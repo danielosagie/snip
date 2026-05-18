@@ -23,7 +23,6 @@ import {
   Share2,
   MessageSquare,
   History,
-  Wand2,
   FilePlus2,
   Undo2,
   Redo2,
@@ -784,6 +783,10 @@ function ContractFullPage() {
                 );
               }
             }}
+            onRunWizard={() => setWizardOpen(true)}
+            runWizardLabel={
+              existing?.clauses ? "Re-run wizard" : "Run setup wizard"
+            }
           />
         ) : null}
 
@@ -961,19 +964,6 @@ function ContractFullPage() {
                 </div>
               </button>
 
-            {/* Re-run wizard — kept as a small chip under the ghost
-                page (when one exists), since clicking it nukes the
-                doc and re-generates from the answers. */}
-            <div className="max-w-[740px] mx-auto mt-4 flex items-center justify-center">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setWizardOpen(true)}
-              >
-                <Wand2 className="h-3.5 w-3.5 mr-1" />
-                {existing?.clauses ? "Re-run wizard" : "Run setup wizard"}
-              </Button>
-            </div>
 
             {originalFilename ? (
               <div className="max-w-[740px] mx-auto mt-3 text-center text-xs font-mono text-[#888]">

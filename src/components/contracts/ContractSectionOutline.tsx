@@ -8,6 +8,7 @@ import {
   Lock,
   Plus,
   Trash2,
+  Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +55,12 @@ interface Props {
   /** Optional handler — when present, non-required rows get a small
    *  delete affordance that fires this on confirm. */
   onDeleteSection?: (sectionId: string) => void | Promise<void>;
+  /** Optional handler — when present, a wizard button renders directly
+   *  below "Add section" in the rail footer. */
+  onRunWizard?: () => void;
+  /** Label for the wizard button (e.g. "Run setup wizard" vs
+   *  "Re-run wizard"). Defaults to "Run wizard". */
+  runWizardLabel?: string;
 }
 
 export function ContractSectionOutline({
@@ -64,6 +71,8 @@ export function ContractSectionOutline({
   renderSectionBody,
   onOpenAddSection,
   onDeleteSection,
+  onRunWizard,
+  runWizardLabel,
 }: Props) {
   // Track which row is currently expanded. We expand at most one at
   // a time so the rail stays scannable; the parent's activeSectionId
@@ -179,16 +188,28 @@ export function ContractSectionOutline({
           })
         )}
       </nav>
-      {onOpenAddSection ? (
-        <div className="border-t-2 border-[#1a1a1a] p-2">
-          <button
-            type="button"
-            onClick={onOpenAddSection}
-            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 border-2 border-dashed border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add section
-          </button>
+      {onOpenAddSection || onRunWizard ? (
+        <div className="border-t-2 border-[#1a1a1a] p-2 space-y-2">
+          {onOpenAddSection ? (
+            <button
+              type="button"
+              onClick={onOpenAddSection}
+              className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 border-2 border-dashed border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add section
+            </button>
+          ) : null}
+          {onRunWizard ? (
+            <button
+              type="button"
+              onClick={onRunWizard}
+              className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+              {runWizardLabel ?? "Run wizard"}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </aside>

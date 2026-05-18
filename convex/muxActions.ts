@@ -46,7 +46,13 @@ function asString(value: unknown): string | undefined {
 }
 
 function getErrorMessage(data: MuxData): string | undefined {
-  const nested = data.errors?.find((item) => typeof item?.message === "string")?.message;
+  // Mux sends `errors` as an array on some events but omits it / sends a
+  // non-array shape on others — `?.` only guards null/undefined, so a
+  // bare `.find` throws "is not a function". Guard the shape explicitly.
+  const errors = data.errors;
+  const nested = Array.isArray(errors)
+    ? errors.find((item) => typeof item?.message === "string")?.message
+    : undefined;
   if (nested) return nested;
   return asString(data.error?.message);
 }

@@ -80,7 +80,7 @@ export function ContractDocPreview({
   // Sync incoming `html` into the editor when the upstream auto-draft
   // changes — but only if the user hasn't started typing.
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed || !editor.view) return;
     if (!resyncWithHtml) return;
     if (userTouchedRef.current) return;
     if (html === lastAppliedHtmlRef.current) return;
@@ -90,7 +90,7 @@ export function ContractDocPreview({
 
   // Toggle editability if the prop changes after mount.
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed || !editor.view) return;
     editor.setEditable(editable);
   }, [editor, editable]);
 

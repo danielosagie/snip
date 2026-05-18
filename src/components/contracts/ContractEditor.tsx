@@ -165,7 +165,7 @@ export function ContractEditor({
   // HTML (e.g. after a .docx import). In collab mode this would fight
   // Yjs, so we skip.
   useEffect(() => {
-    if (!editor || collabMode) return;
+    if (!editor || editor.isDestroyed || !editor.view || collabMode) return;
     if (editor.getHTML() !== contentHtml) {
       editor.commands.setContent(contentHtml || "<p></p>", { emitUpdate: false });
     }
@@ -189,7 +189,8 @@ export function ContractEditor({
   // setContent is NOT idempotent across sessions, so seeding a non-empty
   // doc would duplicate the whole contract — hence the belt-and-braces.
   useEffect(() => {
-    if (!editor || !collabMode || !ydoc) return;
+    if (!editor || editor.isDestroyed || !editor.view) return;
+    if (!collabMode || !ydoc) return;
     if (!seedHtmlIfEmpty || seededRef.current) return;
     if (!contentHtml || contentHtml.trim().length === 0) return;
     if (ydoc.getXmlFragment("default").length > 0) return;
