@@ -27,6 +27,7 @@ import type * as folders from "../folders.js";
 import type * as forensics from "../forensics.js";
 import type * as http from "../http.js";
 import type * as imagePreview from "../imagePreview.js";
+import type * as itemVersions from "../itemVersions.js";
 import type * as mux from "../mux.js";
 import type * as muxActions from "../muxActions.js";
 import type * as payments from "../payments.js";
@@ -76,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   forensics: typeof forensics;
   http: typeof http;
   imagePreview: typeof imagePreview;
+  itemVersions: typeof itemVersions;
   mux: typeof mux;
   muxActions: typeof muxActions;
   payments: typeof payments;
