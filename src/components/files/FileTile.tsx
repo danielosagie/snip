@@ -43,6 +43,10 @@ interface FileTileProps {
   canDelete?: boolean;
   draggable?: boolean;
   onDelete?: () => void;
+  /** When set, clicking the tile body opens the focused view instead of
+   *  downloading (used for image/gif/pdf, which have a real detail view).
+   *  The explicit hover download button still downloads. */
+  onOpen?: () => void;
 }
 
 export function FileTile({
@@ -56,6 +60,7 @@ export function FileTile({
   canDelete,
   draggable,
   onDelete,
+  onOpen,
 }: FileTileProps) {
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
   const [downloading, setDownloading] = useState(false);
@@ -81,7 +86,7 @@ export function FileTile({
 
   return (
     <article
-      onClick={() => void handleDownload()}
+      onClick={() => (onOpen ? onOpen() : void handleDownload())}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;
@@ -202,6 +207,7 @@ export function FileListRow({
   canDelete,
   draggable,
   onDelete,
+  onOpen,
 }: FileTileProps) {
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
   const [downloading, setDownloading] = useState(false);
@@ -225,7 +231,7 @@ export function FileListRow({
 
   return (
     <div
-      onClick={() => void handleDownload()}
+      onClick={() => (onOpen ? onOpen() : void handleDownload())}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;

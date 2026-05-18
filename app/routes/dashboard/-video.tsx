@@ -97,6 +97,16 @@ export default function VideoPage() {
       ? "mux720"
       : "original";
   const isUsingOriginalFallback = Boolean(activePlaybackUrl && activePlaybackUrl === originalPlaybackUrl && !playbackUrl);
+  // Item-type dispatch. Images/GIFs and PDFs are also `videos` rows; they
+  // get the same focused view (header + comments + version stack) but a
+  // different renderer in the media pane. Anything else (video/audio)
+  // keeps the existing Mux/player path.
+  const contentType = video?.contentType ?? "";
+  const isImageItem = contentType.startsWith("image/");
+  const isPdfItem = contentType === "application/pdf";
+  // Only time-based media has a playhead, so only it gets timestamped
+  // comments. Stills/docs post plain comments (timestampSeconds 0).
+  const isTimeBasedItem = !isImageItem && !isPdfItem;
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
   const prewarmTeamIntentHandlers = useRoutePrewarmIntent(() =>
@@ -413,72 +423,120 @@ export default function VideoPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Video player area — full black, Frame.io style */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
-          {video.status === "processing" && isUsingOriginalFallback && activePlaybackUrl ? (
-            <div className="flex-shrink-0 flex items-center gap-2 bg-[#1a1a1a] px-4 py-2 text-sm text-white">
-              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#FF6600]" />
-              <span className="font-semibold">Original playback active.</span>
-              <span className="text-white/60">720p stream is still encoding.</span>
-            </div>
-          ) : null}
-
-          {activePlaybackUrl ? (
-            <VideoPlayer
-              ref={playerRef}
-              src={activePlaybackUrl}
-              poster={playbackSession?.posterUrl}
-              comments={comments || []}
-              onTimeUpdate={handleTimeUpdate}
-              onMarkerClick={handleMarkerClick}
-              allowDownload={video.status === "ready"}
-              downloadFilename={`${video.title}.mp4`}
-              onRequestDownload={requestDownload}
-              controlsBelow
-              qualityOptionsConfig={[
-                {
-                  id: "mux720",
-                  label: playbackUrl ? "720p" : "720p (encoding...)",
-                  disabled: !playbackUrl,
-                },
-                {
-                  id: "original",
-                  label: "Original",
-                  disabled: !originalPlaybackUrl,
-                },
-              ]}
-              selectedQualityId={activeQualityId}
-              onSelectQuality={(id) => {
-                if (id === "mux720" || id === "original") {
-                  setPreferredSource(id);
-                }
-              }}
-            />
-          ) : (
-            <div className="flex-1 flex items-center justify-center">
-              {video.status === "ready" && !playbackUrl ? (
-                <div className="flex flex-col items-center gap-3 text-white">
-                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-                  <p className="text-sm font-medium text-white/85">
-                    {isLoadingPlayback ? "Loading stream..." : "Preparing stream..."}
-                  </p>
-                </div>
-              ) : (
-                <div className="text-center">
-                  {video.status === "uploading" && (
-                    <p className="text-white/60">Uploading...</p>
-                  )}
-                  {video.status === "processing" && (
-                    <p className="text-white/60">
-                      {isLoadingOriginalPlayback
-                        ? "Preparing original playback..."
-                        : "Processing video..."}
+          {isImageItem ? (
+            activePlaybackUrl ? (
+              <div className="flex-1 flex items-center justify-center overflow-auto p-4">
+                <img
+                  src={activePlaybackUrl}
+                  alt={video.title}
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center">
+                {video.status === "failed" ? (
+                  <p className="text-[#dc2626]">This file failed to process</p>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-white">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+                    <p className="text-sm font-medium text-white/85">
+                      Loading image…
                     </p>
-                  )}
-                  {video.status === "failed" && (
-                    <p className="text-[#dc2626]">Processing failed</p>
+                  </div>
+                )}
+              </div>
+            )
+          ) : isPdfItem ? (
+            activePlaybackUrl ? (
+              <iframe
+                src={activePlaybackUrl}
+                title={video.title}
+                className="flex-1 w-full bg-white"
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center">
+                {video.status === "failed" ? (
+                  <p className="text-[#dc2626]">This file failed to process</p>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-white">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+                    <p className="text-sm font-medium text-white/85">
+                      Loading document…
+                    </p>
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            <>
+              {video.status === "processing" && isUsingOriginalFallback && activePlaybackUrl ? (
+                <div className="flex-shrink-0 flex items-center gap-2 bg-[#1a1a1a] px-4 py-2 text-sm text-white">
+                  <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#FF6600]" />
+                  <span className="font-semibold">Original playback active.</span>
+                  <span className="text-white/60">720p stream is still encoding.</span>
+                </div>
+              ) : null}
+
+              {activePlaybackUrl ? (
+                <VideoPlayer
+                  ref={playerRef}
+                  src={activePlaybackUrl}
+                  poster={playbackSession?.posterUrl}
+                  comments={comments || []}
+                  onTimeUpdate={handleTimeUpdate}
+                  onMarkerClick={handleMarkerClick}
+                  allowDownload={video.status === "ready"}
+                  downloadFilename={`${video.title}.mp4`}
+                  onRequestDownload={requestDownload}
+                  controlsBelow
+                  qualityOptionsConfig={[
+                    {
+                      id: "mux720",
+                      label: playbackUrl ? "720p" : "720p (encoding...)",
+                      disabled: !playbackUrl,
+                    },
+                    {
+                      id: "original",
+                      label: "Original",
+                      disabled: !originalPlaybackUrl,
+                    },
+                  ]}
+                  selectedQualityId={activeQualityId}
+                  onSelectQuality={(id) => {
+                    if (id === "mux720" || id === "original") {
+                      setPreferredSource(id);
+                    }
+                  }}
+                />
+              ) : (
+                <div className="flex-1 flex items-center justify-center">
+                  {video.status === "ready" && !playbackUrl ? (
+                    <div className="flex flex-col items-center gap-3 text-white">
+                      <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+                      <p className="text-sm font-medium text-white/85">
+                        {isLoadingPlayback ? "Loading stream..." : "Preparing stream..."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      {video.status === "uploading" && (
+                        <p className="text-white/60">Uploading...</p>
+                      )}
+                      {video.status === "processing" && (
+                        <p className="text-white/60">
+                          {isLoadingOriginalPlayback
+                            ? "Preparing original playback..."
+                            : "Processing video..."}
+                        </p>
+                      )}
+                      {video.status === "failed" && (
+                        <p className="text-[#dc2626]">Processing failed</p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
 
@@ -507,8 +565,8 @@ export default function VideoPage() {
             <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8]">
               <CommentInput
                 videoId={resolvedVideoId}
-                timestampSeconds={currentTime}
-                showTimestamp
+                timestampSeconds={isTimeBasedItem ? currentTime : 0}
+                showTimestamp={isTimeBasedItem}
                 variant="seamless"
               />
             </div>
@@ -553,8 +611,8 @@ export default function VideoPage() {
             <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8]">
               <CommentInput
                 videoId={resolvedVideoId}
-                timestampSeconds={currentTime}
-                showTimestamp
+                timestampSeconds={isTimeBasedItem ? currentTime : 0}
+                showTimestamp={isTimeBasedItem}
                 variant="seamless"
               />
             </div>
