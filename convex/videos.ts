@@ -95,6 +95,78 @@ export const create = mutation({
   },
 });
 
+/**
+ * Duplicate a finished video into the same folder. The copy shares the
+ * original's underlying media — Mux playback IDs + S3 keys are reused, NOT
+ * re-ingested — so it's instant and playable immediately. `remove`/`purge`
+ * never delete Mux assets or S3 objects, so a shared reference is safe:
+ * deleting either row can't break the other's playback.
+ *
+ * Critically we DON'T copy the asset/upload-level Mux IDs (muxAssetId,
+ * muxPreviewAssetId, muxUploadId). Mux webhook handlers resolve a video by
+ * those via `.unique()` (getVideoByMuxAssetId / preview / upload); two rows
+ * sharing one of those IDs would make that throw. Playback IDs are only
+ * read for delivery, never `.unique()`-looked-up, so they're safe to share.
+ *
+ * Restricted to status === "ready": a still-ingesting asset still has
+ * webhooks in flight that key off the asset ID.
+ */
+export const duplicate = mutation({
+  args: { videoId: v.id("videos") },
+  returns: v.id("videos"),
+  handler: async (ctx, args): Promise<Id<"videos">> => {
+    const { user, video, project } = await requireVideoAccess(
+      ctx,
+      args.videoId,
+      "member",
+    );
+    if (video.deletedAt) {
+      throw new Error("Can't duplicate a trashed video.");
+    }
+    if (video.status !== "ready") {
+      throw new Error("Can only duplicate a finished upload.");
+    }
+    // A duplicate is a new row; it counts toward storage the same way every
+    // other row does (getTeamStorageUsedBytes sums fileSize per row).
+    await assertTeamCanStoreBytes(ctx, project.teamId, video.fileSize ?? 0);
+
+    const publicId = await generatePublicId(ctx);
+
+    return await ctx.db.insert("videos", {
+      projectId: video.projectId,
+      folderId: video.folderId,
+      uploadedByClerkId: user.subject,
+      uploaderName: identityName(user),
+      title: `${video.title} (copy)`,
+      description: video.description,
+      visibility: video.visibility,
+      publicId,
+      // Playback-only Mux refs — safe to share (delivery reads, never
+      // `.unique()` webhook lookups).
+      muxPlaybackId: video.muxPlaybackId,
+      muxSignedPlaybackId: video.muxSignedPlaybackId,
+      muxAssetStatus: video.muxAssetStatus,
+      muxPreviewPlaybackId: video.muxPreviewPlaybackId,
+      muxPreviewAssetStatus: video.muxPreviewAssetStatus,
+      watermarkOverlayKey: video.watermarkOverlayKey,
+      imagePreviewS3Key: video.imagePreviewS3Key,
+      imagePreviewStatus: video.imagePreviewStatus,
+      paywall: video.paywall,
+      s3Key: video.s3Key,
+      duration: video.duration,
+      thumbnailUrl: video.thumbnailUrl,
+      fileSize: video.fileSize,
+      contentType: video.contentType,
+      status: video.status,
+      workflowStatus: video.workflowStatus,
+      // Deliberately omitted: muxAssetId / muxPreviewAssetId / muxUploadId
+      // (webhook `.unique()` collision), lineage fields (the copy is its
+      // own standalone item, not a version in the original's stack),
+      // deletedAt, uploadError.
+    });
+  },
+});
+
 export const list = query({
   args: {
     projectId: v.id("projects"),

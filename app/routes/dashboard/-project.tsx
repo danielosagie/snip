@@ -16,6 +16,9 @@ import {
   MessageSquare,
   Eye,
   Share2,
+  Copy,
+  FolderInput,
+  CheckSquare,
 } from "lucide-react";
 import { FileTile, FileListRow } from "@/components/files/FileTile";
 import { VideoKanban } from "@/components/videos/VideoKanban";
@@ -50,6 +53,7 @@ import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
 import { ShareFolderDialog } from "@/components/ShareFolderDialog";
+import { MoveToFolderDialog } from "@/components/MoveToFolderDialog";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
@@ -94,6 +98,10 @@ type VideoIntentTargetProps = {
   muxPlaybackId?: string;
   draggable?: boolean;
   selected?: boolean;
+  /** When true, a plain click toggles selection instead of opening the
+   *  video — this is what the header "Select" button turns on so users
+   *  don't have to know the Cmd/Ctrl/Shift shortcuts. */
+  selectionMode?: boolean;
   onOpen: () => void;
   onSelectToggle?: (
     event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean },
@@ -109,6 +117,7 @@ function VideoIntentTarget({
   muxPlaybackId,
   draggable,
   selected,
+  selectionMode,
   onOpen,
   onSelectToggle,
   children,
@@ -130,10 +139,14 @@ function VideoIntentTarget({
     <div
       className={`${className}${selected ? " ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]" : ""}`}
       onClick={(e) => {
-        // Cmd/Ctrl+click toggles a single item, Shift+click extends the
-        // range. Plain click falls through to onOpen. The selection-toggle
-        // callback owns whichever modifier behavior is set up at the parent.
-        if (onSelectToggle && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+        // In selection mode a plain click toggles. Otherwise Cmd/Ctrl+click
+        // toggles a single item, Shift+click extends the range, and a plain
+        // click falls through to onOpen. The selection-toggle callback owns
+        // whichever modifier behavior is set up at the parent.
+        if (
+          onSelectToggle &&
+          (selectionMode || e.metaKey || e.ctrlKey || e.shiftKey)
+        ) {
           e.preventDefault();
           e.stopPropagation();
           onSelectToggle({
@@ -187,6 +200,7 @@ export default function ProjectPage({
   );
   const { requestUpload } = useDashboardUploadContext();
   const deleteVideo = useMutation(api.videos.remove);
+  const duplicateVideo = useMutation(api.videos.duplicate);
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
   const moveVideoToFolder = useMutation(api.folders.moveVideoToFolder);
   const moveFolder = useMutation(api.folders.moveFolder);
@@ -211,10 +225,16 @@ export default function ProjectPage({
   );
   const [selectionShareOpen, setSelectionShareOpen] = useState(false);
   const [folderShareOpen, setFolderShareOpen] = useState(false);
+  // When on, a plain click selects instead of opening — toggled by the
+  // header "Select" button so the multi-select shortcuts are discoverable.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState<null | string>(null);
 
   const clearSelection = useCallback(() => {
     setSelectedVideoIds(new Set());
     setLastClickedVideoId(null);
+    setSelectionMode(false);
   }, []);
 
   // ESC clears the selection — quick exit when the user is done.
@@ -332,6 +352,79 @@ export default function ProjectPage({
     },
     [moveFolder],
   );
+
+  // ─── Bulk actions on the multi-selection ──────────────────────────────
+  // Each loops the existing single-item mutation/action. Selections are
+  // small (a project grid), so a per-item loop is simpler and safer than
+  // a bespoke bulk backend signature, and reuses the access checks.
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedVideoIds);
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Move ${ids.length} item${ids.length === 1 ? "" : "s"} to the trash?`,
+      )
+    )
+      return;
+    setBulkBusy("delete");
+    try {
+      for (const videoId of ids) {
+        await deleteVideo({ videoId });
+      }
+      clearSelection();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Delete failed.");
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const handleBulkDownload = async () => {
+    const ids = Array.from(selectedVideoIds);
+    if (ids.length === 0) return;
+    setBulkBusy("download");
+    try {
+      const byId = new Map(
+        (filteredVideos ?? []).map((v) => [v._id, v.title] as const),
+      );
+      // Sequential so the browser doesn't block a burst of downloads.
+      for (const videoId of ids) {
+        await handleDownloadVideo(videoId, byId.get(videoId) ?? "video");
+      }
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const handleBulkDuplicate = async () => {
+    const ids = Array.from(selectedVideoIds);
+    if (ids.length === 0) return;
+    setBulkBusy("duplicate");
+    try {
+      for (const videoId of ids) {
+        await duplicateVideo({ videoId });
+      }
+      clearSelection();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Duplicate failed.");
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const handleBulkMove = async (
+    destinationFolderId: Id<"folders"> | null,
+  ) => {
+    const ids = Array.from(selectedVideoIds);
+    if (ids.length === 0) return;
+    for (const videoId of ids) {
+      await moveVideoToFolder({
+        videoId,
+        folderId: destinationFolderId ?? undefined,
+      });
+    }
+    clearSelection();
+  };
 
   const handleUpdateWorkflowStatus = useCallback(
     async (videoId: Id<"videos">, workflowStatus: VideoWorkflowStatus) => {
@@ -521,22 +614,59 @@ export default function ProjectPage({
       {/* Floating selection toolbar — surfaces only when the user has
           multi-selected items. Drives the ad-hoc bundle share flow. */}
       {selectedVideoIds.size > 0 ? (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] px-4 py-2.5 shadow-[4px_4px_0px_0px_var(--shadow-color)]">
-          <span className="font-mono text-xs uppercase tracking-wider">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] px-4 py-2.5 shadow-[4px_4px_0px_0px_var(--shadow-color)] max-w-[95vw] flex-wrap justify-center">
+          <span className="font-mono text-xs uppercase tracking-wider mr-1">
             {selectedVideoIds.size} selected
           </span>
           <button
             type="button"
+            disabled={Boolean(bulkBusy)}
             onClick={() => setSelectionShareOpen(true)}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-[#FF6600] text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#9A3412]"
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-[#FF6600] text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#9A3412] disabled:opacity-40"
           >
             <LinkIcon className="inline h-3.5 w-3.5 mr-1" />
-            Share {selectedVideoIds.size}
+            Share
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkBusy)}
+            onClick={() => void handleBulkDownload()}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+          >
+            <Download className="inline h-3.5 w-3.5 mr-1" />
+            {bulkBusy === "download" ? "Downloading…" : "Download"}
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkBusy)}
+            onClick={() => setMoveOpen(true)}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+          >
+            <FolderInput className="inline h-3.5 w-3.5 mr-1" />
+            Move
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkBusy)}
+            onClick={() => void handleBulkDuplicate()}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+          >
+            <Copy className="inline h-3.5 w-3.5 mr-1" />
+            {bulkBusy === "duplicate" ? "Duplicating…" : "Duplicate"}
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkBusy)}
+            onClick={() => void handleBulkDelete()}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#dc2626] hover:border-[#dc2626] disabled:opacity-40"
+          >
+            <Trash2 className="inline h-3.5 w-3.5 mr-1" />
+            {bulkBusy === "delete" ? "Deleting…" : "Delete"}
           </button>
           <button
             type="button"
             onClick={clearSelection}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
+            className="px-3 py-1 border-2 border-[#f0f0e8]/40 bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
           >
             Cancel
           </button>
@@ -551,6 +681,15 @@ export default function ProjectPage({
           setSelectionShareOpen(open);
           if (!open) clearSelection();
         }}
+      />
+
+      <MoveToFolderDialog
+        projectId={project._id}
+        count={selectedVideoIds.size}
+        currentFolderId={currentFolderId}
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        onConfirm={handleBulkMove}
       />
 
       {/* Header \u2014 breadcrumb skips the team-slug stage. Single-team users
@@ -568,6 +707,35 @@ export default function ProjectPage({
               projectId={resolvedProjectId}
               canEdit={canUpload}
             />
+          ) : null}
+          {canUpload ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (selectionMode) {
+                  clearSelection();
+                } else {
+                  setSelectionMode(true);
+                }
+              }}
+              aria-pressed={selectionMode}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-colors flex-shrink-0",
+                selectionMode
+                  ? "bg-[#FF6600] text-[#f0f0e8] hover:bg-[#9A3412]"
+                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+              )}
+              title={
+                selectionMode
+                  ? "Exit select mode"
+                  : "Select multiple items for bulk actions"
+              }
+            >
+              <CheckSquare className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">
+                {selectionMode ? "Done" : "Select"}
+              </span>
+            </button>
           ) : null}
           {currentFolderId && canUpload ? (
             <button
@@ -717,6 +885,9 @@ export default function ProjectPage({
                   video.status === "uploading" ||
                   video.status === "processing";
                 if (!isPlayableVideo) {
+                  const hasFocusedView =
+                    (video.contentType?.startsWith("image/") ?? false) ||
+                    video.contentType === "application/pdf";
                   return (
                     <FileTile
                       key={video._id}
@@ -730,6 +901,18 @@ export default function ProjectPage({
                       canDelete={canUpload}
                       draggable={canUpload}
                       onDelete={() => handleDeleteVideo(video._id)}
+                      onOpen={
+                        hasFocusedView
+                          ? () =>
+                              navigate({
+                                to: videoPath(
+                                  resolvedTeamSlug,
+                                  project._id,
+                                  video._id,
+                                ),
+                              })
+                          : undefined
+                      }
                     />
                   );
                 }
@@ -751,6 +934,7 @@ export default function ProjectPage({
                     muxPlaybackId={video.muxPlaybackId}
                     draggable={canUpload}
                     selected={selectedVideoIds.has(video._id)}
+                    selectionMode={selectionMode}
                     onSelectToggle={(mods) =>
                       handleSelectionToggle(video._id, mods)
                     }
@@ -902,6 +1086,9 @@ export default function ProjectPage({
                 video.status === "uploading" ||
                 video.status === "processing";
               if (!isPlayableVideo) {
+                const hasFocusedView =
+                  (video.contentType?.startsWith("image/") ?? false) ||
+                  video.contentType === "application/pdf";
                 return (
                   <FileListRow
                     key={video._id}
@@ -915,6 +1102,18 @@ export default function ProjectPage({
                     canDelete={canUpload}
                     draggable={canUpload}
                     onDelete={() => handleDeleteVideo(video._id)}
+                    onOpen={
+                      hasFocusedView
+                        ? () =>
+                            navigate({
+                              to: videoPath(
+                                resolvedTeamSlug,
+                                project._id,
+                                video._id,
+                              ),
+                            })
+                        : undefined
+                    }
                   />
                 );
               }
@@ -936,6 +1135,7 @@ export default function ProjectPage({
                   muxPlaybackId={video.muxPlaybackId}
                   draggable={canUpload}
                   selected={selectedVideoIds.has(video._id)}
+                  selectionMode={selectionMode}
                   onSelectToggle={(mods) =>
                     handleSelectionToggle(video._id, mods)
                   }
