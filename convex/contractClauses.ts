@@ -37,10 +37,12 @@ const stateValidator = v.union(
   v.literal("disputed"),
 );
 
-function assertEditable(project: Doc<"projects">) {
-  if (project.contract?.signedAt) {
-    throw new Error("Contract is signed and immutable. Clear it to redraft.");
-  }
+// A contract edits like any normal document, even after it was sent or
+// signed. Editing reverts it to a draft (the signature no longer matches),
+// so there's nothing to assert here — kept as a named no-op so the
+// intent is explicit at every call site and easy to re-tighten later.
+function assertEditable(_project: Doc<"projects">) {
+  // intentionally empty — see note above
 }
 
 function writeBackContentHtml(

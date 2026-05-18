@@ -148,7 +148,12 @@ function ContractFullPage() {
   // We only create the provider once per session. Re-mounts (e.g. HMR)
   // would race against the subscription — useMemo with a stable key
   // guards that. The provider's destroy() also flushes pending edits.
-  const ydoc = useMemo(() => new Y.Doc(), [projectId]);
+  // Bumped on clear / wizard re-run so the in-memory Y.Doc is thrown
+  // away and rebuilt. Resetting only the server row isn't enough — the
+  // old doc lives on in this tab's memory and would keep its stale
+  // content, so the freshly-generated contract would never seed in.
+  const [docEpoch, setDocEpoch] = useState(0);
+  const ydoc = useMemo(() => new Y.Doc(), [projectId, docEpoch]);
   const [collabReady, setCollabReady] = useState(false);
   useEffect(() => {
     if (!projectId) return;
@@ -162,6 +167,16 @@ function ContractFullPage() {
       provider.destroy();
     };
   }, [ydoc, convexClient, projectId]);
+
+  // Clear the server collab doc AND throw away the in-memory Y.Doc so a
+  // freshly (re)generated contract actually seeds in. Used by both
+  // "Clear" and "Re-run wizard" — without the epoch bump the old doc
+  // would keep its stale content and the new contentHtml never lands.
+  const regenerateCollabDoc = useCallback(async () => {
+    if (!projectId) return;
+    await resetCollabDoc({ projectId: projectId as Id<"projects"> });
+    setDocEpoch((e) => e + 1);
+  }, [resetCollabDoc, projectId]);
 
   const existing = project?.contract;
   const isSigned = Boolean(existing?.signedAt);
@@ -242,7 +257,8 @@ function ContractFullPage() {
   // (which is defined further down the function body).
   useEffect(() => {
     if (!dirty) return;
-    if (isSigned) return;
+    // No signed/sent lock — a contract edits like any document. The
+    // upsertContract mutation reverts a signed/sent contract to draft.
     if (project === undefined || !project) return;
     if (busy && busy !== "autosave") return;
     const handle = window.setTimeout(async () => {
@@ -349,7 +365,10 @@ function ContractFullPage() {
         onComplete={() => {
           // Re-hydrate fields from the freshly generated contract once
           // it lands. The init guard is reset so the existing-contract
-          // useEffect can run a second time.
+          // useEffect can run a second time. Rebuild the collab doc so
+          // the regenerated clauses/contentHtml actually replace the old
+          // (or empty) editor body — not just the Sections rail.
+          void regenerateCollabDoc();
           initRef.current = false;
         }}
       />
@@ -514,9 +533,9 @@ function ContractFullPage() {
     setBusy("clear");
     try {
       await clearContract({ projectId: projectId as Id<"projects"> });
-      // Wipe collab state too, otherwise the next draft starts populated
-      // with the cleared contract's old Yjs history.
-      await resetCollabDoc({ projectId: projectId as Id<"projects"> });
+      // Wipe collab state (server + in-memory) too, otherwise the next
+      // draft starts populated with the cleared contract's old content.
+      await regenerateCollabDoc();
       initRef.current = false;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Clear failed.");
@@ -656,7 +675,7 @@ function ContractFullPage() {
           the top bar exposes plus the editor's format commands. */}
       <ContractFileMenubar
         editor={usableEditor}
-        readOnly={isSigned}
+        readOnly={false}
         onUploadDocx={() => fileInputRef.current?.click()}
         onDownloadDocx={() => void handleExport()}
         onPrint={() => window.print()}
@@ -682,12 +701,8 @@ function ContractFullPage() {
               .run();
           }
         }}
-        onAddSection={
-          existing?.clauses ? () => setAddSectionOpen(true) : undefined
-        }
-        onReRunWizard={
-          existing?.clauses ? () => setWizardOpen(true) : undefined
-        }
+        onAddSection={() => setAddSectionOpen(true)}
+        onReRunWizard={() => setWizardOpen(true)}
       />
 
       {/* Status / errors. Distraction-free notification strip. */}
@@ -751,30 +766,24 @@ function ContractFullPage() {
                 sectionKey={section.sectionKey}
                 projectType={contractProjectType}
                 answers={parsedAnswers}
-                readOnly={isSigned || isSent}
+                readOnly={false}
               />
             )}
-            onOpenAddSection={
-              !isSigned ? () => setAddSectionOpen(true) : undefined
-            }
-            onDeleteSection={
-              !isSigned
-                ? async (clauseId) => {
-                    try {
-                      await removeClause({
-                        projectId: projectId as Id<"projects">,
-                        clauseId,
-                      });
-                    } catch (e) {
-                      alert(
-                        e instanceof Error
-                          ? e.message
-                          : "Couldn't remove section.",
-                      );
-                    }
-                  }
-                : undefined
-            }
+            onOpenAddSection={() => setAddSectionOpen(true)}
+            onDeleteSection={async (clauseId) => {
+              try {
+                await removeClause({
+                  projectId: projectId as Id<"projects">,
+                  clauseId,
+                });
+              } catch (e) {
+                alert(
+                  e instanceof Error
+                    ? e.message
+                    : "Couldn't remove section.",
+                );
+              }
+            }}
           />
         ) : null}
 
@@ -902,8 +911,8 @@ function ContractFullPage() {
                   <ContractEditor
                     contentHtml={contentHtml}
                     onChange={onContentChange}
-                    editable={!isSigned}
-                    ydoc={collabReady && !isSigned ? ydoc : null}
+                    editable
+                    ydoc={collabReady ? ydoc : null}
                     seedHtmlIfEmpty={
                       serverContractDoc === null &&
                       Boolean(
@@ -922,53 +931,49 @@ function ContractFullPage() {
                   available so the user's current content + cursor are
                   preserved (string concat used to clobber selection
                   state on autosave). */}
-              {!isSigned ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (usableEditor) {
-                      usableEditor
-                        .chain()
-                        .focus("end")
-                        .insertContent(
-                          `<div class="page-break"></div><h2>New page</h2><p></p>`,
-                        )
-                        .run();
-                    } else {
-                      // Fallback: append the raw HTML if the editor
-                      // hasn't mounted yet for some reason.
-                      onContentChange(
-                        `${contentHtml}<div class="page-break"></div><h2>New page</h2><p></p>`,
-                      );
-                    }
-                  }}
-                  className="mt-10 mx-auto w-full max-w-[740px] block group px-4 sm:px-0"
-                  title="Add a new page"
-                >
-                  <div className="text-[#888] border-2 border-dashed border-[#1a1a1a]/25 py-10 flex flex-col items-center justify-center gap-2 group-hover:border-[#1a1a1a]/60 group-hover:text-[#1a1a1a] transition-colors">
-                    <FilePlus2 className="h-5 w-5" />
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider">
-                      Add page
-                    </span>
-                  </div>
-                </button>
-              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  if (usableEditor) {
+                    usableEditor
+                      .chain()
+                      .focus("end")
+                      .insertContent(
+                        `<div class="page-break"></div><h2>New page</h2><p></p>`,
+                      )
+                      .run();
+                  } else {
+                    // Fallback: append the raw HTML if the editor
+                    // hasn't mounted yet for some reason.
+                    onContentChange(
+                      `${contentHtml}<div class="page-break"></div><h2>New page</h2><p></p>`,
+                    );
+                  }
+                }}
+                className="mt-10 mx-auto w-full max-w-[740px] block group px-4 sm:px-0"
+                title="Add a new page"
+              >
+                <div className="text-[#888] border-2 border-dashed border-[#1a1a1a]/25 py-10 flex flex-col items-center justify-center gap-2 group-hover:border-[#1a1a1a]/60 group-hover:text-[#1a1a1a] transition-colors">
+                  <FilePlus2 className="h-5 w-5" />
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider">
+                    Add page
+                  </span>
+                </div>
+              </button>
 
             {/* Re-run wizard — kept as a small chip under the ghost
                 page (when one exists), since clicking it nukes the
                 doc and re-generates from the answers. */}
-            {!isSigned && existing?.clauses ? (
-              <div className="max-w-[740px] mx-auto mt-4 flex items-center justify-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setWizardOpen(true)}
-                >
-                  <Wand2 className="h-3.5 w-3.5 mr-1" />
-                  Re-run wizard
-                </Button>
-              </div>
-            ) : null}
+            <div className="max-w-[740px] mx-auto mt-4 flex items-center justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setWizardOpen(true)}
+              >
+                <Wand2 className="h-3.5 w-3.5 mr-1" />
+                {existing?.clauses ? "Re-run wizard" : "Run setup wizard"}
+              </Button>
+            </div>
 
             {originalFilename ? (
               <div className="max-w-[740px] mx-auto mt-3 text-center text-xs font-mono text-[#888]">
@@ -997,7 +1002,7 @@ function ContractFullPage() {
           <SidePanel title="Versions" onClose={() => setPanelOpen(null)}>
             <ContractVersionsPanel
               projectId={projectId as Id<"projects">}
-              readOnly={isSigned}
+              readOnly={false}
             />
           </SidePanel>
         ) : null}

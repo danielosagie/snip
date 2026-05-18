@@ -63,9 +63,7 @@ export function AddSectionDialog({ open, onOpenChange, onConfirm }: Props) {
         <DialogHeader>
           <DialogTitle>New section</DialogTitle>
           <DialogDescription>
-            Add a custom clause to this contract. Required sections (scope,
-            payment, IP transfer, etc.) stay locked even if you re-run the
-            wizard; custom sections are yours to rename or delete later.
+            Add a custom clause. Rename or delete it anytime.
           </DialogDescription>
         </DialogHeader>
 

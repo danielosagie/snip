@@ -151,17 +151,18 @@ export const upsertContract = mutation({
   handler: async (ctx, args) => {
     const { project } = await requireProjectAccess(ctx, args.projectId, "member");
     const existing = project.contract;
-    if (existing?.signedAt) {
-      throw new Error("Contract is signed. Clear it before editing.");
-    }
+    // A contract edits like any other document. Editing one that was
+    // already sent or signed reverts it to a draft — the prior signature
+    // no longer matches the text, so it has to go back out for signature.
+    // (Signing is demo/local today; production e-sign isn't wired yet.)
     await ctx.db.patch(args.projectId, {
       contract: {
         ...args.contract,
         // Preserve fields we don't accept on input.
         docxS3Key: existing?.docxS3Key,
-        sentForSignatureAt: existing?.sentForSignatureAt,
-        signedAt: existing?.signedAt,
-        signedByName: existing?.signedByName,
+        sentForSignatureAt: undefined,
+        signedAt: undefined,
+        signedByName: undefined,
         lastSavedAt: Date.now(),
       },
     });
