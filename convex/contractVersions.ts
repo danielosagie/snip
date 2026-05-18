@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireProjectAccess } from "./auth";
+import { recordItemVersion } from "./itemVersions";
 
 /**
  * Contract version snapshots — point-in-time copies of the contract
@@ -58,7 +59,7 @@ export const snapshot = mutation({
       (user as { email?: string }).email ??
       "Someone";
 
-    return await ctx.db.insert("contractVersions", {
+    const versionId = await ctx.db.insert("contractVersions", {
       projectId: args.projectId,
       versionNumber: nextVersion,
       label: args.label?.trim() || undefined,
@@ -67,6 +68,25 @@ export const snapshot = mutation({
       createdByClerkId: user.subject,
       createdByName: name,
     });
+    // Dual-write into the unified version model. Best-effort: a failure
+    // here must never break snapshotting (contractVersions is still
+    // authoritative this phase).
+    try {
+      await recordItemVersion(ctx, {
+        lineageKey: args.projectId,
+        projectId: args.projectId,
+        kind: "doc",
+        versionNumber: nextVersion,
+        label: args.label?.trim() || undefined,
+        createdByClerkId: user.subject,
+        createdByName: name,
+        contentHtml: contract.contentHtml,
+        wizardAnswers: contract.wizardAnswers,
+      });
+    } catch (e) {
+      console.error("itemVersions dual-write (doc) failed", e);
+    }
+    return versionId;
   },
 });
 

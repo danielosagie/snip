@@ -580,6 +580,40 @@ export default defineSchema({
     .index("by_project_and_version", ["projectId", "versionNumber"]),
 
   /**
+   * Unified version model — foundation for "every reviewable item runs
+   * the same version stack." Subsumes the two legacy mechanisms:
+   *   - video lineage (videos.lineageId / isCurrentVersion) → kind "asset"
+   *   - contractVersions snapshots                          → kind "doc"
+   *
+   * `lineageKey` is the stable identity of the logical item, kept as a
+   * string so it isn't pinned to one table's Id type while the legacy
+   * systems remain authoritative:
+   *   - asset: the lineage-root videoId
+   *   - doc:   the projectId (until documents become first-class items)
+   *
+   * This phase only DUAL-WRITES here from the existing create paths;
+   * reads still flow through the legacy code, so nothing breaks. Later
+   * phases flip reads onto this table and retire the old fields/table.
+   */
+  itemVersions: defineTable({
+    lineageKey: v.string(),
+    projectId: v.id("projects"),
+    kind: v.union(v.literal("asset"), v.literal("doc")),
+    versionNumber: v.number(),
+    isCurrent: v.boolean(),
+    label: v.optional(v.string()),
+    createdByClerkId: v.string(),
+    createdByName: v.string(),
+    // asset → the videos row that holds this version's media
+    videoId: v.optional(v.id("videos")),
+    // doc → point-in-time content snapshot
+    contentHtml: v.optional(v.string()),
+    wizardAnswers: v.optional(v.string()),
+  })
+    .index("by_lineage", ["lineageKey"])
+    .index("by_project", ["projectId"]),
+
+  /**
    * Soft-deleted contracts. When a user "deletes" a contract from a
    * project we snapshot the whole contract object here and clear the
    * project's `contract` field. Restore copies the snapshot back to

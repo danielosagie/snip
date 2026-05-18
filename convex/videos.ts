@@ -6,6 +6,7 @@ import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
 import { resolveBundleVideos } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
+import { recordItemVersion } from "./itemVersions";
 
 const workflowStatusValidator = v.union(
   v.literal("review"),
@@ -534,6 +535,23 @@ export const createNextVersion = mutation({
       isCurrentVersion: true,
       versionLabel: args.versionLabel?.trim() || undefined,
     });
+    // Dual-write into the unified version model. Best-effort: a failure
+    // here must never break the upload flow (legacy lineage is still
+    // authoritative this phase).
+    try {
+      await recordItemVersion(ctx, {
+        lineageKey: lineageId,
+        projectId: parent.projectId,
+        kind: "asset",
+        versionNumber: nextNumber,
+        label: args.versionLabel?.trim() || undefined,
+        createdByClerkId: user.subject,
+        createdByName: identityName(user),
+        videoId,
+      });
+    } catch (e) {
+      console.error("itemVersions dual-write (asset) failed", e);
+    }
     return videoId;
   },
 });
