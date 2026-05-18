@@ -729,4 +729,36 @@ export default defineSchema({
     .index("by_project_and_version", ["projectId", "versionNumber"])
     .index("by_project_latest", ["projectId", "isLatest"])
     .index("by_team", ["teamId"]),
+
+  /**
+   * Global full-text search index. One denormalized row per searchable
+   * thing — a video/file, a contract document (its plaintext + clause
+   * bodies), a comment, and (Part B, later) a video-frame caption —
+   * fed by best-effort dual-writes from the content mutations plus a
+   * `search.reindexAll` backfill. The ⌘K palette queries this so a word
+   * *inside* a document or a comment is findable, not just titles.
+   */
+  searchableContent: defineTable({
+    teamId: v.id("teams"),
+    teamSlug: v.string(),
+    projectId: v.optional(v.id("projects")),
+    videoId: v.optional(v.id("videos")),
+    kind: v.union(
+      v.literal("video"),
+      v.literal("document"),
+      v.literal("comment"),
+      v.literal("frame"),
+    ),
+    // Stable identity of the source row (videoId / projectId / commentId
+    // / `${videoId}:${frameSec}`) so dual-writes can upsert in place.
+    refId: v.string(),
+    title: v.string(),
+    contextLabel: v.string(),
+    text: v.string(),
+  })
+    .index("by_ref", ["kind", "refId"])
+    .searchIndex("by_text", {
+      searchField: "text",
+      filterFields: ["teamId", "kind"],
+    }),
 });

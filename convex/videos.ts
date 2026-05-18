@@ -7,6 +7,7 @@ import { resolveActiveShareGrant } from "./shareAccess";
 import { resolveBundleVideos } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
+import { indexSearchable, removeSearchable } from "./search";
 
 const workflowStatusValidator = v.union(
   v.literal("review"),
@@ -91,6 +92,21 @@ export const create = mutation({
       publicId,
       folderId: args.folderId,
     });
+
+    try {
+      await indexSearchable(ctx, {
+        kind: "video",
+        refId: videoId,
+        teamId: project.teamId,
+        projectId: args.projectId,
+        videoId,
+        title: args.title,
+        contextLabel: `${project.name} · ${args.contentType ?? "file"}`,
+        text: `${args.title} ${args.description ?? ""}`,
+      });
+    } catch (e) {
+      console.error("search index (video create) failed", e);
+    }
 
     return videoId;
   },
@@ -439,13 +455,34 @@ export const update = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireVideoAccess(ctx, args.videoId, "member");
+    const { video, project } = await requireVideoAccess(
+      ctx,
+      args.videoId,
+      "member",
+    );
 
     const updates: Partial<{ title: string; description: string }> = {};
     if (args.title !== undefined) updates.title = args.title;
     if (args.description !== undefined) updates.description = args.description;
 
     await ctx.db.patch(args.videoId, updates);
+
+    try {
+      const title = updates.title ?? video.title;
+      const description = updates.description ?? video.description ?? "";
+      await indexSearchable(ctx, {
+        kind: "video",
+        refId: args.videoId,
+        teamId: project.teamId,
+        projectId: video.projectId,
+        videoId: args.videoId,
+        title,
+        contextLabel: `${project.name} · ${video.contentType ?? "file"}`,
+        text: `${title} ${description}`,
+      });
+    } catch (e) {
+      console.error("search index (video update) failed", e);
+    }
   },
 });
 
@@ -776,6 +813,12 @@ export const remove = mutation({
       deletedAt: Date.now(),
       deletedByName: name,
     });
+    // Drop it from search so trashed items don't surface in ⌘K.
+    try {
+      await removeSearchable(ctx, "video", args.videoId);
+    } catch (e) {
+      console.error("search index (video remove) failed", e);
+    }
   },
 });
 

@@ -9,6 +9,7 @@ import {
 } from "./auth";
 import { resolveActiveShareGrant } from "./shareAccess";
 import { resolveBundleVideos } from "./shareBundles";
+import { indexSearchable, removeSearchable } from "./search";
 
 /**
  * Resolves the video targeted by a share-grant comment. Single-video shares
@@ -106,7 +107,11 @@ export const create = mutation({
     parentId: v.optional(v.id("comments")),
   },
   handler: async (ctx, args) => {
-    const { user } = await requireVideoAccess(ctx, args.videoId, "viewer");
+    const { user, video, project } = await requireVideoAccess(
+      ctx,
+      args.videoId,
+      "viewer",
+    );
 
     if (args.parentId) {
       const parent = await ctx.db.get(args.parentId);
@@ -115,7 +120,7 @@ export const create = mutation({
       }
     }
 
-    return await ctx.db.insert("comments", {
+    const commentId = await ctx.db.insert("comments", {
       videoId: args.videoId,
       userClerkId: user.subject,
       userName: identityName(user),
@@ -125,6 +130,23 @@ export const create = mutation({
       parentId: args.parentId,
       resolved: false,
     });
+
+    try {
+      await indexSearchable(ctx, {
+        kind: "comment",
+        refId: commentId,
+        teamId: project.teamId,
+        projectId: video.projectId,
+        videoId: args.videoId,
+        title: `Comment on ${video.title}`,
+        contextLabel: `${project.name} · ${video.title}`,
+        text: args.text,
+      });
+    } catch (e) {
+      console.error("search index (comment create) failed", e);
+    }
+
+    return commentId;
   },
 });
 
@@ -247,6 +269,15 @@ export const remove = mutation({
     }
 
     await ctx.db.delete(args.commentId);
+
+    try {
+      await removeSearchable(ctx, "comment", args.commentId);
+      for (const reply of replies) {
+        await removeSearchable(ctx, "comment", reply._id);
+      }
+    } catch (e) {
+      console.error("search index (comment remove) failed", e);
+    }
   },
 });
 

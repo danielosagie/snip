@@ -8,6 +8,7 @@ import {
   requireProjectAccess,
 } from "./auth";
 import { assertTeamHasActiveSubscription } from "./billingHelpers";
+import { indexSearchable, removeSearchable, stripHtml } from "./search";
 
 export const create = mutation({
   args: {
@@ -166,6 +167,22 @@ export const upsertContract = mutation({
         lastSavedAt: Date.now(),
       },
     });
+
+    try {
+      // contentHtml is the document body; clause bodies are managed by
+      // contractClauses mutations and swept in by search.reindexProject.
+      await indexSearchable(ctx, {
+        kind: "document",
+        refId: args.projectId,
+        teamId: project.teamId,
+        projectId: args.projectId,
+        title: `${project.name} — contract`,
+        contextLabel: `${project.name} · Contract`,
+        text: stripHtml(args.contract.contentHtml),
+      });
+    } catch (e) {
+      console.error("search index (contract upsert) failed", e);
+    }
   },
 });
 
@@ -244,6 +261,11 @@ export const clearContract = mutation({
       deletedByName: identityName(user),
     });
     await ctx.db.patch(args.projectId, { contract: undefined });
+    try {
+      await removeSearchable(ctx, "document", args.projectId);
+    } catch (e) {
+      console.error("search index (contract clear) failed", e);
+    }
   },
 });
 

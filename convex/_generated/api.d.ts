@@ -35,6 +35,7 @@ import type * as paymentsActions from "../paymentsActions.js";
 import type * as projectVersions from "../projectVersions.js";
 import type * as projects from "../projects.js";
 import type * as s3 from "../s3.js";
+import type * as search from "../search.js";
 import type * as security from "../security.js";
 import type * as shareAccess from "../shareAccess.js";
 import type * as shareBundles from "../shareBundles.js";
@@ -85,6 +86,7 @@ declare const fullApi: ApiFromModules<{
   projectVersions: typeof projectVersions;
   projects: typeof projects;
   s3: typeof s3;
+  search: typeof search;
   security: typeof security;
   shareAccess: typeof shareAccess;
   shareBundles: typeof shareBundles;

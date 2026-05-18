@@ -12,6 +12,9 @@ import {
   Home,
   ArrowRight,
   Briefcase,
+  Film,
+  FileText,
+  MessageSquare,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import {
@@ -19,6 +22,7 @@ import {
   projectPath,
   teamHomePath,
   teamSettingsPath,
+  videoPath,
 } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +42,7 @@ import { cn } from "@/lib/utils";
  *   - Enter opens the focused result
  */
 
-type SearchScope = "all" | "projects" | "teams" | "nav";
+type SearchScope = "all" | "content" | "projects" | "teams" | "nav";
 
 interface ResultItem {
   id: string;
@@ -63,6 +67,20 @@ export function CommandSearch({
   const [focusIndex, setFocusIndex] = useState(0);
 
   const teams = useQuery(api.teams.listWithProjects, open ? {} : "skip");
+
+  // Debounce the text query before hitting the backend full-text search
+  // so we don't fire a Convex query on every keystroke.
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 180);
+    return () => clearTimeout(t);
+  }, [query]);
+  const contentHits = useQuery(
+    api.search.globalSearch,
+    open && debouncedQuery.trim().length >= 2
+      ? { query: debouncedQuery.trim() }
+      : "skip",
+  );
 
   const results = useMemo<ResultItem[]>(() => {
     if (!open) return [];
@@ -128,7 +146,7 @@ export function CommandSearch({
     }
 
     const q = query.trim().toLowerCase();
-    return items
+    const localFiltered = items
       .filter((r) => (scope === "all" ? true : r.scope === scope))
       .filter((r) =>
         q
@@ -136,7 +154,42 @@ export function CommandSearch({
             r.subtitle.toLowerCase().includes(q)
           : true,
       );
-  }, [open, teams, query, scope]);
+
+    // Backend full-text hits — words *inside* documents, file/video
+    // titles+descriptions, comments. Already query-matched server-side,
+    // so no extra substring filter here.
+    const contentItems: ResultItem[] = (contentHits ?? []).map((h, idx) => {
+      let href = dashboardHomePath();
+      let icon = <FileText className="h-4 w-4" />;
+      if (h.kind === "document") {
+        if (h.teamSlug && h.projectId) {
+          href = `/dashboard/${h.teamSlug}/${h.projectId}/contract`;
+        }
+        icon = <FileText className="h-4 w-4" />;
+      } else if (h.teamSlug && h.projectId && h.videoId) {
+        href = videoPath(h.teamSlug, h.projectId, h.videoId);
+        icon =
+          h.kind === "comment" ? (
+            <MessageSquare className="h-4 w-4" />
+          ) : (
+            <Film className="h-4 w-4" />
+          );
+      }
+      return {
+        id: `content:${h.kind}:${h.refId}:${idx}`,
+        scope: "content",
+        label: h.title,
+        subtitle: `${h.contextLabel} — ${h.snippet}`,
+        href,
+        icon,
+      };
+    });
+
+    const showContent = scope === "all" || scope === "content";
+    return showContent
+      ? [...localFiltered, ...contentItems]
+      : localFiltered;
+  }, [open, teams, query, scope, contentHits]);
 
   // Reset focus when results change.
   useEffect(() => {
@@ -185,7 +238,13 @@ export function CommandSearch({
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      const order: SearchScope[] = ["all", "projects", "teams", "nav"];
+      const order: SearchScope[] = [
+        "all",
+        "content",
+        "projects",
+        "teams",
+        "nav",
+      ];
       const idx = order.indexOf(scope);
       setScope(order[(idx + 1) % order.length]);
       return;
@@ -218,7 +277,7 @@ export function CommandSearch({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search projects, teams, or jump to…"
+            placeholder="Search files, documents, comments, projects…"
             className="flex-1 bg-transparent outline-none text-base placeholder:text-[#888]"
           />
           <kbd className="text-[10px] font-mono font-bold px-1.5 py-0.5 border border-[#1a1a1a] bg-[#e8e8e0]">
@@ -227,7 +286,9 @@ export function CommandSearch({
         </div>
 
         <div className="px-3 py-2 border-b-2 border-[#1a1a1a] flex items-center gap-1 flex-wrap">
-          {(["all", "projects", "teams", "nav"] as SearchScope[]).map((s) => {
+          {(
+            ["all", "content", "projects", "teams", "nav"] as SearchScope[]
+          ).map((s) => {
             const active = scope === s;
             return (
               <button
@@ -241,7 +302,7 @@ export function CommandSearch({
                     : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
                 )}
               >
-                {s === "nav" ? "go to" : s}
+                {s === "nav" ? "go to" : s === "content" ? "in files" : s}
               </button>
             );
           })}

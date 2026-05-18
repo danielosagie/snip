@@ -21,6 +21,9 @@ dist
 build
 .tanstack
 
+# desktop app packaged build output (DMGs, mac-* staging — large binaries)
+desktop/release
+
 # misc
 .DS_Store
 *.pem
