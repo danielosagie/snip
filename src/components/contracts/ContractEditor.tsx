@@ -39,7 +39,7 @@ import {
   Minus,
   Image as ImageIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface Props {
   contentHtml: string;
@@ -70,6 +70,15 @@ interface Props {
    * `ContractToolbar` can bind to it.
    */
   onEditorReady?: (editor: Editor) => void;
+  /**
+   * Collab mode only. When true, the parent has confirmed the server-side
+   * Yjs doc is empty (no `contractDocs` row), so `contentHtml` should be
+   * planted into the shared doc exactly once as the initial content —
+   * this is what bridges the wizard's generated clauses into the editor.
+   * Gated by the parent on `api.contractDocs.getDoc === null` so we never
+   * duplicate an existing document.
+   */
+  seedHtmlIfEmpty?: boolean;
 }
 
 /**
@@ -90,8 +99,10 @@ export function ContractEditor({
   ydoc = null,
   chromeMode = "framed",
   onEditorReady,
+  seedHtmlIfEmpty = false,
 }: Props) {
   const collabMode = Boolean(ydoc);
+  const seededRef = useRef(false);
 
   const editor = useEditor({
     extensions: [
@@ -165,6 +176,26 @@ export function ContractEditor({
   useEffect(() => {
     if (editor && onEditorReady) onEditorReady(editor);
   }, [editor, onEditorReady]);
+
+  // Collab seed: plant the wizard-generated HTML into the shared Yjs doc
+  // the first time it's opened. Without this the editor binds to an empty
+  // collab doc and the wizard's clauses never render (the doc comment
+  // above promised this seed; the implementation was missing). Strictly
+  // guarded so it can only ever populate a provably-empty doc:
+  //   - parent passes seedHtmlIfEmpty only when getDoc === null
+  //   - we re-check the bound fragment is empty (defends the rare race
+  //     where a remote update lands between the query and this effect)
+  //   - seededRef makes it at-most-once per mount (HMR / re-render safe)
+  // setContent is NOT idempotent across sessions, so seeding a non-empty
+  // doc would duplicate the whole contract — hence the belt-and-braces.
+  useEffect(() => {
+    if (!editor || !collabMode || !ydoc) return;
+    if (!seedHtmlIfEmpty || seededRef.current) return;
+    if (!contentHtml || contentHtml.trim().length === 0) return;
+    if (ydoc.getXmlFragment("default").length > 0) return;
+    seededRef.current = true;
+    editor.commands.setContent(contentHtml, { emitUpdate: false });
+  }, [editor, collabMode, ydoc, seedHtmlIfEmpty, contentHtml]);
 
   if (!editor) {
     return chromeMode === "bare" ? (

@@ -28,6 +28,8 @@ import {
   Undo2,
   Redo2,
   Printer,
+  PanelLeft,
+  PanelLeftClose,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -44,6 +46,7 @@ import {
 import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
 import { projectPath } from "@/lib/routes";
+import { useSidebarState } from "@/lib/sidebarContext";
 
 export const Route = createFileRoute("/dashboard/$teamSlug/$projectId/contract")({
   head: () =>
@@ -79,6 +82,11 @@ function ContractFullPage() {
     projectId: string;
   };
   const navigate = useNavigate();
+  // Shared with DashboardSidebar via SidebarProvider (mounted in the
+  // /dashboard layout, which wraps this route). This page renders its
+  // own top bar instead of DashboardHeader, so it has to surface the
+  // collapse toggle itself for parity with the rest of the dashboard.
+  const { collapsed, toggle: toggleSidebar } = useSidebarState();
 
   // ESC bails out of the contract editor back to the project page. Autosave
   // handles in-flight edits so dropping out mid-typing won't lose work.
@@ -119,6 +127,17 @@ function ContractFullPage() {
   const linkDocxFile = useMutation(api.projects.linkContractDocxFile);
   const getUploadUrl = useAction(api.contracts.getContractDocxUploadUrl);
   const resetCollabDoc = useMutation(api.contractDocs.resetDoc);
+
+  // Does a server-side collab doc already exist for this project?
+  //   undefined → still loading (don't seed yet)
+  //   null      → no doc yet → editor must seed from the wizard's
+  //               contentHtml (this is the wizard → editor bridge)
+  //   object    → doc exists → never reseed (would duplicate content)
+  // Must stay above the early returns so hook order is stable.
+  const serverContractDoc = useQuery(
+    api.contractDocs.getDoc,
+    projectId ? { projectId: projectId as Id<"projects"> } : "skip",
+  );
 
   // ─── Real-time collab via Yjs + Convex ─────────────────────────────────
   //
@@ -519,6 +538,19 @@ function ContractFullPage() {
           The autosave status sits inline so the user gets confidence
           their work is persisted without having to look for it. */}
       <header className="flex-shrink-0 bg-[#f0f0e8] border-b-2 border-[#1a1a1a] px-4 sm:px-6 py-2 flex items-center gap-3 flex-wrap">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className="hidden md:inline-flex items-center justify-center w-8 h-8 -ml-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors flex-shrink-0"
+          title={collapsed ? "Open sidebar" : "Close sidebar"}
+          aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
+        >
+          {collapsed ? (
+            <PanelLeft className="h-4 w-4" />
+          ) : (
+            <PanelLeftClose className="h-4 w-4" />
+          )}
+        </button>
         <Link
           to={projectPath(teamSlug, projectId as Id<"projects">)}
           className="inline-flex items-center gap-1 text-[#888] hover:text-[#1a1a1a] text-sm font-bold"
@@ -872,6 +904,13 @@ function ContractFullPage() {
                     onChange={onContentChange}
                     editable={!isSigned}
                     ydoc={collabReady && !isSigned ? ydoc : null}
+                    seedHtmlIfEmpty={
+                      serverContractDoc === null &&
+                      Boolean(
+                        existing?.contentHtml &&
+                          existing.contentHtml.trim().length > 0,
+                      )
+                    }
                     chromeMode="bare"
                     onEditorReady={setTiptapEditor}
                   />
