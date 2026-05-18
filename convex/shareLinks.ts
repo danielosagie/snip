@@ -247,6 +247,59 @@ export const list = query({
   },
 });
 
+/**
+ * Every share link for a folder. `shareLinks.list` is video-only; folder
+ * bundles are addressed by bundleId, so we resolve the folder's bundles
+ * (createForFolder mints a fresh bundle row per share, so there can be
+ * several) and flatten their links. Newest first.
+ */
+export const listForFolder = query({
+  args: { folderId: v.id("folders") },
+  handler: async (ctx, args) => {
+    const folder = await ctx.db.get(args.folderId);
+    if (!folder) return [];
+    await requireProjectAccess(ctx, folder.projectId);
+
+    const bundles = await ctx.db
+      .query("shareBundles")
+      .withIndex("by_folder", (q) => q.eq("folderId", args.folderId))
+      .collect();
+    const folderBundleIds = bundles
+      .filter((b) => b.kind === "folder")
+      .map((b) => b._id);
+    if (folderBundleIds.length === 0) return [];
+
+    const linkArrays = await Promise.all(
+      folderBundleIds.map((bundleId) =>
+        ctx.db
+          .query("shareLinks")
+          .withIndex("by_bundle", (q) => q.eq("bundleId", bundleId))
+          .collect(),
+      ),
+    );
+
+    return linkArrays
+      .flat()
+      .map((link) => ({
+        _id: link._id,
+        _creationTime: link._creationTime,
+        bundleId: link.bundleId ?? null,
+        token: link.token,
+        createdByName: link.createdByName,
+        expiresAt: link.expiresAt,
+        allowDownload: link.allowDownload,
+        viewCount: link.viewCount,
+        hasPassword: hasPasswordProtection(link),
+        creatorName: link.createdByName,
+        isExpired: link.expiresAt ? link.expiresAt < Date.now() : false,
+        paywall: link.paywall ?? null,
+        clientLabel: link.clientLabel ?? null,
+        clientEmail: link.clientEmail ?? null,
+      }))
+      .sort((a, b) => b._creationTime - a._creationTime);
+  },
+});
+
 export const remove = mutation({
   args: { linkId: v.id("shareLinks") },
   handler: async (ctx, args) => {

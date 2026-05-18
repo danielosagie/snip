@@ -15,6 +15,7 @@ import {
   Download,
   MessageSquare,
   Eye,
+  Share2,
 } from "lucide-react";
 import { FileTile, FileListRow } from "@/components/files/FileTile";
 import { VideoKanban } from "@/components/videos/VideoKanban";
@@ -48,6 +49,7 @@ import { prewarmVideo } from "./-video.data";
 import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
+import { ShareFolderDialog } from "@/components/ShareFolderDialog";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
@@ -208,6 +210,7 @@ export default function ProjectPage({
     null,
   );
   const [selectionShareOpen, setSelectionShareOpen] = useState(false);
+  const [folderShareOpen, setFolderShareOpen] = useState(false);
 
   const clearSelection = useCallback(() => {
     setSelectedVideoIds(new Set());
@@ -566,6 +569,17 @@ export default function ProjectPage({
               canEdit={canUpload}
             />
           ) : null}
+          {currentFolderId && canUpload ? (
+            <button
+              type="button"
+              onClick={() => setFolderShareOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] transition-colors flex-shrink-0"
+              title="Share this folder & everything in it"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Share folder</span>
+            </button>
+          ) : null}
           {resolvedProjectId && canUpload ? (
             <ProjectAddButton
               projectId={resolvedProjectId}
@@ -577,6 +591,14 @@ export default function ProjectPage({
           ) : null}
         </div>
       </DashboardHeader>
+
+      {currentFolderId ? (
+        <ShareFolderDialog
+          folderId={currentFolderId}
+          open={folderShareOpen}
+          onOpenChange={setFolderShareOpen}
+        />
+      ) : null}
 
       {/* Hidden file input opened by the Add \u2192 Add files action. */}
       <input
