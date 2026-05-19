@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getUser, identityAvatarUrl, identityEmail, identityName, requireUser, requireTeamAccess } from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
+import { internal } from "./_generated/api";
 
 function normalizedEmail(value: string) {
   return value.trim().toLowerCase();
@@ -224,6 +225,18 @@ export const inviteMember = mutation({
       invitedByName: identityName(user),
       token,
       expiresAt,
+    });
+
+    // Fire the invite email (best-effort, scheduled — mutations can't
+    // call actions directly). No-ops without RESEND_API_KEY/APP_URL;
+    // the team-settings copy-link affordance still works regardless.
+    const team = await ctx.db.get(args.teamId);
+    await ctx.scheduler.runAfter(0, internal.email.sendTeamInvite, {
+      email: inviteEmail,
+      token,
+      teamName: team?.name ?? "a team",
+      inviterName: identityName(user),
+      role: args.role,
     });
 
     return token;
