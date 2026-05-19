@@ -1,7 +1,13 @@
 
 import { useConvex, useMutation, useAction } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearch,
+} from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +52,15 @@ import { useVideoData } from "./-video.data";
 export default function VideoPage() {
   const params = useParams({ strict: false });
   const navigate = useNavigate({});
+  // Deep-link from search: ?t=<sec> seeks the player to a matched
+  // frame/transcript moment. Untyped (route has no validateSearch), so
+  // read loosely and coerce.
+  const routeSearch = useSearch({ strict: false }) as { t?: unknown };
+  const deepLinkTime = Number(routeSearch?.t);
+  const initialPlaybackTime =
+    Number.isFinite(deepLinkTime) && deepLinkTime > 0
+      ? deepLinkTime
+      : undefined;
   const pathname = useLocation().pathname;
   const teamSlug = typeof params.teamSlug === "string" ? params.teamSlug : "";
   const projectId = params.projectId as Id<"projects">;
@@ -482,6 +497,7 @@ export default function VideoPage() {
                   ref={playerRef}
                   src={activePlaybackUrl}
                   poster={playbackSession?.posterUrl}
+                  initialTime={initialPlaybackTime}
                   comments={comments || []}
                   onTimeUpdate={handleTimeUpdate}
                   onMarkerClick={handleMarkerClick}

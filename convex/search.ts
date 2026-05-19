@@ -239,16 +239,27 @@ export const globalSearch = query({
     return hits
       .filter((h) => allowed.has(h.teamId))
       .slice(0, 14)
-      .map((h) => ({
-        kind: h.kind,
-        title: h.title,
-        contextLabel: h.contextLabel,
-        snippet: snippet(h.text, q),
-        teamSlug: h.teamSlug,
-        projectId: h.projectId ?? null,
-        videoId: h.videoId ?? null,
-        refId: h.refId,
-      }));
+      .map((h) => {
+        // frame refId = `${videoId}:${sec}`, transcript = `${videoId}:t:${sec}`
+        // → the trailing segment is the timestamp to deep-link to.
+        let timestampSec: number | null = null;
+        if (h.kind === "frame" || h.kind === "transcript") {
+          const last = h.refId.split(":").pop();
+          const n = last ? Number(last) : NaN;
+          timestampSec = Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
+        }
+        return {
+          kind: h.kind,
+          title: h.title,
+          contextLabel: h.contextLabel,
+          snippet: snippet(h.text, q),
+          teamSlug: h.teamSlug,
+          projectId: h.projectId ?? null,
+          videoId: h.videoId ?? null,
+          refId: h.refId,
+          timestampSec,
+        };
+      });
   },
 });
 

@@ -51,6 +51,9 @@ interface ResultItem {
   subtitle: string;
   href: string;
   icon: React.ReactNode;
+  /** Deep-link search params (e.g. {t} to seek the video to a matched
+   *  frame/transcript moment). */
+  search?: Record<string, unknown>;
 }
 
 export function CommandSearch({
@@ -175,6 +178,12 @@ export function CommandSearch({
             <Film className="h-4 w-4" />
           );
       }
+      // Frame / transcript hits deep-link the video to the matched
+      // moment via a ?t= search param the video page reads.
+      const search =
+        typeof h.timestampSec === "number" && h.timestampSec >= 0
+          ? { t: h.timestampSec }
+          : undefined;
       return {
         id: `content:${h.kind}:${h.refId}:${idx}`,
         scope: "content",
@@ -182,6 +191,7 @@ export function CommandSearch({
         subtitle: `${h.contextLabel} — ${h.snippet}`,
         href,
         icon,
+        search,
       };
     });
 
@@ -254,7 +264,10 @@ export function CommandSearch({
       const target = results[focusIndex];
       if (target) {
         onOpenChange(false);
-        navigate({ to: target.href });
+        navigate({
+          to: target.href,
+          ...(target.search ? { search: target.search } : {}),
+        } as never);
       }
     }
   };
@@ -324,6 +337,7 @@ export function CommandSearch({
                   <li key={r.id}>
                     <Link
                       to={r.href}
+                      search={r.search as never}
                       onClick={() => onOpenChange(false)}
                       onMouseEnter={() => setFocusIndex(i)}
                       className={cn(
