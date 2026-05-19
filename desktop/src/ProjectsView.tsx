@@ -1,5 +1,6 @@
 import { ConvexClient } from "convex/browser";
 import { useConvexQuery } from "./useConvex";
+import { Eyebrow } from "./ui";
 
 interface Team {
   _id: string;
@@ -42,6 +43,10 @@ export function ProjectsView({ client, onOpen }: Props) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <header style={{ marginBottom: 2 }}>
+        <Eyebrow>Workspace</Eyebrow>
+        <h2 style={{ fontSize: 26, marginTop: 6 }}>Projects</h2>
+      </header>
       {teams.map((team) => (
         <section key={team._id} style={{ border: "2px solid #1a1a1a" }}>
           <header

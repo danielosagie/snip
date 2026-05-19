@@ -3,46 +3,124 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VideoInfra Desktop</title>
+    <title>snip</title>
     <style>
+      :root {
+        --bg: #f0f0e8;
+        --fg: #1a1a1a;
+        --muted: #888888;
+        --accent: #c2410c;
+        --accent-hover: #9a3412;
+        --wash: #ffedd5;
+        --wash-strong: #fdba74;
+        --border: #1a1a1a;
+        --border-subtle: #cccccc;
+        --cell: #e8e8e0;
+        --danger: #dc2626;
+      }
       html,
       body {
         margin: 0;
         padding: 0;
-        background: #f0f0e8;
-        color: #1a1a1a;
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
-          Arial, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Helvetica Neue", Arial, sans-serif;
         height: 100vh;
+        -webkit-font-smoothing: antialiased;
       }
-      * { box-sizing: border-box; }
-      input, button, textarea {
+      * {
+        box-sizing: border-box;
+      }
+      h1,
+      h2,
+      h3 {
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        margin: 0;
+      }
+      input,
+      textarea,
+      select {
         font-family: inherit;
-        border: 2px solid #1a1a1a;
-        padding: 6px 10px;
-        background: #f0f0e8;
-        color: #1a1a1a;
+        font-size: 13px;
+        border: 2px solid var(--border);
+        padding: 7px 10px;
+        background: var(--bg);
+        color: var(--fg);
+        border-radius: 0;
       }
-      input:focus { outline: 2px solid #2d5a2d; outline-offset: -1px; }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+      }
+
+      /* Brutalist button: 2px border + 4px hard offset shadow, press-down
+         hover (shadow shrinks to 2px as the button moves into it). This is
+         the reference interactive look for the whole app. */
       button {
         cursor: pointer;
+        font-family: inherit;
         font-weight: 700;
-        background: #1a1a1a;
-        color: #f0f0e8;
+        font-size: 13px;
+        border: 2px solid var(--border);
+        padding: 7px 14px;
+        border-radius: 0;
+        background: var(--bg);
+        color: var(--fg);
+        box-shadow: 4px 4px 0 0 var(--border);
+        transition:
+          transform 0.06s ease,
+          box-shadow 0.06s ease,
+          background 0.1s ease;
       }
-      button:hover:not(:disabled) { background: #2d5a2d; }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      button:hover:not(:disabled) {
+        transform: translate(2px, 2px);
+        box-shadow: 2px 2px 0 0 var(--border);
+      }
+      button:active:not(:disabled) {
+        transform: translate(4px, 4px);
+        box-shadow: 0 0 0 0 var(--border);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        box-shadow: 2px 2px 0 0 var(--border);
+      }
+      /* Primary = the burnt-orange accent. Used sparingly: one per view. */
+      button.primary {
+        background: var(--accent);
+        color: var(--bg);
+        border-color: var(--border);
+      }
+      button.primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+      /* Ghost = no shadow, fills on hover. For secondary / inline actions. */
       button.ghost {
         background: transparent;
-        color: #1a1a1a;
-        border-color: #1a1a1a;
+        color: var(--fg);
+        box-shadow: none;
       }
       button.ghost:hover:not(:disabled) {
-        background: #1a1a1a;
-        color: #f0f0e8;
+        background: var(--fg);
+        color: var(--bg);
+        transform: none;
+        box-shadow: none;
       }
-      code, pre, .mono {
+      button.ghost:active:not(:disabled) {
+        transform: none;
+      }
+      code,
+      pre,
+      .mono {
         font-family: "SF Mono", Menlo, Consolas, monospace;
+      }
+      ::selection {
+        background: var(--wash-strong);
+        color: var(--fg);
       }
     </style>
   </head>

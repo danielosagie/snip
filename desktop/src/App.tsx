@@ -5,6 +5,8 @@ import { SettingsView } from "./SettingsView";
 import { ProjectsView } from "./ProjectsView";
 import { ProjectDetail } from "./ProjectDetail";
 import { MountView } from "./MountView";
+import { Onboarding } from "./Onboarding";
+import { C, mono, Wordmark } from "./ui";
 
 type Tab = "projects" | "mount" | "settings";
 
@@ -22,7 +24,6 @@ export function App() {
     settings?.convexAuthToken ?? "",
   );
 
-  // Resolve the configured-ness of the desktop app.
   const isConfigured = Boolean(
     settings?.convexUrl &&
       settings?.convexAuthToken &&
@@ -30,11 +31,46 @@ export function App() {
       settings?.storage.accessKeyId,
   );
 
+  const persist = async (next: DesktopSettings) => {
+    const saved = await api.settings.set(next);
+    setSettings(saved);
+  };
+
   if (!settings) {
     return (
-      <div style={{ padding: 24 }}>
-        <div style={{ color: "#888" }}>Loading…</div>
+      <div
+        style={{
+          height: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+        }}
+      >
+        <Wordmark size={22} />
+        <span
+          style={{
+            fontFamily: mono,
+            fontSize: 11,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: C.muted,
+          }}
+        >
+          Loading…
+        </span>
       </div>
+    );
+  }
+
+  // First run → the full-screen guided flow, not a settings dump.
+  if (!isConfigured) {
+    return (
+      <Onboarding
+        settings={settings}
+        onChange={persist}
+        onDone={() => setTab("mount")}
+      />
     );
   }
 
@@ -42,22 +78,25 @@ export function App() {
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <header
         style={{
-          padding: "12px 18px",
-          borderBottom: "2px solid #1a1a1a",
+          padding: "12px 20px",
+          borderBottom: `2px solid ${C.border}`,
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 16,
           WebkitAppRegion: "drag",
         } as React.CSSProperties}
       >
-        <div style={{ fontWeight: 900, letterSpacing: "-0.02em", paddingLeft: 60 }}>
-          videoinfra
-          <span style={{ color: "#888", fontWeight: 600, marginLeft: 8, fontSize: 12 }}>
-            desktop
-          </span>
+        <div style={{ paddingLeft: 56 }}>
+          <Wordmark size={17} sub="desktop" />
         </div>
         <div style={{ flex: 1 }} />
-        <nav style={{ display: "flex", gap: 6, WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+        <nav
+          style={{
+            display: "flex",
+            gap: 8,
+            WebkitAppRegion: "no-drag",
+          } as React.CSSProperties}
+        >
           <TabButton active={tab === "projects"} onClick={() => setTab("projects")}>
             Projects
           </TabButton>
@@ -70,24 +109,9 @@ export function App() {
         </nav>
       </header>
 
-      <main style={{ flex: 1, overflow: "auto", padding: 20 }}>
-        {!isConfigured ? (
-          <SettingsView
-            settings={settings}
-            onChange={async (next) => {
-              const saved = await api.settings.set(next);
-              setSettings(saved);
-            }}
-            firstRun
-          />
-        ) : tab === "settings" ? (
-          <SettingsView
-            settings={settings}
-            onChange={async (next) => {
-              const saved = await api.settings.set(next);
-              setSettings(saved);
-            }}
-          />
+      <main style={{ flex: 1, overflow: "auto", padding: 24 }}>
+        {tab === "settings" ? (
+          <SettingsView settings={settings} onChange={persist} />
         ) : tab === "mount" ? (
           <MountView settings={settings} client={client} />
         ) : selectedProjectId ? (
@@ -121,10 +145,15 @@ function TabButton({
     <button
       onClick={onClick}
       style={{
-        background: active ? "#1a1a1a" : "transparent",
-        color: active ? "#f0f0e8" : "#1a1a1a",
-        padding: "4px 10px",
+        background: active ? C.fg : "transparent",
+        color: active ? C.bg : C.fg,
+        boxShadow: active ? `4px 4px 0 0 ${C.accent}` : undefined,
+        padding: "6px 14px",
         fontSize: 12,
+        fontFamily: mono,
+        fontWeight: 700,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
       }}
     >
       {children}

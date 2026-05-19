@@ -4,10 +4,9 @@ import { api, DesktopSettings } from "./api";
 interface Props {
   settings: DesktopSettings;
   onChange: (next: DesktopSettings) => Promise<void>;
-  firstRun?: boolean;
 }
 
-export function SettingsView({ settings, onChange, firstRun }: Props) {
+export function SettingsView({ settings, onChange }: Props) {
   const [draft, setDraft] = useState<DesktopSettings>(settings);
   const [saving, setSaving] = useState(false);
 
@@ -58,17 +57,6 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      {firstRun ? (
-        <div style={{
-          background: "#2d5a2d", color: "#f0f0e8", padding: 14, marginBottom: 18,
-          border: "2px solid #1a1a1a", fontSize: 13,
-        }}>
-          <strong>First run.</strong> Configure your Convex deployment, auth token,
-          and object-storage credentials below. You can grab the Convex URL and a
-          session token from the web app.
-        </div>
-      ) : null}
-
       <Section title="Convex">
         <Field label="Deployment URL">
           <input
@@ -242,8 +230,8 @@ export function SettingsView({ settings, onChange, firstRun }: Props) {
         </p>
       </Section>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-        <button onClick={() => void save()} disabled={saving}>
+      <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+        <button className="primary" onClick={() => void save()} disabled={saving}>
           {saving ? "Saving…" : "Save settings"}
         </button>
         <button className="ghost" onClick={() => setDraft(settings)} disabled={saving}>
@@ -260,11 +248,11 @@ function MountCommandPreview({ settings }: { settings: DesktopSettings }) {
   const bucket = s.bucket || "<bucket>";
   const accessKey = s.accessKeyId || "<R2_ACCESS_KEY_ID>";
   const secretKey = s.secretAccessKey ? "<SECRET-FROM-SETTINGS>" : "<R2_SECRET_ACCESS_KEY>";
-  const mountAt = settings.rootDir || "~/VideoInfra";
+  const mountAt = settings.rootDir || "~/snip";
 
   const lines = [
     "# 1. Configure rclone remote (one-time, run rclone config interactively or this scripted form):",
-    `rclone config create videoinfra s3 \\`,
+    `rclone config create snip s3 \\`,
     `  provider Cloudflare \\`,
     `  access_key_id "${accessKey}" \\`,
     `  secret_access_key "${secretKey}" \\`,
@@ -273,7 +261,7 @@ function MountCommandPreview({ settings }: { settings: DesktopSettings }) {
     "",
     "# 2. Mount it:",
     `mkdir -p "${mountAt}"`,
-    `rclone mount "videoinfra:${bucket}/projects" "${mountAt}" \\`,
+    `rclone mount "snip:${bucket}/projects" "${mountAt}" \\`,
     `  --vfs-cache-mode writes \\`,
     `  --vfs-cache-max-size 50G \\`,
     `  --vfs-write-back 5s \\`,

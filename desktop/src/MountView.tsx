@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ConvexClient } from "convex/browser";
 import { api, DesktopSettings, LanCachePeer, MountPrereqs, MountState } from "./api";
 import { useConvexQuery } from "./useConvex";
+import { C, mono, Eyebrow, Pill, Square, Banner, Glyph } from "./ui";
 
 interface PresenceLock {
   _id: string;
@@ -82,28 +83,12 @@ export function MountView({ settings, client }: Props) {
 
   return (
     <div style={{ maxWidth: 760 }}>
-      <header style={{ marginBottom: 14 }}>
-        <div
-          style={{
-            fontSize: 11,
-            color: "#888",
-            fontWeight: 700,
-            letterSpacing: "0.05em",
-          }}
-        >
-          MOUNT AS DRIVE
-        </div>
-        <h2
-          style={{
-            margin: "2px 0 4px",
-            fontSize: 28,
-            fontWeight: 900,
-            letterSpacing: "-0.02em",
-          }}
-        >
+      <header style={{ marginBottom: 16 }}>
+        <Eyebrow>Mount as drive</Eyebrow>
+        <h2 style={{ fontSize: 28, margin: "6px 0 6px" }}>
           {labelForStatus(status)}
         </h2>
-        <p style={{ margin: 0, color: "#666", fontSize: 13 }}>
+        <p style={{ margin: 0, color: "#555", fontSize: 13, lineHeight: 1.55 }}>
           Streams your S3 / R2 bucket as a real Mac volume so Finder,
           Premiere, and Resolve see project files natively — no manual pull.
           One mount per machine. Uses the same tuned rclone VFS flags as{" "}
@@ -147,6 +132,7 @@ export function MountView({ settings, client }: Props) {
               </button>
             ) : (
               <button
+                className="primary"
                 onClick={() => void handleMount()}
                 disabled={busy || !canMount}
                 title={
@@ -284,60 +270,80 @@ function PrereqPanel({ prereqs }: { prereqs: MountPrereqs | null }) {
   if (!prereqs) {
     return null;
   }
+  const fuseLabel =
+    prereqs.platform === "darwin"
+      ? "macFUSE"
+      : prereqs.platform === "win32"
+        ? "WinFsp"
+        : "FUSE";
   if (prereqs.rclone && prereqs.fuse) {
     return (
-      <section
-        style={{
-          border: "2px solid #2d5a2d",
-          background: "#dde6dd",
-          padding: 8,
-          marginBottom: 14,
-          fontSize: 12,
-        }}
-      >
-        ✓ Prerequisites installed (rclone + FUSE).
-      </section>
+      <div style={{ marginBottom: 14 }}>
+        <Banner tone="ok">
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <Glyph name="check" size={15} />
+            Prerequisites installed — rclone + {fuseLabel}.
+          </span>
+        </Banner>
+      </div>
     );
   }
   return (
     <section
       style={{
-        border: "2px solid #b45309",
-        background: "#f5e9d8",
-        padding: 12,
+        border: `2px solid ${C.border}`,
         marginBottom: 14,
       }}
     >
-      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
-        Install these once before mounting:
-      </div>
-      <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12 }}>
-        <li style={{ color: prereqs.rclone ? "#2d5a2d" : "#7f1d1d" }}>
-          {prereqs.rclone ? "✓" : "✗"} rclone
-        </li>
-        <li style={{ color: prereqs.fuse ? "#2d5a2d" : "#7f1d1d" }}>
-          {prereqs.fuse ? "✓" : "✗"}{" "}
-          {prereqs.platform === "darwin"
-            ? "macFUSE (requires kernel-extension approval after install)"
-            : prereqs.platform === "win32"
-              ? "WinFsp"
-              : "FUSE"}
-        </li>
-      </ul>
-      <pre
+      <header
         style={{
-          background: "#1a1a1a",
-          color: "#f0f0e8",
-          fontFamily: '"SF Mono", Menlo, monospace',
+          background: C.fg,
+          color: C.bg,
+          padding: "7px 14px",
           fontSize: 11,
-          padding: 8,
-          marginTop: 8,
-          marginBottom: 0,
-          border: "2px solid #1a1a1a",
+          fontWeight: 900,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
         }}
       >
-        {prereqs.installHint}
-      </pre>
+        Install once before mounting
+      </header>
+      <div style={{ padding: 14 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <Pill tone={prereqs.rclone ? "ok" : "danger"}>
+            <Square
+              color={prereqs.rclone ? C.ok : C.danger}
+              size={10}
+            />
+            rclone
+          </Pill>
+          <Pill tone={prereqs.fuse ? "ok" : "danger"}>
+            <Square color={prereqs.fuse ? C.ok : C.danger} size={10} />
+            {fuseLabel}
+          </Pill>
+        </div>
+        {prereqs.platform === "darwin" ? (
+          <p style={{ fontSize: 11, color: "#666", margin: "0 0 10px", lineHeight: 1.5 }}>
+            macFUSE needs kernel-extension approval in System Settings →
+            Privacy & Security after install.
+          </p>
+        ) : null}
+        <pre
+          style={{
+            background: C.fg,
+            color: C.bg,
+            fontFamily: mono,
+            fontSize: 11,
+            padding: 12,
+            margin: 0,
+            border: `2px solid ${C.border}`,
+            whiteSpace: "pre-wrap",
+            lineHeight: 1.6,
+          }}
+        >
+          {prereqs.installHint}
+        </pre>
+      </div>
     </section>
   );
 }
