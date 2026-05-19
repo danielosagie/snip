@@ -757,6 +757,7 @@ export default defineSchema({
     text: v.string(),
   })
     .index("by_ref", ["kind", "refId"])
+    .index("by_video", ["videoId"])
     .searchIndex("by_text", {
       searchField: "text",
       filterFields: ["teamId", "kind"],

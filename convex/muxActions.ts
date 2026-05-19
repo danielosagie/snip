@@ -273,6 +273,13 @@ export const processWebhook = internalAction({
             duration,
             thumbnailUrl: buildMuxThumbnailUrl(playbackId),
           });
+          // Visual search: caption sampled frames so "describe a person /
+          // scene" finds this video. No-ops if the Gemini key is unset.
+          await ctx.scheduler.runAfter(
+            0,
+            internal.frameCaptions.captionVideo,
+            { videoId: resolved.videoId },
+          );
           console.log("Marked video ready from Mux webhook", {
             eventType,
             videoId: resolved.videoId,

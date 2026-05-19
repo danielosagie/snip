@@ -1,5 +1,11 @@
 import { v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  internalQuery,
+  MutationCtx,
+} from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { requireUser, requireProjectAccess } from "./auth";
 
@@ -85,6 +91,96 @@ export async function removeSearchable(
     .collect();
   for (const r of existing) await ctx.db.delete(r._id);
 }
+
+/** Drop every searchable row tied to a video (the video row + its frame
+ *  caption rows). Used when a video is trashed so nothing stale lingers. */
+export async function removeSearchableForVideo(
+  ctx: MutationCtx,
+  videoId: Id<"videos">,
+): Promise<void> {
+  const rows = await ctx.db
+    .query("searchableContent")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const r of rows) await ctx.db.delete(r._id);
+}
+
+function mmss(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Internal query for the (Node) frame-caption pipeline — actions can't
+ * touch the db directly. Returns just what the captioner needs plus the
+ * count of frames already indexed (so it can skip re-captioning and not
+ * burn the free Gemini quota).
+ */
+export const getVideoForFrameCaption = internalQuery({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video || video.deletedAt) return null;
+    const project = await ctx.db.get(video.projectId);
+    if (!project) return null;
+    const existingFrames = await ctx.db
+      .query("searchableContent")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .collect();
+    return {
+      muxPlaybackId: video.muxPlaybackId ?? null,
+      duration: video.duration ?? null,
+      status: video.status,
+      title: video.title,
+      projectId: video.projectId,
+      teamId: project.teamId,
+      projectName: project.name,
+      frameCount: existingFrames.filter((r) => r.kind === "frame").length,
+    };
+  },
+});
+
+/** Authenticated: ready, non-deleted videos in a project — drives the
+ *  frame-caption backfill. requireProjectAccess gates who can trigger it. */
+export const listReadyVideoIds = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args): Promise<Id<"videos">[]> => {
+    await requireProjectAccess(ctx, args.projectId);
+    const videos = await ctx.db
+      .query("videos")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    return videos
+      .filter((vd) => !vd.deletedAt && vd.status === "ready" && vd.muxPlaybackId)
+      .map((vd) => vd._id);
+  },
+});
+
+/** Internal mutation the Node caption action calls per frame. */
+export const indexFrameCaption = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    sec: v.number(),
+    caption: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video || video.deletedAt) return;
+    const project = await ctx.db.get(video.projectId);
+    if (!project) return;
+    await indexSearchable(ctx, {
+      kind: "frame",
+      refId: `${args.videoId}:${Math.round(args.sec)}`,
+      teamId: project.teamId,
+      projectId: video.projectId,
+      videoId: args.videoId,
+      title: `${video.title} @ ${mmss(args.sec)}`,
+      contextLabel: `${project.name} · ${video.title} · frame ${mmss(args.sec)}`,
+      text: args.caption,
+    });
+  },
+});
 
 function snippet(text: string, q: string): string {
   const lower = text.toLowerCase();

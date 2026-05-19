@@ -7,7 +7,7 @@ import { resolveActiveShareGrant } from "./shareAccess";
 import { resolveBundleVideos } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
-import { indexSearchable, removeSearchable } from "./search";
+import { indexSearchable, removeSearchableForVideo } from "./search";
 
 const workflowStatusValidator = v.union(
   v.literal("review"),
@@ -813,9 +813,10 @@ export const remove = mutation({
       deletedAt: Date.now(),
       deletedByName: name,
     });
-    // Drop it from search so trashed items don't surface in ⌘K.
+    // Drop the video AND its frame-caption rows from search so trashed
+    // items don't surface in ⌘K.
     try {
-      await removeSearchable(ctx, "video", args.videoId);
+      await removeSearchableForVideo(ctx, args.videoId);
     } catch (e) {
       console.error("search index (video remove) failed", e);
     }
