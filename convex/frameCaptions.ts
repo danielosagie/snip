@@ -24,14 +24,25 @@ import type { Id } from "./_generated/dataModel";
  */
 
 const MODEL = "gemini-2.0-flash";
-const MAX_FRAMES = 8;
+// Dense enough that on-screen content (slides, docs, code, UI, lower
+// thirds) is actually captured between samples, capped so a long video
+// can't exhaust the Gemini free tier. ~1 frame / 6s, hard ceiling 30.
+const MAX_FRAMES = 30;
+const SECONDS_PER_FRAME = 6;
 const PACE_MS = 350; // stay comfortably under the free RPM ceiling
 
+// We want the *content* of the frame searchable, not just a vibe — so
+// pull verbatim on-screen text first (slides, documents, code, UI labels,
+// captions, signage), then a concrete scene description. Both go into the
+// same FTS row, so a query hits whichever matched.
 const PROMPT =
-  "Describe this single video frame in one dense, concrete sentence so it " +
-  "is searchable: people (count, appearance, clothing, what they're doing), " +
-  "key objects, the setting/location, notable actions, and any visible text " +
-  "or logos. No preamble, just the description.";
+  "You are indexing a video frame for full-text search. Output two lines:\n" +
+  "TEXT: every word of visible on-screen text, verbatim — slides, " +
+  "documents, code, UI labels, captions, lower-thirds, signage, logos. " +
+  "If there is no text, write TEXT: none.\n" +
+  "SCENE: one dense, concrete sentence — people (count, appearance, " +
+  "clothing, action), key objects, setting, notable actions.\n" +
+  "No preamble, no markdown, just the two lines.";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -41,7 +52,7 @@ function pickTimestamps(duration: number | null): number[] {
   if (!duration || duration <= 1) return [0];
   const n = Math.min(
     MAX_FRAMES,
-    Math.max(3, Math.floor(duration / 12)),
+    Math.max(3, Math.ceil(duration / SECONDS_PER_FRAME)),
   );
   return Array.from({ length: n }, (_, i) =>
     Math.max(0, Math.round(duration * ((i + 0.5) / n))),
@@ -78,7 +89,7 @@ async function captionFrame(
             ],
           },
         ],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 160 },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 400 },
       }),
     },
   );
@@ -98,8 +109,15 @@ async function captionFrame(
   const json = (await resp.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   };
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  return text && text.length > 0 ? text : null;
+  const raw = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!raw) return null;
+  // Drop an empty "TEXT: none" line so it doesn't pollute the FTS row.
+  const cleaned = raw
+    .split("\n")
+    .filter((l) => !/^TEXT:\s*none\.?\s*$/i.test(l.trim()))
+    .join("\n")
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 export const captionVideo = internalAction({
