@@ -119,3 +119,85 @@ export const sendTeamInvite = internalAction({
     await sendViaResend({ to: args.email, subject, html, text });
   },
 });
+
+/** Shared guard for notification emails: resolve the absolute link or
+ *  bail (no APP_URL → skip; the in-app activity is unaffected). */
+function linkOrSkip(path: string): string | null {
+  const appUrl = process.env.APP_URL;
+  if (!appUrl) {
+    console.log("email: APP_URL not set — skipping notification email");
+    return null;
+  }
+  return `${appUrl.replace(/\/$/, "")}${path}`;
+}
+
+export const sendCommentReply = internalAction({
+  args: {
+    to: v.string(),
+    replierName: v.string(),
+    videoTitle: v.string(),
+    path: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const link = linkOrSkip(args.path);
+    if (!link) return;
+    const subject = `${args.replierName} replied on "${args.videoTitle}"`;
+    const text = `${args.replierName} replied to a comment thread you're in on "${args.videoTitle}".\n\nView: ${link}`;
+    await sendViaResend({
+      to: args.to,
+      subject,
+      text,
+      html: shell(
+        `<p style="margin:0 0 16px;"><strong>${args.replierName}</strong> replied to a comment thread you're in on <strong>${args.videoTitle}</strong>.</p>` +
+          `<p style="margin:0 0 8px;">${button(link, "View thread")}</p>`,
+      ),
+    });
+  },
+});
+
+export const sendContractSigned = internalAction({
+  args: {
+    to: v.string(),
+    projectName: v.string(),
+    signedByName: v.string(),
+    path: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const link = linkOrSkip(args.path);
+    if (!link) return;
+    const subject = `Contract signed — ${args.projectName}`;
+    const text = `${args.signedByName} signed the contract on "${args.projectName}".\n\nView: ${link}`;
+    await sendViaResend({
+      to: args.to,
+      subject,
+      text,
+      html: shell(
+        `<p style="margin:0 0 16px;">The contract on <strong>${args.projectName}</strong> was signed by <strong>${args.signedByName}</strong>.</p>` +
+          `<p style="margin:0 0 8px;">${button(link, "View contract")}</p>`,
+      ),
+    });
+  },
+});
+
+export const sendUploadFinished = internalAction({
+  args: {
+    to: v.string(),
+    videoTitle: v.string(),
+    path: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const link = linkOrSkip(args.path);
+    if (!link) return;
+    const subject = `Ready: "${args.videoTitle}" finished processing`;
+    const text = `Your upload "${args.videoTitle}" finished processing and is ready to review.\n\nOpen: ${link}`;
+    await sendViaResend({
+      to: args.to,
+      subject,
+      text,
+      html: shell(
+        `<p style="margin:0 0 16px;">Your upload <strong>${args.videoTitle}</strong> finished processing and is ready to review.</p>` +
+          `<p style="margin:0 0 8px;">${button(link, "Open video")}</p>`,
+      ),
+    });
+  },
+});

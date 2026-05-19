@@ -9,6 +9,8 @@ import {
 } from "./auth";
 import { assertTeamHasActiveSubscription } from "./billingHelpers";
 import { indexSearchable, removeSearchable, stripHtml } from "./search";
+import { internal } from "./_generated/api";
+import { prefEnabled } from "./notifications";
 
 export const create = mutation({
   args: {
@@ -229,6 +231,35 @@ export const signContractDemo = mutation({
         signedByName: args.signedByName,
       },
     });
+
+    // Notify opted-in team members that the contract was signed
+    // (best-effort, pref-gated). No-ops without RESEND_API_KEY/APP_URL.
+    try {
+      const team = await ctx.db.get(project.teamId);
+      if (team) {
+        const members = await ctx.db
+          .query("teamMembers")
+          .withIndex("by_team", (q) => q.eq("teamId", project.teamId))
+          .collect();
+        for (const m of members) {
+          if (!m.userEmail) continue;
+          if (!(await prefEnabled(ctx, m.userClerkId, "contractSigned")))
+            continue;
+          await ctx.scheduler.runAfter(
+            0,
+            internal.email.sendContractSigned,
+            {
+              to: m.userEmail,
+              projectName: project.name,
+              signedByName: args.signedByName,
+              path: `/dashboard/${team.slug}/${args.projectId}/contract`,
+            },
+          );
+        }
+      }
+    } catch (e) {
+      console.error("contract-signed notification failed", e);
+    }
   },
 });
 

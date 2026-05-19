@@ -10,6 +10,8 @@ import {
 import { resolveActiveShareGrant } from "./shareAccess";
 import { resolveBundleVideos } from "./shareBundles";
 import { indexSearchable, removeSearchable } from "./search";
+import { internal } from "./_generated/api";
+import { prefEnabled, resolveUserEmail } from "./notifications";
 
 /**
  * Resolves the video targeted by a share-grant comment. Single-video shares
@@ -113,8 +115,8 @@ export const create = mutation({
       "viewer",
     );
 
+    const parent = args.parentId ? await ctx.db.get(args.parentId) : null;
     if (args.parentId) {
-      const parent = await ctx.db.get(args.parentId);
       if (!parent || parent.videoId !== args.videoId) {
         throw new Error("Invalid parent comment");
       }
@@ -144,6 +146,34 @@ export const create = mutation({
       });
     } catch (e) {
       console.error("search index (comment create) failed", e);
+    }
+
+    // Notify the parent author of a reply (best-effort, pref-gated,
+    // skips self-replies). No-ops without RESEND_API_KEY/APP_URL.
+    try {
+      if (
+        parent &&
+        parent.userClerkId &&
+        parent.userClerkId !== user.subject &&
+        (await prefEnabled(ctx, parent.userClerkId, "commentReply"))
+      ) {
+        const to = await resolveUserEmail(ctx, parent.userClerkId);
+        const team = await ctx.db.get(project.teamId);
+        if (to && team) {
+          await ctx.scheduler.runAfter(
+            0,
+            internal.email.sendCommentReply,
+            {
+              to,
+              replierName: identityName(user),
+              videoTitle: video.title,
+              path: `/dashboard/${team.slug}/${video.projectId}/${args.videoId}`,
+            },
+          );
+        }
+      }
+    } catch (e) {
+      console.error("comment reply notification failed", e);
     }
 
     return commentId;

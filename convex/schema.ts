@@ -793,4 +793,16 @@ export default defineSchema({
     // desktop's next poll, then nulled.
     signInToken: v.optional(v.string()),
   }).index("by_code", ["code"]),
+
+  /**
+   * Per-user email notification preferences (Settings → Notifications).
+   * Absent row = defaults: comment replies + contract-signed ON, upload
+   * completion OFF (mirrors the original toggle defaults).
+   */
+  notificationPrefs: defineTable({
+    userClerkId: v.string(),
+    commentReply: v.boolean(),
+    contractSigned: v.boolean(),
+    uploadFinished: v.boolean(),
+  }).index("by_user", ["userClerkId"]),
 });

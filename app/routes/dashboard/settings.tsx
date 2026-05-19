@@ -1,16 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
+import { useState } from "react";
 import { api } from "@convex/_generated/api";
 import { DashboardHeader } from "@/components/DashboardHeader";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   CreditCard,
@@ -23,7 +17,6 @@ import {
   Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { teamSettingsPath } from "@/lib/routes";
 import { seoHead } from "@/lib/seo";
 
 export const Route = createFileRoute("/dashboard/settings")({
@@ -47,8 +40,17 @@ export const Route = createFileRoute("/dashboard/settings")({
  * than mirroring those into Convex — Clerk is the source of truth
  * for identity, snip just tags rows with `clerkId`.
  */
+const SETTINGS_TABS = [
+  { value: "profile", label: "Profile" },
+  { value: "notifications", label: "Notifications" },
+  { value: "integrations", label: "Integrations" },
+] as const;
+
+type SettingsTab = (typeof SETTINGS_TABS)[number]["value"];
+
 function SettingsRoute() {
   const { user } = useUser();
+  const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
 
   return (
     <div className="h-full flex flex-col">
@@ -64,28 +66,41 @@ function SettingsRoute() {
             integrations. Team-scoped settings live in the team settings page.
           </p>
 
-          <Tabs defaultValue="profile" className="mt-6">
-            <TabsList>
-              <TabsTrigger value="profile">Profile</TabsTrigger>
-              <TabsTrigger value="notifications">Notifications</TabsTrigger>
-              <TabsTrigger value="integrations">Integrations</TabsTrigger>
-            </TabsList>
+          {/* Brutalist tab strip — matches the team settings page. */}
+          <nav className="border-b-2 border-[#1a1a1a] mt-6">
+            <div className="flex gap-1">
+              {SETTINGS_TABS.map((tab) => {
+                const isActive = activeTab === tab.value;
+                return (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    onClick={() => setActiveTab(tab.value)}
+                    className={
+                      isActive
+                        ? "px-4 py-2 text-sm font-bold border-2 border-[#1a1a1a] border-b-0 bg-[#f0f0e8] text-[#1a1a1a] -mb-[2px] relative z-10"
+                        : "px-4 py-2 text-sm font-bold text-[#666] hover:text-[#1a1a1a] border-2 border-transparent"
+                    }
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
 
-            <TabsContent value="profile" className="mt-4">
+          <div className="mt-4">
+            {activeTab === "profile" ? (
               <ProfileTab
                 name={user?.fullName ?? user?.firstName ?? ""}
                 email={user?.primaryEmailAddress?.emailAddress ?? ""}
               />
-            </TabsContent>
-
-            <TabsContent value="notifications" className="mt-4">
+            ) : activeTab === "notifications" ? (
               <NotificationsTab />
-            </TabsContent>
-
-            <TabsContent value="integrations" className="mt-4">
+            ) : (
               <IntegrationsTab />
-            </TabsContent>
-          </Tabs>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -156,6 +171,9 @@ function ProfileTab({ name, email }: { name: string; email: string }) {
 }
 
 function NotificationsTab() {
+  const prefs = useQuery(api.notifications.getMyPrefs, {});
+  const update = useMutation(api.notifications.updateMyPrefs);
+  const loading = prefs === undefined;
   return (
     <Section
       title="Notifications"
@@ -164,20 +182,27 @@ function NotificationsTab() {
       <NotifyToggle
         label="Comment replies"
         help="Email me when someone replies to a thread I'm in."
-        defaultChecked
+        checked={prefs?.commentReply ?? true}
+        disabled={loading}
+        onChange={(v) => void update({ commentReply: v })}
       />
       <NotifyToggle
         label="Contract signature events"
         help="Email me when a contract on one of my projects is signed."
-        defaultChecked
+        checked={prefs?.contractSigned ?? true}
+        disabled={loading}
+        onChange={(v) => void update({ contractSigned: v })}
       />
       <NotifyToggle
         label="Upload completion"
         help="Email me when a long upload finishes (over 5 minutes)."
+        checked={prefs?.uploadFinished ?? false}
+        disabled={loading}
+        onChange={(v) => void update({ uploadFinished: v })}
       />
       <p className="pt-2 text-xs text-[#888] font-mono">
-        Email delivery is not wired yet — these toggles persist preferences
-        but don't fire actual emails. Coming once we wire Resend.
+        Emails send via Resend when configured; until then preferences
+        still save and in-app activity is unaffected.
       </p>
     </Section>
   );
@@ -186,18 +211,24 @@ function NotificationsTab() {
 function NotifyToggle({
   label,
   help,
-  defaultChecked,
+  checked,
+  disabled,
+  onChange,
 }: {
   label: string;
   help?: string;
-  defaultChecked?: boolean;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
 }) {
   return (
     <label className="flex items-start gap-3 cursor-pointer">
       <input
         type="checkbox"
-        defaultChecked={defaultChecked}
-        className="mt-0.5 h-4 w-4 accent-[#FF6600]"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 accent-[#FF6600] disabled:opacity-50"
       />
       <div className="flex-1">
         <div className="font-bold text-sm text-[#1a1a1a]">{label}</div>
@@ -210,9 +241,7 @@ function NotifyToggle({
 }
 
 function IntegrationsTab() {
-  const teams = useQuery(api.teams.list, {});
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
-  const firstTeam = teams?.[0];
 
   return (
     <>
@@ -229,18 +258,16 @@ function IntegrationsTab() {
               ? "configured"
               : "not-configured"
           }
-          configuredHint="Stripe API keys detected — set up payouts per team to enable receiving money."
+          configuredHint="Stripe API keys detected — set up payouts in Billing to enable receiving money."
           notConfiguredHint="Set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET in your Convex env to enable."
           action={
-            firstTeam ? (
-              <Link
-                to={`${teamSettingsPath(firstTeam.slug)}/payouts`}
-                className="inline-flex items-center gap-1 text-xs font-bold text-[#FF6600] hover:text-[#FF7A1F] underline underline-offset-2"
-              >
-                Set up payouts for {firstTeam.name}
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            ) : null
+            <Link
+              to="/dashboard/billing"
+              className="inline-flex items-center gap-1 text-xs font-bold text-[#FF6600] hover:text-[#FF7A1F] underline underline-offset-2"
+            >
+              Set up payouts in Billing
+              <ExternalLink className="h-3 w-3" />
+            </Link>
           }
         />
 

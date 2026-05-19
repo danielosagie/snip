@@ -8,6 +8,8 @@ import { resolveBundleVideos } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
 import { indexSearchable, removeSearchableForVideo } from "./search";
+import { internal } from "./_generated/api";
+import { prefEnabled, resolveUserEmail } from "./notifications";
 
 const workflowStatusValidator = v.union(
   v.literal("review"),
@@ -1067,6 +1069,7 @@ export const markAsReady = internalMutation({
     thumbnailUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const before = await ctx.db.get(args.videoId);
     await ctx.db.patch(args.videoId, {
       muxAssetId: args.muxAssetId,
       muxPlaybackId: args.muxPlaybackId,
@@ -1076,6 +1079,40 @@ export const markAsReady = internalMutation({
       uploadError: undefined,
       status: "ready",
     });
+
+    // "Long upload finished" email — only if it took >5min, the
+    // uploader opted in, and we can resolve their address. Best-effort,
+    // no-ops without RESEND_API_KEY/APP_URL.
+    try {
+      if (before && before.status !== "ready") {
+        const elapsed = Date.now() - before._creationTime;
+        if (
+          elapsed > 5 * 60 * 1000 &&
+          (await prefEnabled(
+            ctx,
+            before.uploadedByClerkId,
+            "uploadFinished",
+          ))
+        ) {
+          const to = await resolveUserEmail(ctx, before.uploadedByClerkId);
+          const project = await ctx.db.get(before.projectId);
+          const team = project ? await ctx.db.get(project.teamId) : null;
+          if (to && project && team) {
+            await ctx.scheduler.runAfter(
+              0,
+              internal.email.sendUploadFinished,
+              {
+                to,
+                videoTitle: before.title,
+                path: `/dashboard/${team.slug}/${before.projectId}/${args.videoId}`,
+              },
+            );
+          }
+        }
+      }
+    } catch (e) {
+      console.error("upload-finished notification failed", e);
+    }
   },
 });
 
@@ -1157,6 +1194,17 @@ export const setMuxPreviewPlaybackId = internalMutation({
     await ctx.db.patch(args.videoId, {
       muxPreviewPlaybackId: args.muxPreviewPlaybackId,
       muxPreviewAssetStatus: "ready",
+    });
+  },
+});
+
+export const setMuxPreviewAssetErrored = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      muxPreviewAssetStatus: "errored",
     });
   },
 });

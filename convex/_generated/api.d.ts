@@ -33,6 +33,7 @@ import type * as imagePreview from "../imagePreview.js";
 import type * as itemVersions from "../itemVersions.js";
 import type * as mux from "../mux.js";
 import type * as muxActions from "../muxActions.js";
+import type * as notifications from "../notifications.js";
 import type * as payments from "../payments.js";
 import type * as paymentsActions from "../paymentsActions.js";
 import type * as projectVersions from "../projectVersions.js";
@@ -88,6 +89,7 @@ declare const fullApi: ApiFromModules<{
   itemVersions: typeof itemVersions;
   mux: typeof mux;
   muxActions: typeof muxActions;
+  notifications: typeof notifications;
   payments: typeof payments;
   paymentsActions: typeof paymentsActions;
   projectVersions: typeof projectVersions;
