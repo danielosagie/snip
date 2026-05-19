@@ -64,7 +64,17 @@ export function getMuxClient(): Mux {
 export async function createMuxAssetFromInputUrl(videoId: string, inputUrl: string) {
   const mux = getMuxClient();
   return await mux.video.assets.create({
-    inputs: [{ url: inputUrl }],
+    inputs: [
+      { url: inputUrl },
+      // Mux auto-transcribes the audio into a WebVTT text track so the
+      // *spoken content* of the video becomes searchable (indexed via
+      // the video.asset.track.ready webhook). Part of Mux — no extra API.
+      {
+        generated_subtitles: [
+          { language_code: "en", name: "English (auto)" },
+        ],
+      },
+    ],
     playback_policies: ["public"],
     video_quality: "basic",
     // Mux currently supports 1080p as the lowest adaptive streaming max tier.
@@ -72,6 +82,41 @@ export async function createMuxAssetFromInputUrl(videoId: string, inputUrl: stri
     mp4_support: "none",
     passthrough: videoId,
   });
+}
+
+/**
+ * Add a Mux auto-generated English subtitle/transcript track to an
+ * already-ingested asset. Used to backfill transcription for videos that
+ * predate generated_subtitles being requested at create time.
+ */
+export async function addGeneratedSubtitles(assetId: string) {
+  // The SDK's AssetCreateTrackParams (v12) has no `generated_subtitles`
+  // field even though the REST endpoint supports it, so call the API
+  // directly with Basic auth.
+  const auth = btoa(
+    `${requireEnv("MUX_TOKEN_ID")}:${requireEnv("MUX_TOKEN_SECRET")}`,
+  );
+  const resp = await fetch(
+    `https://api.mux.com/video/v1/assets/${assetId}/tracks`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+      body: JSON.stringify({
+        generated_subtitles: [
+          { language_code: "en", name: "English (auto)" },
+        ],
+      }),
+    },
+  );
+  if (!resp.ok) {
+    throw new Error(
+      `Mux addGeneratedSubtitles ${resp.status}: ${(await resp.text()).slice(0, 200)}`,
+    );
+  }
+  return await resp.json();
 }
 
 /**

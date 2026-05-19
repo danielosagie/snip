@@ -748,6 +748,7 @@ export default defineSchema({
       v.literal("document"),
       v.literal("comment"),
       v.literal("frame"),
+      v.literal("transcript"),
     ),
     // Stable identity of the source row (videoId / projectId / commentId
     // / `${videoId}:${frameSec}`) so dual-writes can upsert in place.

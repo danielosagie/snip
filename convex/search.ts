@@ -22,7 +22,7 @@ import { requireUser, requireProjectAccess } from "./auth";
  * last term. One `searchField` ("text"); we pack title + body into it.
  */
 
-type Kind = "video" | "document" | "comment" | "frame";
+type Kind = "video" | "document" | "comment" | "frame" | "transcript";
 
 export function stripHtml(html: string | undefined | null): string {
   if (!html) return "";
@@ -130,6 +130,7 @@ export const getVideoForFrameCaption = internalQuery({
       .collect();
     return {
       muxPlaybackId: video.muxPlaybackId ?? null,
+      muxAssetId: video.muxAssetId ?? null,
       duration: video.duration ?? null,
       status: video.status,
       title: video.title,
@@ -178,6 +179,32 @@ export const indexFrameCaption = internalMutation({
       title: `${video.title} @ ${mmss(args.sec)}`,
       contextLabel: `${project.name} · ${video.title} · frame ${mmss(args.sec)}`,
       text: args.caption,
+    });
+  },
+});
+
+/** Internal mutation the (Node) transcript action calls per ~window of
+ *  spoken audio, so the actual words said in the video are searchable. */
+export const indexTranscriptCue = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    sec: v.number(),
+    text: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video || video.deletedAt) return;
+    const project = await ctx.db.get(video.projectId);
+    if (!project) return;
+    await indexSearchable(ctx, {
+      kind: "transcript",
+      refId: `${args.videoId}:t:${Math.round(args.sec)}`,
+      teamId: project.teamId,
+      projectId: video.projectId,
+      videoId: args.videoId,
+      title: `${video.title} — said @ ${mmss(args.sec)}`,
+      contextLabel: `${project.name} · ${video.title} · transcript ${mmss(args.sec)}`,
+      text: args.text,
     });
   },
 });

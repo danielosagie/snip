@@ -16,6 +16,10 @@ type MuxData = {
   asset_id?: string;
   passthrough?: string;
   duration?: number;
+  // Track events (video.asset.track.ready) — `id` is the track id.
+  type?: string;
+  text_type?: string;
+  status?: string;
   errors?: Array<{ message?: string }>;
   error?: { message?: string };
   playback_ids?: Array<{ id?: string; policy?: string }>;
@@ -287,6 +291,39 @@ export const processWebhook = internalAction({
             playbackId,
           });
 
+          break;
+        }
+
+        case "video.asset.track.ready": {
+          // Mux finished auto-transcribing the audio. Index the spoken
+          // content so the *actual content* of the video is searchable.
+          const trackType = asString(data.type);
+          if (trackType !== "text") break;
+          const trackId = asString(data.id);
+          const assetId = asString(data.asset_id);
+          if (!trackId || !assetId) {
+            console.error("Mux track.ready missing track/asset id", {
+              ...eventSummary,
+            });
+            break;
+          }
+          const resolved = await resolveVideoIdFromMuxRefs(ctx, {
+            ...data,
+            asset_id: assetId,
+            id: assetId,
+          });
+          if (!resolved || resolved.isPreview) break;
+          await ctx.scheduler.runAfter(
+            0,
+            internal.transcripts.indexTranscript,
+            { videoId: resolved.videoId, trackId },
+          );
+          console.log("Scheduled transcript indexing", {
+            eventType,
+            videoId: resolved.videoId,
+            assetId,
+            trackId,
+          });
           break;
         }
 

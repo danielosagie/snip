@@ -46,6 +46,7 @@ import type * as stripeConnect from "../stripeConnect.js";
 import type * as stripeConnectActions from "../stripeConnectActions.js";
 import type * as teams from "../teams.js";
 import type * as timelines from "../timelines.js";
+import type * as transcripts from "../transcripts.js";
 import type * as videoActions from "../videoActions.js";
 import type * as videoPresence from "../videoPresence.js";
 import type * as videos from "../videos.js";
@@ -99,6 +100,7 @@ declare const fullApi: ApiFromModules<{
   stripeConnectActions: typeof stripeConnectActions;
   teams: typeof teams;
   timelines: typeof timelines;
+  transcripts: typeof transcripts;
   videoActions: typeof videoActions;
   videoPresence: typeof videoPresence;
   videos: typeof videos;
