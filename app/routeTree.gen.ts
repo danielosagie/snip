@@ -13,6 +13,7 @@ import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as MonoRouteImport } from './routes/mono'
+import { Route as ConnectDesktopRouteImport } from './routes/connect-desktop'
 import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
@@ -58,6 +59,11 @@ const PricingRoute = PricingRouteImport.update({
 const MonoRoute = MonoRouteImport.update({
   id: '/mono',
   path: '/mono',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectDesktopRoute = ConnectDesktopRouteImport.update({
+  id: '/connect-desktop',
+  path: '/connect-desktop',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRouteRoute = DashboardRouteRouteImport.update({
@@ -202,6 +208,7 @@ const DashboardTeamSlugProjectIdVideoIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteRouteWithChildren
+  '/connect-desktop': typeof ConnectDesktopRoute
   '/mono': typeof MonoRoute
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
@@ -233,6 +240,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/connect-desktop': typeof ConnectDesktopRoute
   '/mono': typeof MonoRoute
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
@@ -263,6 +271,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteRouteWithChildren
+  '/connect-desktop': typeof ConnectDesktopRoute
   '/mono': typeof MonoRoute
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
@@ -297,6 +306,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/connect-desktop'
     | '/mono'
     | '/pricing'
     | '/sign-in'
@@ -328,6 +338,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/connect-desktop'
     | '/mono'
     | '/pricing'
     | '/sign-in'
@@ -357,6 +368,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/connect-desktop'
     | '/mono'
     | '/pricing'
     | '/sign-in'
@@ -390,6 +402,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRouteRoute: typeof DashboardRouteRouteWithChildren
+  ConnectDesktopRoute: typeof ConnectDesktopRoute
   MonoRoute: typeof MonoRoute
   PricingRoute: typeof PricingRoute
   SignInRoute: typeof SignInRouteWithChildren
@@ -432,6 +445,13 @@ declare module '@tanstack/react-router' {
       path: '/mono'
       fullPath: '/mono'
       preLoaderRoute: typeof MonoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connect-desktop': {
+      id: '/connect-desktop'
+      path: '/connect-desktop'
+      fullPath: '/connect-desktop'
+      preLoaderRoute: typeof ConnectDesktopRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -588,18 +608,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardTeamSlugProjectIdIndexRouteImport
       parentRoute: typeof DashboardTeamSlugProjectIdRoute
     }
-    '/dashboard/$teamSlug/settings/folders': {
-      id: '/dashboard/$teamSlug/settings/folders'
-      path: '/folders'
-      fullPath: '/dashboard/$teamSlug/settings/folders'
-      preLoaderRoute: typeof DashboardTeamSlugSettingsFoldersRouteImport
-      parentRoute: typeof DashboardTeamSlugSettingsRoute
-    }
     '/dashboard/$teamSlug/settings/payouts': {
       id: '/dashboard/$teamSlug/settings/payouts'
       path: '/payouts'
       fullPath: '/dashboard/$teamSlug/settings/payouts'
       preLoaderRoute: typeof DashboardTeamSlugSettingsPayoutsRouteImport
+      parentRoute: typeof DashboardTeamSlugSettingsRoute
+    }
+    '/dashboard/$teamSlug/settings/folders': {
+      id: '/dashboard/$teamSlug/settings/folders'
+      path: '/folders'
+      fullPath: '/dashboard/$teamSlug/settings/folders'
+      preLoaderRoute: typeof DashboardTeamSlugSettingsFoldersRouteImport
       parentRoute: typeof DashboardTeamSlugSettingsRoute
     }
     '/dashboard/$teamSlug/$projectId/contract': {
@@ -719,6 +739,7 @@ const SignUpRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRouteRoute: DashboardRouteRouteWithChildren,
+  ConnectDesktopRoute: ConnectDesktopRoute,
   MonoRoute: MonoRoute,
   PricingRoute: PricingRoute,
   SignInRoute: SignInRouteWithChildren,

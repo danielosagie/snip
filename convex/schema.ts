@@ -762,4 +762,34 @@ export default defineSchema({
       searchField: "text",
       filterFields: ["teamId", "kind"],
     }),
+
+  /**
+   * Desktop device-pairing. The desktop app generates a high-entropy
+   * `code`, opens the web app's /connect-desktop?code=… (where the user
+   * is signed in via Clerk), and polls. The web page approves: we mint a
+   * single-use Clerk *sign-in token* for the signed-in user and stash it
+   * here. The desktop polls once more, receives the sign-in token + the
+   * storage bootstrap, redeems the ticket with Clerk JS to establish its
+   * own durable session, and never touches credentials again.
+   *
+   * Rows are short-lived (10-min expiry) and single-use — the sign-in
+   * token is cleared the moment the desktop reads it.
+   */
+  desktopPairings: defineTable({
+    code: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("consumed"),
+      v.literal("expired"),
+    ),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    deviceLabel: v.optional(v.string()),
+    userClerkId: v.optional(v.string()),
+    userName: v.optional(v.string()),
+    // One-time Clerk sign-in token — present only between approve and the
+    // desktop's next poll, then nulled.
+    signInToken: v.optional(v.string()),
+  }).index("by_code", ["code"]),
 });

@@ -1,38 +1,48 @@
 import { ConvexClient } from "convex/browser";
 import { useEffect, useMemo, useState } from "react";
+import { CONVEX_URL } from "./config";
 
 /**
- * Minimal Convex client wrapper for the desktop app. The user pastes their
- * Convex deployment URL + a Clerk session token (from the web app) and we
- * point this client at that deployment with that auth.
- *
- * For v1 the auth token is just a static string the user pastes. Future
- * improvement: deep-link from the web app's "Generate desktop token" page.
+ * Convex client wired to the desktop's own Clerk session. Pass a token
+ * getter (Clerk's `getToken({ template: "convex" })`); Convex calls it on
+ * its own refresh cycle, so auth stays live for as long as the Clerk
+ * session does — no pasted, expiring tokens. The deployment URL is baked
+ * in (config.ts), never typed.
  */
 
-export function useConvexClient(url: string, authToken: string) {
+export function useConvexClient(
+  getToken: (() => Promise<string | null>) | null,
+  // Advanced/self-host escape hatch: a manually pasted token used only
+  // when there's no Clerk session.
+  fallbackToken?: string,
+) {
   const client = useMemo(() => {
-    if (!url) return null;
     try {
-      return new ConvexClient(url);
+      return new ConvexClient(CONVEX_URL);
     } catch {
       return null;
     }
-  }, [url]);
+  }, []);
 
   useEffect(() => {
     if (!client) return;
-    if (authToken) {
-      client.setAuth(async () => authToken);
+    if (getToken) {
+      client.setAuth(async () => {
+        try {
+          return await getToken();
+        } catch {
+          return null;
+        }
+      });
+    } else if (fallbackToken) {
+      client.setAuth(async () => fallbackToken);
     } else {
-      // No token configured yet — leave auth unset; queries will run as
-      // anonymous and most will return empty results.
       client.setAuth(async () => null);
     }
     return () => {
       client.close();
     };
-  }, [client, authToken]);
+  }, [client, getToken, fallbackToken]);
 
   return client;
 }

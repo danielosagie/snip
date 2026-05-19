@@ -13,9 +13,12 @@
  * and demotes manual entry to a real "Advanced" escape hatch.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { useSignIn } from "@clerk/clerk-react";
 import { api, DesktopSettings, MountPrereqs, MountState } from "./api";
+import { runPairing, PairingStorage } from "./pairing";
+import { CONVEX_URL } from "./config";
 import { C, mono, Wordmark, Eyebrow, Field, Pill, Banner, Glyph, Square } from "./ui";
 
 type Step = "connect" | "prereqs" | "mount" | "done";
@@ -29,10 +32,11 @@ const STEPS: { id: Step; label: string }[] = [
 interface Props {
   settings: DesktopSettings;
   onChange: (next: DesktopSettings) => Promise<void>;
+  isSignedIn: boolean;
   onDone: () => void;
 }
 
-export function Onboarding({ settings, onChange, onDone }: Props) {
+export function Onboarding({ settings, onChange, isSignedIn, onDone }: Props) {
   const [step, setStep] = useState<Step>("connect");
   const [draft, setDraft] = useState<DesktopSettings>(settings);
   const [saving, setSaving] = useState(false);
@@ -49,12 +53,7 @@ export function Onboarding({ settings, onChange, onDone }: Props) {
   }, []);
 
   const connectComplete = Boolean(
-    draft.convexUrl &&
-      draft.convexAuthToken &&
-      draft.storage.bucket &&
-      draft.storage.endpoint &&
-      draft.storage.accessKeyId &&
-      draft.storage.secretAccessKey,
+    isSignedIn && draft.storage.bucket && draft.storage.accessKeyId,
   );
   const hasPrereqs = Boolean(prereqs?.rclone && prereqs?.fuse);
   const isMounted = mount?.status === "mounted";
@@ -91,6 +90,25 @@ export function Onboarding({ settings, onChange, onDone }: Props) {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Pairing delivered the bucket bootstrap — fold it into settings.
+  const commitStorage = async (s: PairingStorage) => {
+    const next: DesktopSettings = {
+      ...draft,
+      convexUrl: CONVEX_URL,
+      storage: {
+        ...draft.storage,
+        provider: s.provider,
+        bucket: s.bucket,
+        endpoint: s.endpoint,
+        accessKeyId: s.accessKeyId,
+        secretAccessKey: s.secretAccessKey,
+        region: s.region,
+      },
+    };
+    setDraft(next);
+    await onChange(next);
   };
 
   const advance = async () => {
@@ -173,7 +191,12 @@ export function Onboarding({ settings, onChange, onDone }: Props) {
       >
         <div style={{ width: "100%", maxWidth: 620 }}>
           {step === "connect" ? (
-            <ConnectStep draft={draft} setDraft={setDraft} />
+            <ConnectStep
+              draft={draft}
+              setDraft={setDraft}
+              isSignedIn={isSignedIn}
+              commitStorage={commitStorage}
+            />
           ) : step === "prereqs" ? (
             <PrereqStep prereqs={prereqs} onRecheck={recheck} />
           ) : step === "mount" ? (
@@ -375,19 +398,78 @@ function StepHead({
   );
 }
 
+type ConnectPhase = "idle" | "pairing" | "redeeming" | "done" | "error";
+
 function ConnectStep({
   draft,
   setDraft,
+  isSignedIn,
+  commitStorage,
 }: {
   draft: DesktopSettings;
   setDraft: (fn: (d: DesktopSettings) => DesktopSettings) => void;
+  isSignedIn: boolean;
+  commitStorage: (s: PairingStorage) => Promise<void>;
 }) {
-  const set = <K extends keyof DesktopSettings>(k: K, v: DesktopSettings[K]) =>
-    setDraft((d) => ({ ...d, [k]: v }));
+  const { signIn, setActive, isLoaded: clerkLoaded } = useSignIn();
+  const [phase, setPhase] = useState<ConnectPhase>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [openedUrl, setOpenedUrl] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  const cancelRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+
+  const alreadyConnected =
+    isSignedIn && Boolean(draft.storage.bucket && draft.storage.accessKeyId);
+
   const setS = <K extends keyof DesktopSettings["storage"]>(
     k: K,
     v: DesktopSettings["storage"][K],
   ) => setDraft((d) => ({ ...d, storage: { ...d.storage, [k]: v } }));
+  const set = <K extends keyof DesktopSettings>(k: K, v: DesktopSettings[K]) =>
+    setDraft((d) => ({ ...d, [k]: v }));
+
+  const handleConnect = async () => {
+    setError(null);
+    setOpenedUrl(null);
+    setPhase("pairing");
+    cancelRef.current = { cancelled: false };
+    try {
+      const result = await runPairing({
+        deviceLabel:
+          typeof navigator !== "undefined" && navigator.platform
+            ? `snip desktop · ${navigator.platform}`
+            : "snip desktop",
+        onOpened: (u) => setOpenedUrl(u),
+        signal: cancelRef.current,
+      });
+
+      setPhase("redeeming");
+      if (!clerkLoaded || !signIn) {
+        throw new Error("Auth not ready — try again in a moment.");
+      }
+      const res = await signIn.create({
+        strategy: "ticket",
+        ticket: result.signInToken,
+      });
+      if (res.status !== "complete" || !res.createdSessionId) {
+        throw new Error("Could not establish a session from the sign-in.");
+      }
+      await setActive({ session: res.createdSessionId });
+
+      if (result.storage) {
+        await commitStorage(result.storage);
+      }
+      setPhase("done");
+    } catch (e) {
+      setPhase("error");
+      setError(e instanceof Error ? e.message : "Connection failed.");
+    }
+  };
+
+  const cancel = () => {
+    cancelRef.current.cancelled = true;
+    setPhase("idle");
+  };
 
   return (
     <div>
@@ -396,113 +478,185 @@ function ConnectStep({
       </div>
       <StepHead
         eyebrow="Step 1 — Connect"
-        title="Bring your drive online."
+        title={
+          alreadyConnected || phase === "done"
+            ? "Account connected."
+            : "Sign in to snip."
+        }
         blurb={
           <>
             snip streams your team's cloud bucket as a real Mac volume, so
             Finder, Premiere, and Resolve see project files natively — no
-            manual pulls.
+            manual pulls. One click connects this machine to your account —
+            nothing to copy or paste.
           </>
         }
       />
 
-      <Banner tone="accent">
-        <strong>One-click sign-in is on the way.</strong> For now, connect
-        with the deployment URL, session token, and bucket credentials from
-        the snip web app — a future build pairs automatically when you sign
-        in.
-      </Banner>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 18 }}>
-        <Field
-          label="Convex deployment URL"
-          hint="From the web app environment — e.g. https://your-app.convex.cloud"
-        >
-          <input
-            type="url"
-            placeholder="https://your-app.convex.cloud"
-            value={draft.convexUrl}
-            onChange={(e) => set("convexUrl", e.target.value.trim())}
-            style={{ width: "100%" }}
-          />
-        </Field>
-        <Field
-          label="Session token"
-          hint="Clerk session JWT copied from the signed-in web app."
-        >
-          <textarea
-            placeholder="eyJhbGc…"
-            rows={3}
-            value={draft.convexAuthToken}
-            onChange={(e) => set("convexAuthToken", e.target.value.trim())}
-            style={{ width: "100%", resize: "vertical", fontFamily: mono, fontSize: 11 }}
-          />
-        </Field>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 14,
-          }}
-        >
-          <Field label="Storage provider">
-            <select
-              value={draft.storage.provider}
-              onChange={(e) =>
-                setS("provider", e.target.value as "r2" | "railway")
-              }
-              style={{ width: "100%" }}
+      {alreadyConnected || phase === "done" ? (
+        <Banner tone="ok">
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <Glyph name="check" size={15} />
+            Connected. Continue to set up your drive.
+          </span>
+        </Banner>
+      ) : phase === "pairing" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Banner tone="accent">
+            Approve this device in your browser. We opened the snip web app —
+            sign in there if needed, and it'll connect back automatically.
+          </Banner>
+          {openedUrl ? (
+            <div
+              style={{
+                fontFamily: mono,
+                fontSize: 11,
+                color: C.muted,
+                wordBreak: "break-all",
+              }}
             >
-              <option value="r2">Cloudflare R2</option>
-              <option value="railway">Railway S3</option>
-            </select>
-          </Field>
-          <Field label="Region">
-            <input
-              value={draft.storage.region}
-              onChange={(e) => setS("region", e.target.value.trim())}
-              placeholder={draft.storage.provider === "r2" ? "auto" : "us-east-1"}
-              style={{ width: "100%" }}
-            />
-          </Field>
+              {openedUrl}
+            </div>
+          ) : null}
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Pill tone="neutral">Waiting for approval…</Pill>
+            <button className="ghost" onClick={cancel}>
+              Cancel
+            </button>
+          </div>
         </div>
-        <Field label="Bucket name">
-          <input
-            value={draft.storage.bucket}
-            onChange={(e) => setS("bucket", e.target.value.trim())}
-            style={{ width: "100%" }}
-          />
-        </Field>
-        <Field label="Endpoint URL">
-          <input
-            value={draft.storage.endpoint}
-            placeholder={
-              draft.storage.provider === "r2"
-                ? "https://<account>.r2.cloudflarestorage.com"
-                : "https://bucket-production.up.railway.app"
-            }
-            onChange={(e) => setS("endpoint", e.target.value.trim())}
-            style={{ width: "100%" }}
-          />
-        </Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <Field label="Access key ID">
-            <input
-              value={draft.storage.accessKeyId}
-              onChange={(e) => setS("accessKeyId", e.target.value.trim())}
-              style={{ width: "100%" }}
-            />
-          </Field>
-          <Field label="Secret access key">
-            <input
-              type="password"
-              value={draft.storage.secretAccessKey}
-              onChange={(e) => setS("secretAccessKey", e.target.value.trim())}
-              style={{ width: "100%" }}
-            />
-          </Field>
+      ) : phase === "redeeming" ? (
+        <Banner tone="accent">Finishing sign-in…</Banner>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <button
+            className="primary"
+            onClick={() => void handleConnect()}
+            style={{ alignSelf: "flex-start" }}
+          >
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
+              Connect snip account
+              <Glyph name="external" size={15} />
+            </span>
+          </button>
+          {phase === "error" && error ? (
+            <Banner tone="danger">{error}</Banner>
+          ) : null}
         </div>
+      )}
+
+      {/* Advanced escape hatch — self-host / debugging only. */}
+      <div style={{ marginTop: 28 }}>
+        <button
+          className="ghost"
+          onClick={() => setAdvanced((v) => !v)}
+          style={{ fontSize: 12 }}
+        >
+          {advanced ? "Hide advanced" : "Advanced — connect manually"}
+        </button>
+        {advanced ? (
+          <div
+            style={{
+              marginTop: 14,
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+              border: `2px solid ${C.border}`,
+              padding: 16,
+            }}
+          >
+            <p style={{ fontSize: 12, color: C.muted, margin: 0, lineHeight: 1.5 }}>
+              For self-hosted deployments. Paste a Convex session token and
+              bucket credentials instead of pairing.
+            </p>
+            <Field label="Convex deployment URL">
+              <input
+                type="url"
+                placeholder="https://your-app.convex.cloud"
+                value={draft.convexUrl}
+                onChange={(e) => set("convexUrl", e.target.value.trim())}
+                style={{ width: "100%" }}
+              />
+            </Field>
+            <Field label="Session token">
+              <textarea
+                placeholder="eyJhbGc…"
+                rows={3}
+                value={draft.convexAuthToken}
+                onChange={(e) => set("convexAuthToken", e.target.value.trim())}
+                style={{
+                  width: "100%",
+                  resize: "vertical",
+                  fontFamily: mono,
+                  fontSize: 11,
+                }}
+              />
+            </Field>
+            <div
+              style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}
+            >
+              <Field label="Storage provider">
+                <select
+                  value={draft.storage.provider}
+                  onChange={(e) =>
+                    setS("provider", e.target.value as "r2" | "railway")
+                  }
+                  style={{ width: "100%" }}
+                >
+                  <option value="r2">Cloudflare R2</option>
+                  <option value="railway">Railway S3</option>
+                </select>
+              </Field>
+              <Field label="Region">
+                <input
+                  value={draft.storage.region}
+                  onChange={(e) => setS("region", e.target.value.trim())}
+                  placeholder={
+                    draft.storage.provider === "r2" ? "auto" : "us-east-1"
+                  }
+                  style={{ width: "100%" }}
+                />
+              </Field>
+            </div>
+            <Field label="Bucket name">
+              <input
+                value={draft.storage.bucket}
+                onChange={(e) => setS("bucket", e.target.value.trim())}
+                style={{ width: "100%" }}
+              />
+            </Field>
+            <Field label="Endpoint URL">
+              <input
+                value={draft.storage.endpoint}
+                onChange={(e) => setS("endpoint", e.target.value.trim())}
+                style={{ width: "100%" }}
+              />
+            </Field>
+            <div
+              style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}
+            >
+              <Field label="Access key ID">
+                <input
+                  value={draft.storage.accessKeyId}
+                  onChange={(e) => setS("accessKeyId", e.target.value.trim())}
+                  style={{ width: "100%" }}
+                />
+              </Field>
+              <Field label="Secret access key">
+                <input
+                  type="password"
+                  value={draft.storage.secretAccessKey}
+                  onChange={(e) =>
+                    setS("secretAccessKey", e.target.value.trim())
+                  }
+                  style={{ width: "100%" }}
+                />
+              </Field>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

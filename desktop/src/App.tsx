@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "@clerk/clerk-react";
 import { api, DesktopSettings, SyncProgress } from "./api";
 import { useConvexClient, useConvexQuery, callMutation } from "./useConvex";
 import { SettingsView } from "./SettingsView";
@@ -7,6 +8,7 @@ import { ProjectDetail } from "./ProjectDetail";
 import { MountView } from "./MountView";
 import { Onboarding } from "./Onboarding";
 import { C, mono, Wordmark } from "./ui";
+import { CONVEX_URL } from "./config";
 
 type Tab = "projects" | "mount" | "settings";
 
@@ -15,28 +17,56 @@ export function App() {
   const [tab, setTab] = useState<Tab>("projects");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
+  const { isLoaded: clerkLoaded, isSignedIn, getToken } = useAuth();
+
   useEffect(() => {
     void api.settings.get().then(setSettings);
   }, []);
 
+  // Convex auth flows from the desktop's own Clerk session.
+  const tokenGetter = useMemo(
+    () => (isSignedIn ? () => getToken({ template: "convex" }) : null),
+    [isSignedIn, getToken],
+  );
   const client = useConvexClient(
-    settings?.convexUrl ?? "",
-    settings?.convexAuthToken ?? "",
+    tokenGetter,
+    settings?.convexAuthToken || undefined,
   );
 
-  const isConfigured = Boolean(
-    settings?.convexUrl &&
-      settings?.convexAuthToken &&
-      settings?.storage.bucket &&
-      settings?.storage.accessKeyId,
-  );
+  // Bridge the live token to the main process once, so background loops
+  // (presence/prefetch) keep working. They're best-effort and tolerate a
+  // stale token; full background re-auth is a tracked follow-up.
+  useEffect(() => {
+    if (!isSignedIn || !settings) return;
+    let done = false;
+    void (async () => {
+      const t = await getToken({ template: "convex" }).catch(() => null);
+      if (done || !t) return;
+      if (settings.convexAuthToken === t && settings.convexUrl === CONVEX_URL)
+        return;
+      const next = { ...settings, convexUrl: CONVEX_URL, convexAuthToken: t };
+      const saved = await api.settings.set(next);
+      setSettings(saved);
+    })();
+    return () => {
+      done = true;
+    };
+  }, [isSignedIn, settings, getToken]);
 
-  const persist = async (next: DesktopSettings) => {
+  const persist = useCallback(async (next: DesktopSettings) => {
     const saved = await api.settings.set(next);
     setSettings(saved);
-  };
+  }, []);
 
-  if (!settings) {
+  // Storage creds arrive from pairing. Configured = an auth path
+  // (Clerk session, or a manually pasted token via Advanced) + storage.
+  const storageReady = Boolean(
+    settings?.storage.bucket && settings?.storage.accessKeyId,
+  );
+  const hasManualToken = Boolean(settings?.convexAuthToken);
+  const isConfigured = Boolean((isSignedIn || hasManualToken) && storageReady);
+
+  if (!settings || !clerkLoaded) {
     return (
       <div
         style={{
@@ -63,12 +93,12 @@ export function App() {
     );
   }
 
-  // First run → the full-screen guided flow, not a settings dump.
   if (!isConfigured) {
     return (
       <Onboarding
         settings={settings}
         onChange={persist}
+        isSignedIn={Boolean(isSignedIn)}
         onDone={() => setTab("mount")}
       />
     );
