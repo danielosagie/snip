@@ -1122,11 +1122,37 @@ export const markAsFailed = internalMutation({
     uploadError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const before = await ctx.db.get(args.videoId);
     await ctx.db.patch(args.videoId, {
       muxAssetStatus: "errored",
       uploadError: args.uploadError,
       status: "failed",
     });
+
+    // Always notify the uploader on failure (sparse, system-state event
+    // — not gated by the chatty "Upload completion" pref). Best-effort,
+    // no-ops without RESEND_API_KEY/APP_URL.
+    try {
+      if (before && before.uploadedByClerkId) {
+        const to = await resolveUserEmail(ctx, before.uploadedByClerkId);
+        const project = await ctx.db.get(before.projectId);
+        const team = project ? await ctx.db.get(project.teamId) : null;
+        if (to && project && team) {
+          await ctx.scheduler.runAfter(
+            0,
+            internal.email.sendUploadFailed,
+            {
+              to,
+              videoTitle: before.title,
+              errorMessage: args.uploadError,
+              path: `/dashboard/${team.slug}/${before.projectId}/${args.videoId}`,
+            },
+          );
+        }
+      }
+    } catch (e) {
+      console.error("upload-failed notification failed", e);
+    }
   },
 });
 

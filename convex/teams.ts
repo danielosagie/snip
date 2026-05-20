@@ -3,6 +3,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { getUser, identityAvatarUrl, identityEmail, identityName, requireUser, requireTeamAccess } from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
 import { internal } from "./_generated/api";
+import { resolveUserEmail } from "./notifications";
 
 function normalizedEmail(value: string) {
   return value.trim().toLowerCase();
@@ -324,6 +325,30 @@ export const acceptInvite = mutation({
     await ctx.db.delete(invite._id);
 
     const team = await ctx.db.get(invite.teamId);
+
+    // Notify the original inviter that the invite was accepted
+    // (best-effort, sparse — sent unconditionally when an email + URL
+    // are configured). No-ops without RESEND_API_KEY/APP_URL.
+    try {
+      if (team && invite.invitedByClerkId !== user.subject) {
+        const to = await resolveUserEmail(ctx, invite.invitedByClerkId);
+        if (to) {
+          await ctx.scheduler.runAfter(
+            0,
+            internal.email.sendInviteAccepted,
+            {
+              to,
+              accepterName: identityName(user),
+              teamName: team.name,
+              path: `/dashboard/${team.slug}`,
+            },
+          );
+        }
+      }
+    } catch (e) {
+      console.error("invite-accepted notification failed", e);
+    }
+
     return team;
   },
 });

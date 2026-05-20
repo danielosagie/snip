@@ -201,3 +201,57 @@ export const sendUploadFinished = internalAction({
     });
   },
 });
+
+export const sendUploadFailed = internalAction({
+  args: {
+    to: v.string(),
+    videoTitle: v.string(),
+    errorMessage: v.optional(v.string()),
+    path: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const link = linkOrSkip(args.path);
+    if (!link) return;
+    const subject = `Upload didn't process: "${args.videoTitle}"`;
+    const reason = args.errorMessage
+      ? ` Reason: ${args.errorMessage}.`
+      : "";
+    const text = `Your upload "${args.videoTitle}" failed to process.${reason}\n\nOpen: ${link}`;
+    await sendViaResend({
+      to: args.to,
+      subject,
+      text,
+      html: shell(
+        `<p style="margin:0 0 12px;">Your upload <strong>${args.videoTitle}</strong> failed to process.</p>` +
+          (args.errorMessage
+            ? `<p style="margin:0 0 16px;color:#888;font-size:13px;">${args.errorMessage}</p>`
+            : "") +
+          `<p style="margin:0 0 8px;">${button(link, "Open video")}</p>`,
+      ),
+    });
+  },
+});
+
+export const sendInviteAccepted = internalAction({
+  args: {
+    to: v.string(),
+    accepterName: v.string(),
+    teamName: v.string(),
+    path: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const link = linkOrSkip(args.path);
+    if (!link) return;
+    const subject = `${args.accepterName} joined ${args.teamName}`;
+    const text = `${args.accepterName} accepted your invite and joined "${args.teamName}".\n\nOpen team: ${link}`;
+    await sendViaResend({
+      to: args.to,
+      subject,
+      text,
+      html: shell(
+        `<p style="margin:0 0 16px;"><strong>${args.accepterName}</strong> accepted your invite and joined <strong>${args.teamName}</strong>.</p>` +
+          `<p style="margin:0 0 8px;">${button(link, "Open team")}</p>`,
+      ),
+    });
+  },
+});
