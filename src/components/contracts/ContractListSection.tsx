@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { FileSignature, Plus } from "lucide-react";
 
 interface ContractListSectionProps {
@@ -54,27 +54,32 @@ export function ContractListSection({
   canEdit,
 }: ContractListSectionProps) {
   const contracts = useQuery(api.contractsTable.list, { projectId });
+  // Legacy embedded contract (the wizard-backed singleton on
+  // projects.contract). Surfaced as a synthetic row at the top of the
+  // list so a project that pre-dates the multi-contract table still
+  // shows its contract here with folder-style tiles, instead of as a
+  // separate large file card in the grid.
+  const project = useQuery(api.projects.get, { projectId });
+  const legacyContract = project?.contract ?? null;
   const [createOpen, setCreateOpen] = useState(false);
 
-  if (contracts === undefined) {
+  if (contracts === undefined || project === undefined) {
     return null;
   }
-  if (contracts.length === 0 && !canEdit) {
+  const totalCount = contracts.length + (legacyContract ? 1 : 0);
+  if (totalCount === 0 && !canEdit) {
     return null;
   }
 
   return (
-    <div className="px-6 pt-6">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <FileSignature className="h-4 w-4 text-[#1a1a1a]" />
-          <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a]">
-            Contracts
-          </h3>
-          {contracts.length > 0 && (
-            <span className="text-[11px] font-mono font-bold text-[#C2410C]">
-              {contracts.length}
-            </span>
+    // Match FolderRow: dense top-padding, plain mono header, no
+    // shadow on the section container.
+    <section className="px-6 pt-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          Contracts
+          {totalCount > 0 && (
+            <span className="ml-2 text-[#C2410C]">{totalCount}</span>
           )}
         </div>
         {canEdit && (
@@ -96,49 +101,89 @@ export function ContractListSection({
         )}
       </div>
 
-      {contracts.length === 0 ? (
+      {totalCount === 0 ? (
         <div className="border-2 border-dashed border-[#1a1a1a]/30 bg-[#f0f0e8] p-6 text-center text-sm text-[#888]">
           No contracts yet. Click <span className="font-bold">New contract</span> to draft one.
         </div>
       ) : (
-        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {contracts.map((c) => (
+        // Folder-tile parity: dense horizontal rows, 2px border, no
+        // drop-shadow, single FileSignature icon on the left, name +
+        // subline of meta on the right. Click navigates to the editor.
+        <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+          {legacyContract ? (
             <Link
-              key={c._id}
-              to={contractPath(teamSlug, projectId, c._id)}
-              className="block border-2 border-[#1a1a1a] bg-[#f0f0e8] p-4 shadow-[4px_4px_0px_0px_#1a1a1a] hover:bg-[#FFEDD5] hover:-translate-y-[1px] hover:-translate-x-[1px] hover:shadow-[5px_5px_0px_0px_#1a1a1a] transition-all"
+              to={`/dashboard/${teamSlug}/${projectId}/contract`}
+              className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
             >
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-0.5">
-                    {KIND_LABELS[c.kind] ?? c.kind}
-                  </div>
-                  <div className="text-sm font-black tracking-tight text-[#1a1a1a] truncate">
+              <FileSignature
+                className="h-5 w-5 flex-shrink-0 text-[#888]"
+                strokeWidth={1.75}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-[#1a1a1a] truncate">
+                  {project?.name ?? "Contract"}
+                </div>
+                <div className="text-[10px] font-mono text-[#888] truncate">
+                  {legacyContract.clientName
+                    ? `Client: ${legacyContract.clientName}`
+                    : "Statement of work"}
+                </div>
+              </div>
+              <span
+                className={cn(
+                  "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
+                  legacyContract.signedAt
+                    ? STATUS_STYLES.completed
+                    : legacyContract.sentForSignatureAt
+                      ? STATUS_STYLES.pending
+                      : STATUS_STYLES.draft,
+                )}
+              >
+                {legacyContract.signedAt
+                  ? "signed"
+                  : legacyContract.sentForSignatureAt
+                    ? "sent"
+                    : "draft"}
+              </span>
+            </Link>
+          ) : null}
+          {contracts.map((c) => {
+            const meta =
+              c.recipientCount > 0
+                ? `${c.signedCount}/${c.recipientCount} signed`
+                : KIND_LABELS[c.kind] ?? c.kind;
+            return (
+              <Link
+                key={c._id}
+                to={contractPath(teamSlug, projectId, c._id)}
+                className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
+              >
+                <FileSignature
+                  className="h-5 w-5 flex-shrink-0 text-[#888]"
+                  strokeWidth={1.75}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
                     {c.title}
+                  </div>
+                  <div className="text-[10px] font-mono text-[#888] truncate">
+                    {meta}
                   </div>
                 </div>
                 <span
                   className={cn(
-                    "shrink-0 inline-flex items-center px-2 py-0.5 border-2 text-[10px] font-bold uppercase tracking-wider bg-[#f0f0e8]",
+                    "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
                     STATUS_STYLES[c.status] ?? STATUS_STYLES.draft,
                   )}
                 >
                   {c.status}
                 </span>
-              </div>
-              <div className="flex items-center justify-between text-[11px] font-mono text-[#888]">
-                <span>
-                  {c.recipientCount > 0
-                    ? `${c.signedCount}/${c.recipientCount} signed`
-                    : "No recipients yet"}
-                </span>
-                <span>{formatRelativeTime(c.lastSavedAt ?? c._creationTime)}</span>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

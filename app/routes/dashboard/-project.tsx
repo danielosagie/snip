@@ -30,7 +30,6 @@ import {
 } from "@/components/projects/ProjectToolbar";
 import { ProjectAddButton } from "@/components/projects/ProjectAddButton";
 import { FolderRow } from "@/components/folders/FolderRow";
-import { ContractTile } from "@/components/contracts/ContractTile";
 import { ContractListSection } from "@/components/contracts/ContractListSection";
 import {
   DropdownMenu,
@@ -109,6 +108,26 @@ type VideoIntentTargetProps = {
   ) => void;
   children: ReactNode;
 };
+
+// Content types that have an in-app focused view (the asset detail
+// page). Click in the project grid → navigate to the editor view
+// instead of triggering a download. Everything else (zips, source
+// files, etc.) downloads on click as before.
+const DOC_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/x-markdown",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
+function computeHasFocusedView(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  if (contentType.startsWith("image/")) return true;
+  if (contentType.startsWith("text/")) return true;
+  return DOC_CONTENT_TYPES.has(contentType);
+}
 
 function VideoIntentTarget({
   className,
@@ -449,6 +468,50 @@ export default function ProjectPage({
     }, 2400);
   }, []);
 
+  // One-click "share whole project" — creates a fresh project-scoped
+  // bundle, wraps it in a default share link (no paywall, downloads
+  // off, no expiry), copies the URL to the clipboard, and surfaces a
+  // toast. The "set advanced options" flow is still per-video / per-
+  // folder; this is the quick-grab affordance the project root has
+  // been missing.
+  const createProjectBundle = useMutation(api.shareBundles.createForProject);
+  const createShareLinkForProject = useMutation(api.shareLinks.create);
+  const [isSharingProject, setIsSharingProject] = useState(false);
+  const handleShareProject = useCallback(async () => {
+    if (!resolvedProjectId || isSharingProject) return;
+    setIsSharingProject(true);
+    try {
+      const bundleId = await createProjectBundle({
+        projectId: resolvedProjectId,
+      });
+      const { token } = await createShareLinkForProject({
+        bundleId,
+        allowDownload: false,
+      });
+      const url = `${window.location.origin}/share/${token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        showShareToast("success", "Project share link copied");
+      } catch {
+        showShareToast("error", `Share link: ${url}`);
+      }
+    } catch (err) {
+      console.error("Failed to share project", err);
+      showShareToast(
+        "error",
+        err instanceof Error ? err.message : "Couldn't share project",
+      );
+    } finally {
+      setIsSharingProject(false);
+    }
+  }, [
+    createProjectBundle,
+    createShareLinkForProject,
+    isSharingProject,
+    resolvedProjectId,
+    showShareToast,
+  ]);
+
   const handleShareVideo = useCallback(
     async (video: {
       _id: Id<"videos">;
@@ -749,6 +812,20 @@ export default function ProjectPage({
               <span className="hidden sm:inline">Share folder</span>
             </button>
           ) : null}
+          {!currentFolderId && canUpload && resolvedProjectId ? (
+            <button
+              type="button"
+              onClick={() => void handleShareProject()}
+              disabled={isSharingProject}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] disabled:opacity-50 transition-colors flex-shrink-0"
+              title="Share the whole project — every file in every folder. Link is copied to your clipboard."
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">
+                {isSharingProject ? "Creating…" : "Share project"}
+              </span>
+            </button>
+          ) : null}
           {resolvedProjectId && canUpload ? (
             <ProjectAddButton
               projectId={resolvedProjectId}
@@ -853,9 +930,9 @@ export default function ProjectPage({
                 void handleMoveFolder(droppedId, targetId)
               }
             />
-            {/* Multi-contract list — sits above the file grid when at
-                project root. Hidden when the project has no contracts
-                AND the viewer can't create one. */}
+            {/* Contracts share folder-tile styling and sit alongside
+                them as the project's organizational/metadata strip.
+                Hidden when empty AND the viewer can't create one. */}
             {currentFolderId === null && (
               <ContractListSection
                 projectId={project._id}
@@ -870,19 +947,9 @@ export default function ProjectPage({
                 </div>
               ) : null}
               <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-              {/* Contract pinned to the front of the grid when at
-                  project root. Contracts live one-per-project today
-                  (not in a folder), so we only show the tile when
-                  the user isn't deep inside a folder. */}
-              {currentFolderId === null ? (
-                <ContractTile
-                  teamSlug={resolvedTeamSlug}
-                  projectId={project._id}
-                  projectName={project.name}
-                  contract={project.contract ?? null}
-                  canDelete={canUpload}
-                />
-              ) : null}
+              {/* The contract (legacy embedded + new multi-contracts) now
+                  renders in the folder-styled ContractListSection above
+                  the FolderRow. Keeping the file grid pure files. */}
               {filteredVideos?.map((video) => {
                 // Non-video assets (PDF, docs, images, source files) take
                 // a separate Drive-style tile — no thumbnail, no
@@ -896,9 +963,7 @@ export default function ProjectPage({
                   video.status === "uploading" ||
                   video.status === "processing";
                 if (!isPlayableVideo) {
-                  const hasFocusedView =
-                    (video.contentType?.startsWith("image/") ?? false) ||
-                    video.contentType === "application/pdf";
+                  const hasFocusedView = computeHasFocusedView(video.contentType);
                   return (
                     <FileTile
                       key={video._id}
@@ -1089,6 +1154,13 @@ export default function ProjectPage({
                 void handleMoveFolder(droppedId, targetId)
               }
             />
+            {currentFolderId === null && (
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                canEdit={canUpload}
+              />
+            )}
             <div className="divide-y-2 divide-[#1a1a1a]">
             {filteredVideos?.map((video) => {
               const isPlayableVideo =

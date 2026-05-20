@@ -96,6 +96,17 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
         setCreateError("Price must be at least $0.50.");
         return;
       }
+      // Server-side guard (requireRecipientIdentityForPaywall) refuses
+      // paywalled links without a recipient identity, since that's
+      // what the watermark + Stripe Checkout key off. Surface the same
+      // requirement here so the user gets an inline error instead of a
+      // generic "Server Error" wrapper.
+      if (!newLinkOptions.clientEmail.trim()) {
+        setCreateError(
+          "A client email is required for paywalled links — it's used in the watermark and pre-fills checkout.",
+        );
+        return;
+      }
       paywallArg = {
         priceCents: Math.round(dollars * 100),
         currency: newLinkOptions.currency || "usd",

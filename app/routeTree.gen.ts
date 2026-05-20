@@ -42,6 +42,7 @@ import { Route as DashboardTeamSlugProjectIdContractRouteImport } from './routes
 import { Route as DashboardTeamSlugProjectIdVideoIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.$videoId'
 import { Route as DashboardTeamSlugProjectIdContractContractIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract.$contractId'
 import { Route as SignTokenRouteImport } from './routes/sign.$token'
+import { Route as CTokenRouteImport } from './routes/c.$token'
 
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
@@ -650,6 +651,13 @@ declare module '@tanstack/react-router' {
       path: '/sign/$token'
       fullPath: '/sign/$token'
       preLoaderRoute: typeof SignTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/c/$token': {
+      id: '/c/$token'
+      path: '/c/$token'
+      fullPath: '/c/$token'
+      preLoaderRoute: typeof CTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
   }

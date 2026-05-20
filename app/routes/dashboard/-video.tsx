@@ -50,6 +50,108 @@ import { prewarmProject } from "./-project.data";
 import { prewarmTeam } from "./-team.data";
 import { useVideoData } from "./-video.data";
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Lightweight plaintext → HTML: blank-line-separated paragraphs, with
+// `<br>` inside each paragraph for inline newlines. Enough for log
+// files, README-style notes, and the simple text-document case.
+function plainTextToHtml(text: string): string {
+  if (!text.trim()) return "<p><em>(empty)</em></p>";
+  const blocks = text.replace(/\r\n/g, "\n").split(/\n{2,}/);
+  return blocks
+    .map((b) => {
+      const inner = escapeHtml(b).replace(/\n/g, "<br />");
+      return `<p>${inner}</p>`;
+    })
+    .join("\n");
+}
+
+// Minimal markdown → HTML for the file-viewer surface. Covers
+// headings (#/##/###), bold (**), italic (*), inline code (`),
+// fenced code (```), bullet lists, and blank-line paragraphs.
+// Not a full CommonMark implementation — for full fidelity the
+// user would round-trip through the contract editor.
+function markdownToHtml(md: string): string {
+  if (!md.trim()) return "<p><em>(empty)</em></p>";
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let inList = false;
+  let inCode = false;
+  let codeBuf: string[] = [];
+  const flushList = () => {
+    if (inList) {
+      out.push("</ul>");
+      inList = false;
+    }
+  };
+  for (const raw of lines) {
+    if (raw.startsWith("```")) {
+      if (inCode) {
+        out.push(`<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`);
+        codeBuf = [];
+        inCode = false;
+      } else {
+        flushList();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuf.push(raw);
+      continue;
+    }
+    const line = raw;
+    if (/^### /.test(line)) {
+      flushList();
+      out.push(`<h3>${inline(line.slice(4))}</h3>`);
+      continue;
+    }
+    if (/^## /.test(line)) {
+      flushList();
+      out.push(`<h2>${inline(line.slice(3))}</h2>`);
+      continue;
+    }
+    if (/^# /.test(line)) {
+      flushList();
+      out.push(`<h1>${inline(line.slice(2))}</h1>`);
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      if (!inList) {
+        out.push("<ul>");
+        inList = true;
+      }
+      out.push(`<li>${inline(line.replace(/^\s*[-*]\s+/, ""))}</li>`);
+      continue;
+    }
+    if (line.trim() === "") {
+      flushList();
+      out.push("");
+      continue;
+    }
+    flushList();
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  flushList();
+  if (inCode) {
+    out.push(`<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`);
+  }
+  return out.join("\n");
+
+  function inline(s: string): string {
+    let r = escapeHtml(s);
+    r = r.replace(/`([^`]+)`/g, "<code>$1</code>");
+    r = r.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    r = r.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+    return r;
+  }
+}
+
 export default function VideoPage() {
   const params = useParams({ strict: false });
   const navigate = useNavigate({});
@@ -135,16 +237,86 @@ export default function VideoPage() {
   const contentType = video?.contentType ?? "";
   const isImageItem = contentType.startsWith("image/");
   const isPdfItem = contentType === "application/pdf";
+  const isTextItem =
+    contentType === "text/plain" ||
+    contentType === "text/markdown" ||
+    contentType === "text/x-markdown" ||
+    contentType.startsWith("text/");
+  const isWordDocItem =
+    contentType === "application/msword" ||
+    contentType ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const isDocItem = isPdfItem || isTextItem || isWordDocItem;
   const isSequenceItem = video?.kind === "image_sequence";
   // Only time-based media has a playhead, so only it gets timestamped
   // comments. Stills/docs post plain comments (timestampSeconds 0).
   // Sequences become time-based once stitched; until then they behave
   // like stills.
-  const isTimeBasedItem = !isImageItem && !isPdfItem;
+  const isTimeBasedItem = !isImageItem && !isDocItem;
   const getSequenceFrameUrls = useAction(api.videoActions.getSequenceFrameUrls);
   const [sequenceFrames, setSequenceFrames] = useState<
     Array<{ key: string; url: string }> | null
   >(null);
+  // Plain-text / markdown / Word body — fetched lazily when the user
+  // opens a doc-class file. PDFs are rendered via the existing
+  // iframe; this is the path for files we want to surface in the
+  // editor shell instead. No wizard, no signing — just the contents.
+  const [docHtml, setDocHtml] = useState<string | null>(null);
+  const [docError, setDocError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!resolvedVideoId || (!isTextItem && !isWordDocItem)) {
+      setDocHtml(null);
+      setDocError(null);
+      return;
+    }
+    let cancelled = false;
+    setDocHtml(null);
+    setDocError(null);
+    (async () => {
+      try {
+        const { url, contentType: ct } = await getOriginalPlaybackUrl({
+          videoId: resolvedVideoId,
+        });
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Fetch failed (${resp.status})`);
+        if (isWordDocItem) {
+          const buf = await resp.arrayBuffer();
+          // Defer mammoth's bundle until actually needed.
+          const mammoth = await import("mammoth");
+          const result = await mammoth.convertToHtml({ arrayBuffer: buf });
+          if (!cancelled) setDocHtml(result.value || "<p><em>(empty document)</em></p>");
+          return;
+        }
+        const text = await resp.text();
+        if (cancelled) return;
+        // Markdown → rendered as paragraphs split on blank lines, with
+        // headings detected. Lightweight conversion — avoids a markdown
+        // parser dep for the simple cases. Plain text falls through
+        // the same path and just becomes paragraphs.
+        const isMarkdown =
+          ct === "text/markdown" ||
+          ct === "text/x-markdown" ||
+          video?.title?.toLowerCase?.().endsWith(".md") === true;
+        const html = isMarkdown ? markdownToHtml(text) : plainTextToHtml(text);
+        setDocHtml(html);
+      } catch (err) {
+        if (!cancelled) {
+          setDocError(
+            err instanceof Error ? err.message : "Could not load document.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    resolvedVideoId,
+    isTextItem,
+    isWordDocItem,
+    video?.title,
+    getOriginalPlaybackUrl,
+  ]);
   useEffect(() => {
     if (!isSequenceItem || !resolvedVideoId) {
       setSequenceFrames(null);
@@ -533,6 +705,30 @@ export default function VideoPage() {
                 )}
               </div>
             )
+          ) : isTextItem || isWordDocItem ? (
+            // Generic document viewer — paper-style canvas, same look
+            // as the contract editor but stripped of wizard / signing
+            // chrome. View-only for now; the round-trip back to .docx
+            // / plain-text is in the share menu instead of inline.
+            <div className="flex-1 overflow-y-auto bg-[#1a1a1a] py-10">
+              <div className="mx-auto max-w-3xl bg-white border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_#000] p-10 sm:p-14">
+                {docError ? (
+                  <p className="text-[#dc2626] text-sm font-mono">
+                    {docError}
+                  </p>
+                ) : docHtml === null ? (
+                  <div className="flex flex-col items-center gap-3 text-[#888]">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#1a1a1a]/15 border-t-[#1a1a1a]/60" />
+                    <p className="text-sm font-medium">Loading document…</p>
+                  </div>
+                ) : (
+                  <article
+                    className="prose prose-sm max-w-none text-[#1a1a1a]"
+                    dangerouslySetInnerHTML={{ __html: docHtml }}
+                  />
+                )}
+              </div>
+            </div>
           ) : (
             <>
               {video.status === "processing" && isUsingOriginalFallback && activePlaybackUrl ? (

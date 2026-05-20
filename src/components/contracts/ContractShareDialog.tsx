@@ -89,6 +89,9 @@ export function ContractShareDialog({
 }: Props) {
   const sendForSignature = useMutation(api.projects.sendContractForSignature);
   const signContractDemo = useMutation(api.projects.signContractDemo);
+  const createContractShareLink = useMutation(
+    api.projects.createContractShareLink,
+  );
 
   const [tab, setTab] = useState<Tab>("sign");
   const [signerEmail, setSignerEmail] = useState("");
@@ -99,6 +102,12 @@ export function ContractShareDialog({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  // Cache one link per role so repeated copies hand back the same URL
+  // instead of minting a fresh row on every click.
+  const [linkUrls, setLinkUrls] = useState<Record<"review" | "edit", string | undefined>>({
+    review: undefined,
+    edit: undefined,
+  });
 
   const handleSend = async () => {
     setBusy("send");
@@ -138,18 +147,31 @@ export function ContractShareDialog({
   };
 
   const copyShareLink = async (kind: "review" | "edit") => {
-    // Placeholder until the share-link backend lands. Hands back a
-    // mock URL so the UX flow can be exercised end-to-end. Once the
-    // contract-share table exists this swaps in a real action.
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/contract-share/${projectId}?role=${kind}`;
+    setError(null);
     try {
+      let url = linkUrls[kind];
+      if (!url) {
+        setBusy(`copy:${kind}`);
+        const { token } = await createContractShareLink({
+          projectId,
+          role: kind,
+        });
+        const origin =
+          typeof window !== "undefined" ? window.location.origin : "";
+        url = `${origin}/c/${token}`;
+        setLinkUrls((prev) => ({ ...prev, [kind]: url }));
+      }
       await navigator.clipboard.writeText(url);
       setCopied(kind);
       setTimeout(() => setCopied(null), 1800);
-    } catch {
-      setError("Couldn't copy. Allow clipboard access and try again.");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? `Couldn't create link: ${e.message}`
+          : "Couldn't copy. Allow clipboard access and try again.",
+      );
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -315,7 +337,7 @@ function ShareLinkPanel({
       <div className="flex items-center gap-2">
         <Badge variant="secondary">{badge}</Badge>
         <span className="text-[10px] font-mono text-[#888]">
-          Backend wiring pending — link is a placeholder
+          Public link — anyone with the URL can open the contract
         </span>
       </div>
       <Field label="Invite by email">
