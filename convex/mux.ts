@@ -65,11 +65,14 @@ export async function createMuxAssetFromInputUrl(videoId: string, inputUrl: stri
   const mux = getMuxClient();
   return await mux.video.assets.create({
     inputs: [
-      { url: inputUrl },
       // Mux auto-transcribes the audio into a WebVTT text track so the
       // *spoken content* of the video becomes searchable (indexed via
       // the video.asset.track.ready webhook). Part of Mux — no extra API.
+      // Per Mux's API, generated_subtitles must live on the *first* input
+      // alongside the URL; a separate generated_subtitles-only input is
+      // rejected as "invalid additional input".
       {
+        url: inputUrl,
         generated_subtitles: [
           { language_code: "en", name: "English (auto)" },
         ],

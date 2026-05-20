@@ -147,72 +147,89 @@ export const create = mutation({
     clientEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    if (Boolean(args.videoId) === Boolean(args.bundleId)) {
-      throw new Error("Share link must reference exactly one of videoId or bundleId.");
-    }
+    try {
+      if (Boolean(args.videoId) === Boolean(args.bundleId)) {
+        throw new Error("Share link must reference exactly one of videoId or bundleId.");
+      }
 
-    let creatorSubject: string;
-    let creatorName: string;
-    if (args.videoId) {
-      const { user } = await requireVideoAccess(ctx, args.videoId, "member");
-      creatorSubject = user.subject;
-      creatorName = identityName(user);
-    } else {
-      const bundle = await ctx.db.get(args.bundleId!);
-      if (!bundle) throw new Error("Bundle not found");
-      const { user } = await requireProjectAccess(ctx, bundle.projectId, "member");
-      creatorSubject = user.subject;
-      creatorName = identityName(user);
-    }
+      let creatorSubject: string;
+      let creatorName: string;
+      if (args.videoId) {
+        const { user } = await requireVideoAccess(ctx, args.videoId, "member");
+        creatorSubject = user.subject;
+        creatorName = identityName(user);
+      } else {
+        const bundle = await ctx.db.get(args.bundleId!);
+        if (!bundle) throw new Error("Bundle not found");
+        const { user } = await requireProjectAccess(ctx, bundle.projectId, "member");
+        creatorSubject = user.subject;
+        creatorName = identityName(user);
+      }
 
-    const token = await generateShareToken(ctx);
-    const expiresAt = args.expiresInDays
-      ? Date.now() + args.expiresInDays * 24 * 60 * 60 * 1000
-      : undefined;
-    const normalizedPassword = normalizeProvidedPassword(args.password);
-    const passwordHash = normalizedPassword
-      ? await hashPassword(normalizedPassword)
-      : undefined;
-    const paywall = sanitizePaywallInput(args.paywall);
-    requireRecipientIdentityForPaywall(
-      paywall,
-      args.clientEmail,
-      args.clientLabel,
-    );
-
-    const shareLinkId = await ctx.db.insert("shareLinks", {
-      videoId: args.videoId,
-      bundleId: args.bundleId,
-      token,
-      createdByClerkId: creatorSubject,
-      createdByName: creatorName,
-      expiresAt,
-      allowDownload: args.allowDownload ?? false,
-      password: undefined,
-      passwordHash,
-      failedAccessAttempts: 0,
-      lockedUntil: undefined,
-      viewCount: 0,
-      paywall,
-      clientLabel: args.clientLabel?.trim() || undefined,
-      clientEmail: args.clientEmail?.trim() || undefined,
-    });
-
-    // Paywalled links need a watermarked 360p preview asset. In the steady
-    // state the per-video preview is already pre-baked (scheduled the moment
-    // the full asset is ready in `videos.markAsReady`). We schedule it again
-    // as a safety net for legacy videos that uploaded before pre-warm
-    // shipped — `ensurePreviewAssetForVideo` is idempotent. Bundle links
-    // defer to first-view since bundles can have arbitrary contents.
-    if (paywall && args.videoId) {
-      await ctx.scheduler.runAfter(
-        0,
-        api.videoActions.ensurePreviewAssetForVideo,
-        { videoId: args.videoId },
+      const token = await generateShareToken(ctx);
+      const expiresAt = args.expiresInDays
+        ? Date.now() + args.expiresInDays * 24 * 60 * 60 * 1000
+        : undefined;
+      const normalizedPassword = normalizeProvidedPassword(args.password);
+      const passwordHash = normalizedPassword
+        ? await hashPassword(normalizedPassword)
+        : undefined;
+      const paywall = sanitizePaywallInput(args.paywall);
+      requireRecipientIdentityForPaywall(
+        paywall,
+        args.clientEmail,
+        args.clientLabel,
       );
-    }
 
-    return { token };
+      const shareLinkId = await ctx.db.insert("shareLinks", {
+        videoId: args.videoId,
+        bundleId: args.bundleId,
+        token,
+        createdByClerkId: creatorSubject,
+        createdByName: creatorName,
+        expiresAt,
+        allowDownload: args.allowDownload ?? false,
+        password: undefined,
+        passwordHash,
+        failedAccessAttempts: 0,
+        lockedUntil: undefined,
+        viewCount: 0,
+        paywall,
+        clientLabel: args.clientLabel?.trim() || undefined,
+        clientEmail: args.clientEmail?.trim() || undefined,
+      });
+
+      // Paywalled links need a watermarked 360p preview asset. In the steady
+      // state the per-video preview is already pre-baked (scheduled the moment
+      // the full asset is ready in `videos.markAsReady`). We schedule it again
+      // as a safety net for legacy videos that uploaded before pre-warm
+      // shipped — `ensurePreviewAssetForVideo` is idempotent. Bundle links
+      // defer to first-view since bundles can have arbitrary contents.
+      if (paywall && args.videoId) {
+        await ctx.scheduler.runAfter(
+          0,
+          api.videoActions.ensurePreviewAssetForVideo,
+          { videoId: args.videoId },
+        );
+      }
+
+      return { token };
+    } catch (err) {
+      // Surface the actual cause in the Convex dashboard logs instead of
+      // letting the generic "Server Error" wrapper swallow it on the
+      // client. Re-throws so the client still gets the failure.
+      console.error("shareLinks.create failed", {
+        videoId: args.videoId,
+        bundleId: args.bundleId,
+        hasPassword: Boolean(args.password),
+        hasPaywall: Boolean(args.paywall),
+        hasClientEmail: Boolean(args.clientEmail),
+        hasClientLabel: Boolean(args.clientLabel),
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      throw err;
+    }
   },
 });
 
