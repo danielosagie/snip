@@ -1230,8 +1230,24 @@ export const setMuxPreviewPlaybackId = internalMutation({
   args: {
     videoId: v.id("videos"),
     muxPreviewPlaybackId: v.string(),
+    // Set by webhook + poll callers to fence stale events from a prior
+    // generation. After an owner retry the video's `muxPreviewAssetId`
+    // points at the NEW asset; a late `video.asset.ready` event for the
+    // discarded old asset would otherwise overwrite the new state.
+    expectedAssetId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (args.expectedAssetId) {
+      const current = await ctx.db.get(args.videoId);
+      if (current?.muxPreviewAssetId !== args.expectedAssetId) {
+        console.log("Ignoring stale preview ready event", {
+          videoId: args.videoId,
+          expectedAssetId: args.expectedAssetId,
+          currentAssetId: current?.muxPreviewAssetId,
+        });
+        return;
+      }
+    }
     await ctx.db.patch(args.videoId, {
       muxPreviewPlaybackId: args.muxPreviewPlaybackId,
       muxPreviewAssetStatus: "ready",
@@ -1245,8 +1261,23 @@ export const setMuxPreviewAssetErrored = internalMutation({
   args: {
     videoId: v.id("videos"),
     reason: v.optional(v.string()),
+    // Same stale-event guard as setMuxPreviewPlaybackId. Pre-Mux callers
+    // (the action itself recording its own watermark-pipeline failures
+    // before any asset id exists) omit this and unconditionally land.
+    expectedAssetId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (args.expectedAssetId) {
+      const current = await ctx.db.get(args.videoId);
+      if (current?.muxPreviewAssetId !== args.expectedAssetId) {
+        console.log("Ignoring stale preview errored event", {
+          videoId: args.videoId,
+          expectedAssetId: args.expectedAssetId,
+          currentAssetId: current?.muxPreviewAssetId,
+        });
+        return;
+      }
+    }
     await ctx.db.patch(args.videoId, {
       muxPreviewAssetStatus: "errored",
       muxPreviewAssetError: args.reason,
@@ -1338,10 +1369,57 @@ export const getForPreviewGen = query({
       _id: video._id,
       s3Key: video.s3Key,
       contentType: video.contentType,
+      status: video.status,
+      muxAssetStatus: video.muxAssetStatus,
       muxPreviewAssetId: video.muxPreviewAssetId,
+      muxPreviewAssetStatus: video.muxPreviewAssetStatus,
+      muxPreviewAssetUpdatedAt: video.muxPreviewAssetUpdatedAt,
       muxPreviewPlaybackId: video.muxPreviewPlaybackId,
       title: video.title,
     };
+  },
+});
+
+/**
+ * Atomic claim used by `ensurePreviewAssetForVideo` to fence concurrent
+ * schedulers (e.g. one from `markAsReady` + one from `shareLinks.create`
+ * for the same video). Inside a single Convex mutation the read+patch is
+ * transactional, so exactly one caller observes `claimed: true` for a
+ * given `(videoId, generation)` race. An in-flight claim is considered
+ * stale after 10 minutes — that's well past the Mux ingest budget but
+ * short enough that a wedged scheduler doesn't block retries forever.
+ */
+export const claimPreviewGeneration = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.object({
+    claimed: v.boolean(),
+    reason: v.optional(
+      v.union(
+        v.literal("video_missing"),
+        v.literal("already_has_asset"),
+        v.literal("in_flight"),
+      ),
+    ),
+  }),
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return { claimed: false, reason: "video_missing" as const };
+    if (video.muxPreviewAssetId) {
+      return { claimed: false, reason: "already_has_asset" as const };
+    }
+    const inFlight =
+      video.muxPreviewAssetStatus === "preparing" &&
+      typeof video.muxPreviewAssetUpdatedAt === "number" &&
+      Date.now() - video.muxPreviewAssetUpdatedAt < 10 * 60 * 1000;
+    if (inFlight) {
+      return { claimed: false, reason: "in_flight" as const };
+    }
+    await ctx.db.patch(args.videoId, {
+      muxPreviewAssetStatus: "preparing",
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
+    });
+    return { claimed: true };
   },
 });
 

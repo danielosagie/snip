@@ -261,6 +261,7 @@ export const processWebhook = internalAction({
             await ctx.runMutation(internal.videos.setMuxPreviewPlaybackId, {
               videoId: resolved.videoId,
               muxPreviewPlaybackId: signedPlaybackId,
+              expectedAssetId: assetId,
             });
             console.log("Preview asset ready", {
               videoId: resolved.videoId,
@@ -360,6 +361,7 @@ export const processWebhook = internalAction({
             await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
               videoId: resolved.videoId,
               reason: `mux_asset_errored:${errorMessage}`,
+              expectedAssetId: assetId,
             });
             break;
           }

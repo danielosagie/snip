@@ -650,6 +650,11 @@ export default function SharePage() {
   const isPreviewPending = playbackSession?.mode === "preview_pending";
   const isPreviewUnavailable = playbackSession?.mode === "preview_unavailable";
   const isFullMode = playbackSession?.mode === "full";
+  // The watermarked-preview pipeline only runs for video uploads — image
+  // and file paywalled shares don't have a "preview asset" concept. The
+  // owner viewAs toggle + retry controls are video-specific, so gate the
+  // banner on the playback session's media kind.
+  const isVideoPlayback = playbackSession?.kind === "video";
   const downloadAllowed = !isPaywalled || isPaid;
 
   if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
@@ -778,7 +783,7 @@ export default function SharePage() {
           </section>
         ) : null}
 
-        {paywall && isOwner ? (
+        {paywall && isOwner && isVideoPlayback ? (
           <section className="border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-5 flex flex-col gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>

@@ -1004,8 +1004,11 @@ export const getSharedPaywalledPlayback = action({
     // attribution channel instead is this structured log line on every
     // signed-token issuance: `grantId` and `shareLinkId` tie a Mux
     // playback session (Mux Data logs the JWT's expiry + asset id) back
-    // to a specific recipient. The log fires only for paywalled streams;
-    // public/no-paywall shares are unattributed by design.
+    // to a specific recipient. `grantToken` itself is the bearer
+    // credential that grants access to the paywalled stream — it is
+    // deliberately NOT logged so anyone with read access to the Convex
+    // logs cannot replay it. `grantId` is the stable, non-secret join
+    // key for forensic correlation.
     const logTokenIssue = (
       mode: "preview" | "full",
       playbackId: string,
@@ -1015,7 +1018,6 @@ export const getSharedPaywalledPlayback = action({
         videoId: video._id,
         shareLinkId: shareLink._id,
         grantId: grant._id,
-        grantToken: args.grantToken,
         clientEmail: shareLink.clientEmail ?? null,
         clientLabel: shareLink.clientLabel ?? null,
         recipientClerkId: identity?.subject ?? null,
@@ -1155,6 +1157,7 @@ export const getSharedPaywalledPlayback = action({
           await ctx.runMutation(internal.videos.setMuxPreviewPlaybackId, {
             videoId: video._id,
             muxPreviewPlaybackId: signedId,
+            expectedAssetId: video.muxPreviewAssetId,
           });
           const videoToken = await signPlaybackToken(signedId, `${TTL_SECONDS}s`);
           const thumbToken = await signThumbnailToken(signedId, `${TTL_SECONDS}s`);
@@ -1178,6 +1181,7 @@ export const getSharedPaywalledPlayback = action({
           await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
             videoId: video._id,
             reason,
+            expectedAssetId: video.muxPreviewAssetId,
           });
           return { ...unavailable, previewError: reason };
         }
@@ -1195,6 +1199,7 @@ export const getSharedPaywalledPlayback = action({
           await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
             videoId: video._id,
             reason,
+            expectedAssetId: video.muxPreviewAssetId,
           });
           return { ...unavailable, previewError: reason };
         }
@@ -1343,6 +1348,45 @@ export const ensurePreviewAssetForVideo = action({
     }
     if (video.muxPreviewAssetId) {
       return { status: "alreadyExists" as const };
+    }
+    // Only video uploads can go through the Mux ingest pipeline. Image
+    // and file paywalled shares are handled elsewhere — guard against a
+    // stray scheduler firing for a non-video record. Also require the
+    // upload to be fully done (status: "ready"); kicking off preview
+    // ingest while the source is still uploading would race the signed
+    // S3 URL against the upload itself.
+    if (!video.contentType.startsWith("video/")) {
+      return {
+        status: "notReady" as const,
+        reason: "Not a video upload — preview pipeline only runs for video/*.",
+      };
+    }
+    if (video.status !== "ready") {
+      return {
+        status: "notReady" as const,
+        reason: `Source upload not finished (status=${video.status}). markAsReady will reschedule once Mux finishes the full asset.`,
+      };
+    }
+
+    // Atomic claim — fences concurrent schedulers so only one of them
+    // actually calls Mux. Without this, the upload-complete scheduler
+    // and the legacy-video safety net in `shareLinks.create` could both
+    // start an ingest for the same video and double-bill Mux storage.
+    const claim = await ctx.runMutation(
+      internal.videos.claimPreviewGeneration,
+      { videoId: video._id },
+    );
+    if (!claim.claimed) {
+      if (claim.reason === "already_has_asset") {
+        return { status: "alreadyExists" as const };
+      }
+      return {
+        status: "alreadyExists" as const,
+        reason:
+          claim.reason === "in_flight"
+            ? "Another scheduler is already running this preview generation."
+            : "Could not claim preview generation.",
+      };
     }
 
     let overlayKey: string;
