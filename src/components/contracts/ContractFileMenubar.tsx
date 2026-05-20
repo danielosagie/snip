@@ -244,7 +244,9 @@ function renderMenubar(props: Actions) {
       </FileMenuButton>
 
       <FileMenuButton label="Help">
-        <Item onClick={() => window.open("https://snip.film", "_blank")}>
+        <Item
+          onClick={() => window.open("https://snipfilm.vercel.app", "_blank")}
+        >
           Documentation
         </Item>
         <Item

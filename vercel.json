@@ -8,14 +8,14 @@
       "src": "/downloads/snip-desktop\\.dmg",
       "status": 302,
       "headers": {
-        "Location": "https://github.com/danielosagie/lawn/releases/latest/download/snip-desktop.dmg"
+        "Location": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop.dmg"
       }
     },
     {
       "src": "/downloads/snip-desktop-x64\\.dmg",
       "status": 302,
       "headers": {
-        "Location": "https://github.com/danielosagie/lawn/releases/latest/download/snip-desktop-x64.dmg"
+        "Location": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop-x64.dmg"
       }
     },
     { "src": "/(.*)", "dest": "/_shell.html" }

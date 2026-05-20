@@ -18,10 +18,14 @@ export const CLERK_PUBLISHABLE_KEY =
   env.VITE_CLERK_PUBLISHABLE_KEY?.trim() ||
   "pk_test_b3V0Z29pbmctd2VldmlsLTE4LmNsZXJrLmFjY291bnRzLmRldiQ";
 
-/** Web origin for the connect-desktop hand-off. Derived from the Clerk
- *  publishable key's domain isn't reliable, so it's its own override. */
+/** Web origin for the connect-desktop hand-off. Override at build time
+ *  via VITE_WEB_ORIGIN (desktop/.env) for staging/self-host builds.
+ *  Default points at the canonical Vercel project URL until a custom
+ *  domain is registered + assigned to the project — `snip.film` was the
+ *  planned domain but is unregistered (NXDOMAIN), so it can't be the
+ *  fallback. */
 export const WEB_ORIGIN =
-  env.VITE_WEB_ORIGIN?.trim() || "https://snip.film";
+  env.VITE_WEB_ORIGIN?.trim() || "https://snipfilm.vercel.app";
 
 /** Convex function path → full HTTP endpoint for unauthenticated public
  *  mutation calls (pairing) made before we have a session. */

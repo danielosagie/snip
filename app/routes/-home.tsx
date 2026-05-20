@@ -361,7 +361,7 @@ export default function Homepage() {
             name: "snip",
             description:
               "Video review and collaboration for creative teams. Frame-accurate comments, unlimited seats, flat pricing.",
-            url: "https://snip.film",
+            url: "https://snipfilm.vercel.app",
             applicationCategory: "MultimediaApplication",
             operatingSystem: "Web",
             offers: [
