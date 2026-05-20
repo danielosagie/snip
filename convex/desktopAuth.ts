@@ -150,50 +150,74 @@ export const markApproved = internalMutation({
 export const approvePairing = action({
   args: { code: v.string() },
   handler: async (ctx, args): Promise<{ ok: true; deviceLabel: string | null }> => {
-    const identity = await getIdentity(ctx);
-    const userId = identity.subject;
+    try {
+      const identity = await getIdentity(ctx);
+      const userId = identity.subject;
 
-    const pending = await ctx.runQuery(internal.desktopAuth.lookupPending, {
-      code: args.code,
-    });
-    if (!pending) throw new Error("Unknown pairing code.");
-    if (pending.status !== "pending") {
-      throw new Error("This device was already connected.");
+      const pending = await ctx.runQuery(internal.desktopAuth.lookupPending, {
+        code: args.code,
+      });
+      if (!pending) throw new Error("Unknown pairing code.");
+      if (pending.status !== "pending") {
+        throw new Error("This device was already connected.");
+      }
+      if (pending.expiresAt < Date.now()) {
+        throw new Error("This pairing request expired. Restart it from the app.");
+      }
+
+      const secret = process.env.CLERK_SECRET_KEY;
+      if (!secret) throw new Error("Clerk is not configured on the server.");
+
+      const resp = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${secret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          expires_in_seconds: SIGN_IN_TOKEN_TTL_SEC,
+        }),
+      });
+      if (!resp.ok) {
+        // Read the Clerk error body so the dashboard log shows
+        // exactly what they rejected (most common: invalid
+        // CLERK_SECRET_KEY, dev-vs-prod instance mismatch, or a
+        // user_id from a different Clerk instance).
+        const errBody = await resp.text().catch(() => "<unreadable>");
+        console.error("Clerk sign_in_tokens rejected", {
+          status: resp.status,
+          body: errBody.slice(0, 500),
+          userId,
+        });
+        throw new Error(
+          `Could not mint a sign-in token (Clerk HTTP ${resp.status}).`,
+        );
+      }
+      const body = (await resp.json()) as { token?: string };
+      if (!body.token) throw new Error("Clerk returned no sign-in token.");
+
+      await ctx.runMutation(internal.desktopAuth.markApproved, {
+        code: args.code,
+        userClerkId: userId,
+        userName: identityName(identity),
+        signInToken: body.token,
+      });
+
+      return { ok: true as const, deviceLabel: pending.deviceLabel };
+    } catch (err) {
+      // Surface the underlying exception in the Convex dashboard logs.
+      // The client-side wrapper otherwise replaces this with a generic
+      // "Server Error", leaving the user with "Couldn't connect" and no
+      // clue why. Re-throws unchanged.
+      console.error("desktopAuth.approvePairing failed", {
+        codePrefix: args.code.slice(0, 4) + "…",
+        hasClerkSecret: Boolean(process.env.CLERK_SECRET_KEY),
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      throw err;
     }
-    if (pending.expiresAt < Date.now()) {
-      throw new Error("This pairing request expired. Restart it from the app.");
-    }
-
-    const secret = process.env.CLERK_SECRET_KEY;
-    if (!secret) throw new Error("Clerk is not configured on the server.");
-
-    const resp = await fetch("https://api.clerk.com/v1/sign_in_tokens", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${secret}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        expires_in_seconds: SIGN_IN_TOKEN_TTL_SEC,
-      }),
-    });
-    if (!resp.ok) {
-      throw new Error(
-        `Could not mint a sign-in token (Clerk HTTP ${resp.status}).`,
-      );
-    }
-    const body = (await resp.json()) as { token?: string };
-    if (!body.token) throw new Error("Clerk returned no sign-in token.");
-
-    await ctx.runMutation(internal.desktopAuth.markApproved, {
-      code: args.code,
-      userClerkId: userId,
-      userName: identityName(identity),
-      signInToken: body.token,
-    });
-
-    return { ok: true as const, deviceLabel: pending.deviceLabel };
   },
 });
 
