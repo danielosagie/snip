@@ -367,10 +367,37 @@ export default defineSchema({
   //                 Deletions disappear.
   //   • selection — frozen snapshot of a specific list of videoIds. Used
   //                 when sharing an ad-hoc multi-select from the grid.
+  /**
+   * Read-only / edit-by-link share for the legacy embedded
+   * `project.contract`. Lets the agency hand a client a URL they can
+   * open without an account to view (`role: "review"`) or co-edit
+   * (`role: "edit"`) the contract. Opaque token authenticates the
+   * request — no other claim is needed.
+   */
+  contractShareLinks: defineTable({
+    projectId: v.id("projects"),
+    token: v.string(),
+    role: v.union(v.literal("review"), v.literal("edit")),
+    createdByClerkId: v.string(),
+    createdByName: v.string(),
+    expiresAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+  })
+    .index("by_token", ["token"])
+    .index("by_project", ["projectId"]),
+
   shareBundles: defineTable({
     projectId: v.id("projects"),
     name: v.string(),
-    kind: v.union(v.literal("folder"), v.literal("selection")),
+    // `project` kind shares the WHOLE project root — every video, every
+    // folder, every nested file. The bundle row carries no folderId or
+    // videoIds; resolveBundleVideos returns all non-deleted videos
+    // under the projectId.
+    kind: v.union(
+      v.literal("folder"),
+      v.literal("selection"),
+      v.literal("project"),
+    ),
     folderId: v.optional(v.id("folders")),
     videoIds: v.optional(v.array(v.id("videos"))),
     createdByClerkId: v.string(),

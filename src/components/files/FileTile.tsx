@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAction } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -63,12 +63,33 @@ export function FileTile({
   onOpen,
 }: FileTileProps) {
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
+  const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
 
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
   const isReady = status === "ready";
+  const isImage = contentType?.startsWith("image/") ?? false;
+
+  // Fetch a signed URL for image files so the tile renders the actual
+  // image as a thumbnail instead of a generic icon. Best-effort — we
+  // silently fall back to the icon if the URL fetch fails.
+  useEffect(() => {
+    if (!isImage || !isReady) return;
+    let cancelled = false;
+    getOriginalPlaybackUrl({ videoId })
+      .then(({ url }) => {
+        if (!cancelled) setThumbnailSrc(url);
+      })
+      .catch(() => {
+        // Ignore — falls back to the file-type icon.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isImage, isReady, videoId, getOriginalPlaybackUrl]);
 
   const handleDownload = useCallback(async () => {
     if (!isReady || downloading) return;
@@ -102,7 +123,16 @@ export function FileTile({
         className="relative aspect-video overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all flex items-center justify-center"
         style={{ background: meta.tileBg }}
       >
-        <Icon className="h-20 w-20" style={{ color: meta.iconColor }} strokeWidth={1.5} />
+        {thumbnailSrc ? (
+          <img
+            src={thumbnailSrc}
+            alt={title}
+            loading="lazy"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <Icon className="h-20 w-20" style={{ color: meta.iconColor }} strokeWidth={1.5} />
+        )}
 
         {/* Top-left file-type chip — mirrors Drive's red "PDF" badge */}
         <div

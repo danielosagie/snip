@@ -449,6 +449,50 @@ export default function ProjectPage({
     }, 2400);
   }, []);
 
+  // One-click "share whole project" — creates a fresh project-scoped
+  // bundle, wraps it in a default share link (no paywall, downloads
+  // off, no expiry), copies the URL to the clipboard, and surfaces a
+  // toast. The "set advanced options" flow is still per-video / per-
+  // folder; this is the quick-grab affordance the project root has
+  // been missing.
+  const createProjectBundle = useMutation(api.shareBundles.createForProject);
+  const createShareLinkForProject = useMutation(api.shareLinks.create);
+  const [isSharingProject, setIsSharingProject] = useState(false);
+  const handleShareProject = useCallback(async () => {
+    if (!resolvedProjectId || isSharingProject) return;
+    setIsSharingProject(true);
+    try {
+      const bundleId = await createProjectBundle({
+        projectId: resolvedProjectId,
+      });
+      const { token } = await createShareLinkForProject({
+        bundleId,
+        allowDownload: false,
+      });
+      const url = `${window.location.origin}/share/${token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        showShareToast("success", "Project share link copied");
+      } catch {
+        showShareToast("error", `Share link: ${url}`);
+      }
+    } catch (err) {
+      console.error("Failed to share project", err);
+      showShareToast(
+        "error",
+        err instanceof Error ? err.message : "Couldn't share project",
+      );
+    } finally {
+      setIsSharingProject(false);
+    }
+  }, [
+    createProjectBundle,
+    createShareLinkForProject,
+    isSharingProject,
+    resolvedProjectId,
+    showShareToast,
+  ]);
+
   const handleShareVideo = useCallback(
     async (video: {
       _id: Id<"videos">;
@@ -749,6 +793,20 @@ export default function ProjectPage({
               <span className="hidden sm:inline">Share folder</span>
             </button>
           ) : null}
+          {!currentFolderId && canUpload && resolvedProjectId ? (
+            <button
+              type="button"
+              onClick={() => void handleShareProject()}
+              disabled={isSharingProject}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] disabled:opacity-50 transition-colors flex-shrink-0"
+              title="Share the whole project — every file in every folder. Link is copied to your clipboard."
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">
+                {isSharingProject ? "Creating…" : "Share project"}
+              </span>
+            </button>
+          ) : null}
           {resolvedProjectId && canUpload ? (
             <ProjectAddButton
               projectId={resolvedProjectId}
@@ -853,16 +911,6 @@ export default function ProjectPage({
                 void handleMoveFolder(droppedId, targetId)
               }
             />
-            {/* Multi-contract list — sits above the file grid when at
-                project root. Hidden when the project has no contracts
-                AND the viewer can't create one. */}
-            {currentFolderId === null && (
-              <ContractListSection
-                projectId={project._id}
-                teamSlug={resolvedTeamSlug}
-                canEdit={canUpload}
-              />
-            )}
             <div className="px-6 pt-4 pb-6">
               {(filteredFolders?.length ?? 0) > 0 ? (
                 <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
@@ -1070,6 +1118,16 @@ export default function ProjectPage({
               })}
               </div>
             </div>
+            {/* Multi-contract list — pinned BELOW the file grid as project
+                metadata, separated from the working content. Hidden when
+                empty AND the viewer can't create one. */}
+            {currentFolderId === null && (
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                canEdit={canUpload}
+              />
+            )}
           </div>
         ) : (
           /* List View - Horizontal rows */
@@ -1276,6 +1334,15 @@ export default function ProjectPage({
               );
             })}
             </div>
+            {/* Multi-contract list — pinned BELOW the file list as project
+                metadata, separated from the working content. */}
+            {currentFolderId === null && (
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                canEdit={canUpload}
+              />
+            )}
           </div>
         )}
         {/* Timeline history used to live here as a panel under the grid.

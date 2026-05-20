@@ -11,6 +11,7 @@ import { assertTeamHasActiveSubscription } from "./billingHelpers";
 import { indexSearchable, removeSearchable, stripHtml } from "./search";
 import { internal } from "./_generated/api";
 import { prefEnabled } from "./notifications";
+import { generateUniqueToken } from "./security";
 
 export const create = mutation({
   args: {
@@ -196,6 +197,100 @@ export const upsertContract = mutation({
     } catch (e) {
       console.error("search index (contract upsert) failed", e);
     }
+  },
+});
+
+// ─── Contract share links (legacy embedded contract) ─────────────────
+
+const CONTRACT_SHARE_TOKEN_LENGTH = 24;
+
+/**
+ * Create a read-only / edit-by-link share for the legacy embedded
+ * contract. Wires up the "Copy share link" affordance in the contract
+ * share dialog so the agency can drop a URL into Slack instead of
+ * inviting the recipient through Clerk. The returned token is consumed
+ * by `getContractByToken` on the public `/c/$token` route.
+ */
+export const createContractShareLink = mutation({
+  args: {
+    projectId: v.id("projects"),
+    role: v.union(v.literal("review"), v.literal("edit")),
+    expiresInDays: v.optional(v.number()),
+  },
+  returns: v.object({ token: v.string() }),
+  handler: async (ctx, args) => {
+    const { user, project } = await requireProjectAccess(
+      ctx,
+      args.projectId,
+      "member",
+    );
+    if (!project.contract) {
+      throw new Error("No contract drafted yet.");
+    }
+    const token = await generateUniqueToken(
+      CONTRACT_SHARE_TOKEN_LENGTH,
+      async (t) => {
+        const hit = await ctx.db
+          .query("contractShareLinks")
+          .withIndex("by_token", (q) => q.eq("token", t))
+          .unique();
+        return hit !== null;
+      },
+    );
+    const expiresAt = args.expiresInDays
+      ? Date.now() + args.expiresInDays * 24 * 60 * 60 * 1000
+      : undefined;
+    await ctx.db.insert("contractShareLinks", {
+      projectId: args.projectId,
+      token,
+      role: args.role,
+      createdByClerkId: user.subject,
+      createdByName: identityName(user),
+      expiresAt,
+    });
+    return { token };
+  },
+});
+
+/**
+ * Public lookup for the `/c/$token` route. Returns the minimal slice
+ * the public viewer needs (contract HTML + a few labels). Skips
+ * revoked / expired links.
+ */
+export const getContractByToken = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const link = await ctx.db
+      .query("contractShareLinks")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .unique();
+    if (!link) return null;
+    if (link.revokedAt) return { status: "revoked" as const };
+    if (link.expiresAt && link.expiresAt < Date.now()) {
+      return { status: "expired" as const };
+    }
+    const project = await ctx.db.get(link.projectId);
+    if (!project || project.deletedAt) {
+      return { status: "missing" as const };
+    }
+    const contract = project.contract;
+    if (!contract) return { status: "missing" as const };
+    return {
+      status: "ok" as const,
+      role: link.role,
+      project: { name: project.name },
+      contract: {
+        contentHtml: contract.contentHtml,
+        clientName: contract.clientName ?? null,
+        clientEmail: contract.clientEmail ?? null,
+        priceCents: contract.priceCents ?? null,
+        currency: contract.currency ?? null,
+        deadline: contract.deadline ?? null,
+        signedAt: contract.signedAt ?? null,
+        signedByName: contract.signedByName ?? null,
+        sentForSignatureAt: contract.sentForSignatureAt ?? null,
+      },
+    };
   },
 });
 

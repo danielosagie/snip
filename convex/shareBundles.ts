@@ -43,6 +43,16 @@ export async function resolveBundleVideos(
     return inFolder.filter((v) => !v.deletedAt && v.isCurrentVersion !== false);
   }
 
+  if (bundle.kind === "project") {
+    // Whole-project bundle — every non-deleted current-version video
+    // in the project, across every folder.
+    const all = await ctx.db
+      .query("videos")
+      .withIndex("by_project", (q) => q.eq("projectId", bundle.projectId))
+      .collect();
+    return all.filter((v) => !v.deletedAt && v.isCurrentVersion !== false);
+  }
+
   // selection
   if (!bundle.videoIds || bundle.videoIds.length === 0) return [];
   const fetched = await Promise.all(bundle.videoIds.map((id) => ctx.db.get(id)));
@@ -65,6 +75,36 @@ export const createForFolder = mutation({
       name: args.name?.trim() || folder.name,
       kind: "folder",
       folderId: args.folderId,
+      videoIds: undefined,
+      createdByClerkId: user.subject,
+      createdByName: identityName(user),
+    });
+  },
+});
+
+/**
+ * Whole-project share bundle. One bundle per share — each fresh share
+ * gets its own row so we can revoke independently. The bundle stays
+ * "live": new uploads to the project show up on the share page
+ * automatically (same semantics as folder bundles).
+ */
+export const createForProject = mutation({
+  args: {
+    projectId: v.id("projects"),
+    name: v.optional(v.string()),
+  },
+  returns: v.id("shareBundles"),
+  handler: async (ctx, args): Promise<Id<"shareBundles">> => {
+    const { user, project } = await requireProjectAccess(
+      ctx,
+      args.projectId,
+      "member",
+    );
+    return await ctx.db.insert("shareBundles", {
+      projectId: args.projectId,
+      name: args.name?.trim() || project.name,
+      kind: "project",
+      folderId: undefined,
       videoIds: undefined,
       createdByClerkId: user.subject,
       createdByName: identityName(user),
