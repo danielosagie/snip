@@ -24,11 +24,63 @@ function createUploadId() {
   return Math.random().toString(36).slice(2);
 }
 
+// Matches sequence filenames like `shot.0001.png` or `shot_0001.exr`.
+// The integer must be 3-6 digits; anything shorter is too ambiguous and
+// would false-positive on dates / version numbers.
+const SEQUENCE_FILENAME_RE = /^(.+?)[._](\d{3,6})\.([a-z0-9]+)$/i;
+
+const SEQUENCE_FRAME_EXTS = new Set([
+  "png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "tga", "webp", "bmp",
+]);
+
+interface FrameMatch {
+  stem: string;
+  index: number;
+  ext: string;
+  file: File;
+}
+
+function detectFrame(file: File): FrameMatch | null {
+  const m = SEQUENCE_FILENAME_RE.exec(file.name);
+  if (!m) return null;
+  const [, stem, idxStr, ext] = m;
+  if (!SEQUENCE_FRAME_EXTS.has(ext.toLowerCase())) return null;
+  const index = Number(idxStr);
+  if (!Number.isFinite(index)) return null;
+  return { stem, index, ext: ext.toLowerCase(), file };
+}
+
+/**
+ * Group an upload batch by (stem, ext) when ≥3 files share both. Returns
+ * a map from groupKey → ordered frames. Files that don't match the
+ * sequence pattern are excluded.
+ */
+function groupSequenceFrames(files: File[]): Map<string, FrameMatch[]> {
+  const groups = new Map<string, FrameMatch[]>();
+  for (const file of files) {
+    const match = detectFrame(file);
+    if (!match) continue;
+    const key = `${match.stem}.${match.ext}`;
+    const arr = groups.get(key) ?? [];
+    arr.push(match);
+    groups.set(key, arr);
+  }
+  for (const [key, arr] of groups) {
+    if (arr.length < 3) {
+      groups.delete(key);
+      continue;
+    }
+    arr.sort((a, b) => a.index - b.index);
+  }
+  return groups;
+}
+
 export function useVideoUploadManager() {
   const createVideo = useMutation(api.videos.create);
   const getUploadUrl = useAction(api.videoActions.getUploadUrl);
   const markUploadComplete = useAction(api.videoActions.markUploadComplete);
   const markUploadFailed = useAction(api.videoActions.markUploadFailed);
+  const coalesceIntoSequence = useMutation(api.videos.coalesceIntoSequence);
   const [uploads, setUploads] = useState<ManagedUploadItem[]>([]);
 
   const uploadFilesToProject = useCallback(
@@ -37,6 +89,12 @@ export function useVideoUploadManager() {
       files: File[],
       folderId?: Id<"folders">,
     ) => {
+      // Detect image-sequence groups up-front so we can coalesce after
+      // the per-file uploads complete. Tracks each frame's videoId in
+      // creation order so the coalesce mutation can collapse them.
+      const sequenceGroups = groupSequenceFrames(files);
+      const sequenceVideoIdsByFile = new Map<File, Id<"videos">>();
+
       for (const file of files) {
         const uploadId = createUploadId();
         const title = file.name.replace(/\.[^/.]+$/, "");
@@ -160,6 +218,11 @@ export function useVideoUploadManager() {
 
           await markUploadComplete({ videoId: createdVideoId });
 
+          // Stash the frame's videoId for the post-loop coalesce pass.
+          if (createdVideoId) {
+            sequenceVideoIdsByFile.set(file, createdVideoId);
+          }
+
           setUploads((prev) =>
             prev.map((upload) =>
               upload.id === uploadId
@@ -188,8 +251,37 @@ export function useVideoUploadManager() {
           }
         }
       }
+
+      // Coalesce detected sequences. Each group's frames are uploaded
+      // independently above; here we collapse them into one
+      // image_sequence row and schedule the optional stitch action.
+      // Best-effort — a coalesce failure leaves the per-frame videos in
+      // place so nothing is lost.
+      for (const [, frames] of sequenceGroups) {
+        const frameVideoIds = frames
+          .map((f) => sequenceVideoIdsByFile.get(f.file))
+          .filter((id): id is Id<"videos"> => !!id);
+        if (frameVideoIds.length < 3) continue;
+        const { stem, ext } = frames[0];
+        try {
+          await coalesceIntoSequence({
+            frameVideoIds,
+            stem,
+            ext,
+            fps: 24,
+          });
+        } catch (err) {
+          console.error("coalesceIntoSequence failed", err);
+        }
+      }
     },
-    [createVideo, getUploadUrl, markUploadComplete, markUploadFailed],
+    [
+      createVideo,
+      getUploadUrl,
+      markUploadComplete,
+      markUploadFailed,
+      coalesceIntoSequence,
+    ],
   );
 
   const cancelUpload = useCallback(

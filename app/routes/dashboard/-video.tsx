@@ -1,5 +1,5 @@
 
-import { useConvex, useMutation, useAction } from "convex/react";
+import { useConvex, useMutation, useAction, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import {
   Link,
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player/VideoPlayer";
+import { ImageSequenceFrameGrid } from "@/components/videos/ImageSequenceFrameGrid";
 import { VideoPaywallControl } from "@/components/videos/VideoPaywallControl";
 import { VideoVersionDropdown } from "@/components/videos/VideoVersionDropdown";
 import { triggerDownload } from "@/lib/download";
@@ -23,7 +24,7 @@ import {
   VideoWorkflowStatusControl,
   type VideoWorkflowStatus,
 } from "@/components/videos/VideoWorkflowStatusControl";
-import { formatDuration } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import { useVideoPresence } from "@/lib/useVideoPresence";
 import { VideoWatchers } from "@/components/presence/VideoWatchers";
 import { DashboardHeader } from "@/components/DashboardHeader";
@@ -112,6 +113,21 @@ export default function VideoPage() {
       ? "mux720"
       : "original";
   const isUsingOriginalFallback = Boolean(activePlaybackUrl && activePlaybackUrl === originalPlaybackUrl && !playbackUrl);
+  // Mux-generated captions track. Available once
+  // `video.asset.track.ready` has fired (muxActions.ts). Falls back to
+  // undefined for videos that predate the captions backfill — the
+  // VideoPlayer simply omits the <track> in that case.
+  const captionsVttUrl =
+    video?.muxPlaybackId && video?.muxCaptionsTrackId
+      ? `https://stream.mux.com/${video.muxPlaybackId}/text/${video.muxCaptionsTrackId}.vtt`
+      : undefined;
+  // Transcript tab data — loaded lazily; the search.ts query returns
+  // the ordered ~45s cue windows from the search index.
+  const transcriptCues = useQuery(
+    api.search.getCuesForVideo,
+    resolvedVideoId ? { videoId: resolvedVideoId } : "skip",
+  );
+  const [sidebarTab, setSidebarTab] = useState<"comments" | "transcript">("comments");
   // Item-type dispatch. Images/GIFs and PDFs are also `videos` rows; they
   // get the same focused view (header + comments + version stack) but a
   // different renderer in the media pane. Anything else (video/audio)
@@ -119,9 +135,34 @@ export default function VideoPage() {
   const contentType = video?.contentType ?? "";
   const isImageItem = contentType.startsWith("image/");
   const isPdfItem = contentType === "application/pdf";
+  const isSequenceItem = video?.kind === "image_sequence";
   // Only time-based media has a playhead, so only it gets timestamped
   // comments. Stills/docs post plain comments (timestampSeconds 0).
+  // Sequences become time-based once stitched; until then they behave
+  // like stills.
   const isTimeBasedItem = !isImageItem && !isPdfItem;
+  const getSequenceFrameUrls = useAction(api.videoActions.getSequenceFrameUrls);
+  const [sequenceFrames, setSequenceFrames] = useState<
+    Array<{ key: string; url: string }> | null
+  >(null);
+  useEffect(() => {
+    if (!isSequenceItem || !resolvedVideoId) {
+      setSequenceFrames(null);
+      return;
+    }
+    let cancelled = false;
+    getSequenceFrameUrls({ videoId: resolvedVideoId })
+      .then((frames) => {
+        if (!cancelled) setSequenceFrames(frames);
+      })
+      .catch((err) => {
+        console.error("getSequenceFrameUrls failed", err);
+        if (!cancelled) setSequenceFrames([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSequenceItem, resolvedVideoId, getSequenceFrameUrls]);
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
   const prewarmTeamIntentHandlers = useRoutePrewarmIntent(() =>
@@ -438,7 +479,17 @@ export default function VideoPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Video player area — full black, Frame.io style */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
-          {isImageItem ? (
+          {isSequenceItem && !activePlaybackUrl ? (
+            <ImageSequenceFrameGrid
+              frames={sequenceFrames}
+              stitchStatus={
+                (video as { sequenceStitchStatus?: string }).sequenceStitchStatus
+              }
+              stitchError={
+                (video as { sequenceStitchError?: string }).sequenceStitchError
+              }
+            />
+          ) : isImageItem ? (
             activePlaybackUrl ? (
               <div className="flex-1 flex items-center justify-center overflow-auto p-4">
                 <img
@@ -504,6 +555,7 @@ export default function VideoPage() {
                   allowDownload={video.status === "ready"}
                   downloadFilename={`${video.title}.mp4`}
                   onRequestDownload={requestDownload}
+                  captionsVttUrl={captionsVttUrl}
                   controlsBelow
                   qualityOptionsConfig={[
                     {
@@ -558,33 +610,95 @@ export default function VideoPage() {
 
         {/* Comments sidebar — desktop */}
         <aside className="hidden lg:flex w-80 xl:w-96 border-l-2 border-[#1a1a1a] flex-col bg-[#f0f0e8]">
-          <div className="flex-shrink-0 px-5 py-4 border-b border-[#1a1a1a]/10 dark:border-white/10 flex items-center justify-between">
-            <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2 text-[#1a1a1a] dark:text-[#f0f0e8]">
-              Discussion
-            </h2>
-            {comments && comments.length > 0 && (
-              <span className="text-[11px] font-medium text-[#888] bg-[#1a1a1a]/5 dark:bg-white/5 px-2 py-0.5 rounded-full">
-                {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
-              </span>
-            )}
+          {/* Tabs: Comments | Transcript. Brutalist: 2px border on the
+              active tab, cream bg, no rounded corners. */}
+          <div className="flex-shrink-0 border-b-2 border-[#1a1a1a] grid grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setSidebarTab("comments")}
+              className={cn(
+                "h-10 text-xs font-bold uppercase tracking-wider border-r-2 border-[#1a1a1a] transition-colors",
+                sidebarTab === "comments"
+                  ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5]",
+              )}
+            >
+              Comments
+              {comments && comments.length > 0 && (
+                <span className="ml-2 text-[#C2410C]">{comments.length}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarTab("transcript")}
+              disabled={!transcriptCues || transcriptCues.length === 0}
+              className={cn(
+                "h-10 text-xs font-bold uppercase tracking-wider transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                sidebarTab === "transcript"
+                  ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5]",
+              )}
+              title={!transcriptCues || transcriptCues.length === 0 ? "No transcript yet" : "Transcript"}
+            >
+              Transcript
+              {transcriptCues && transcriptCues.length > 0 && (
+                <span className="ml-2 text-[#C2410C]">{transcriptCues.length}</span>
+              )}
+            </button>
           </div>
-          <div className="flex-1 overflow-hidden">
-            <CommentList
-              videoId={resolvedVideoId}
-              comments={commentsThreaded}
-              onTimestampClick={handleTimestampClick}
-              highlightedCommentId={highlightedCommentId}
-              canResolve={canEdit}
-            />
-          </div>
-          {canComment && (
-            <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8]">
-              <CommentInput
-                videoId={resolvedVideoId}
-                timestampSeconds={isTimeBasedItem ? currentTime : 0}
-                showTimestamp={isTimeBasedItem}
-                variant="seamless"
-              />
+          {sidebarTab === "comments" ? (
+            <>
+              <div className="flex-1 overflow-hidden">
+                <CommentList
+                  videoId={resolvedVideoId}
+                  comments={commentsThreaded}
+                  onTimestampClick={handleTimestampClick}
+                  highlightedCommentId={highlightedCommentId}
+                  canResolve={canEdit}
+                  currentTime={isTimeBasedItem ? currentTime : undefined}
+                />
+              </div>
+              {canComment && (
+                <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8]">
+                  <CommentInput
+                    videoId={resolvedVideoId}
+                    timestampSeconds={isTimeBasedItem ? currentTime : 0}
+                    showTimestamp={isTimeBasedItem}
+                    variant="seamless"
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              {transcriptCues && transcriptCues.length > 0 ? (
+                <ul className="divide-y divide-[#1a1a1a]/10">
+                  {transcriptCues.map((cue) => (
+                    <li key={`${cue.start}`}>
+                      <button
+                        type="button"
+                        onClick={() => handleTimestampClick(cue.start)}
+                        className={cn(
+                          "w-full text-left px-4 py-3 hover:bg-[#FFEDD5] transition-colors",
+                          Math.abs(currentTime - cue.start) < 45 && "bg-[#FFEDD5]",
+                        )}
+                      >
+                        <div className="text-[11px] font-mono font-bold text-[#C2410C]">
+                          {formatDuration(cue.start)}
+                        </div>
+                        <div className="text-sm text-[#1a1a1a] mt-1 leading-snug">
+                          {cue.text}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="p-6 text-center text-sm text-[#888]">
+                  No transcript yet. Mux auto-transcribes audio when it ingests
+                  a video — it should appear shortly after upload.
+                </div>
+              )}
             </div>
           )}
         </aside>
@@ -621,6 +735,7 @@ export default function VideoPage() {
               }}
               highlightedCommentId={highlightedCommentId}
               canResolve={canEdit}
+              currentTime={isTimeBasedItem ? currentTime : undefined}
             />
           </div>
           {canComment && (

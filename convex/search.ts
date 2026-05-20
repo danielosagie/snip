@@ -209,6 +209,47 @@ export const indexTranscriptCue = internalMutation({
   },
 });
 
+/**
+ * Ordered transcript cues for a single video. The transcript action
+ * writes one row per ~45s window into `searchableContent` with
+ * `kind:"transcript"`; we surface them here as `[{ start, text }]`
+ * for the in-app transcript panel beside the player.
+ *
+ * `start` is recovered from the refId pattern `${videoId}:t:${sec}`
+ * written by `indexTranscriptCue`.
+ */
+export const getCuesForVideo = query({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args): Promise<Array<{ start: number; text: string }>> => {
+    const user = await requireUser(ctx);
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return [];
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", user.subject))
+      .collect();
+    const project = await ctx.db.get(video.projectId);
+    if (!project) return [];
+    if (!memberships.some((m) => m.teamId === project.teamId)) return [];
+
+    const rows = await ctx.db
+      .query("searchableContent")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .collect();
+    const cues: Array<{ start: number; text: string }> = [];
+    for (const row of rows) {
+      if (row.kind !== "transcript") continue;
+      const parts = row.refId.split(":t:");
+      if (parts.length !== 2) continue;
+      const start = Number(parts[1]);
+      if (!Number.isFinite(start)) continue;
+      cues.push({ start, text: row.text });
+    }
+    cues.sort((a, b) => a.start - b.start);
+    return cues;
+  },
+});
+
 function snippet(text: string, q: string): string {
   const lower = text.toLowerCase();
   const term = q.trim().toLowerCase().split(/\s+/)[0] ?? "";

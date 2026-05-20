@@ -63,7 +63,35 @@ export const TIERS = {
     currency: "usd",
     features: [...COMMON_FEATURES, "Priority support"],
   },
+  // Pay-as-you-go tier for enterprise customers. Zero base, everything
+  // metered: storage by GB-month, egress by GB, seats by month, and
+  // transcription by 1k-minute blocks. Reported to Stripe via the Meter
+  // Events API by the daily cron in convex/crons.ts.
+  enterprise: {
+    plan: "enterprise",
+    label: "Enterprise",
+    baseCents: 0,
+    perSeatCents: 500, // $5 / seat (no included seats)
+    includedSeats: 0,
+    storageBytes: Number.MAX_SAFE_INTEGER,
+    currency: "usd",
+    features: [
+      ...COMMON_FEATURES,
+      "Priority support",
+      "Pay-as-you-go billing",
+      "Custom SLA available",
+      "Volume discount on request",
+    ],
+    meters: {
+      storageGbMonthCents: 5, // $0.05 / GB-month stored
+      egressGbCents: 10, // $0.10 / GB downloaded
+      perSeatCents: 500, // $5 / seat / month
+      transcriptionPer1kMinCents: 100, // $1.00 / 1000 transcribed minutes
+    },
+  },
 } as const;
+
+export const ENTERPRISE_PLAN_KEY = "enterprise" as const;
 
 export type TierKey = keyof typeof TIERS;
 
@@ -161,9 +189,11 @@ export const getMySubscription = query({
 });
 
 /**
- * Public tier listing — both Studio and Pro. Marketing pages and the
- * billing tier picker call this; it never needs auth so unsigned-in
- * pricing pages render with the same shape signed-in users see.
+ * Public tier listing — Studio, Pro, Enterprise. Marketing pages and
+ * the billing tier picker call this; it never needs auth so unsigned-
+ * in pricing pages render with the same shape signed-in users see.
+ * `meters` is set for pay-as-you-go (enterprise) tiers and absent for
+ * flat-rate tiers.
  */
 export const listTiers = query({
   args: {},
@@ -177,6 +207,14 @@ export const listTiers = query({
       storageBytes: v.number(),
       currency: v.string(),
       features: v.array(v.string()),
+      meters: v.optional(
+        v.object({
+          storageGbMonthCents: v.number(),
+          egressGbCents: v.number(),
+          perSeatCents: v.number(),
+          transcriptionPer1kMinCents: v.number(),
+        }),
+      ),
     }),
   ),
   handler: async () =>
@@ -189,6 +227,7 @@ export const listTiers = query({
       storageBytes: t.storageBytes,
       currency: t.currency,
       features: [...t.features],
+      meters: (t as { meters?: typeof TIERS.enterprise.meters }).meters,
     })),
 });
 

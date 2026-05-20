@@ -17,3 +17,11 @@ export function projectPath(teamSlug: string, projectId: string) {
 export function videoPath(teamSlug: string, projectId: string, videoId: string) {
   return `/dashboard/${teamSlug}/${projectId}/${videoId}`;
 }
+
+export function contractPath(teamSlug: string, projectId: string, contractId: string) {
+  return `/dashboard/${teamSlug}/${projectId}/contract/${contractId}`;
+}
+
+export function signPath(token: string) {
+  return `/sign/${token}`;
+}

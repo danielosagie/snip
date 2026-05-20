@@ -16,6 +16,8 @@ import {
   Settings2,
   Check,
   ChevronDown,
+  Captions,
+  CaptionsOff,
 } from "lucide-react";
 import { cn, formatDuration, formatTimestamp } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
@@ -24,6 +26,8 @@ interface Comment {
   _id: string;
   timestampSeconds: number;
   resolved: boolean;
+  text?: string;
+  userName?: string;
 }
 
 interface DownloadResult {
@@ -52,6 +56,10 @@ interface VideoPlayerProps {
   onSelectQuality?: (id: string) => void;
   /** Render controls below the video frame instead of overlaid. Ideal for mobile. */
   controlsBelow?: boolean;
+  /** WebVTT captions URL — usually Mux's auto-generated track at
+   *  https://stream.mux.com/{playbackId}/text/{trackId}.vtt. When set,
+   *  renders a <track kind="captions" default> and exposes a CC toggle. */
+  captionsVttUrl?: string;
 }
 
 export interface VideoPlayerHandle {
@@ -91,6 +99,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     selectedQualityId,
     onSelectQuality,
     controlsBelow = false,
+    captionsVttUrl,
   },
   ref
 ) {
@@ -119,6 +128,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [qualityOptions, setQualityOptions] = useState<QualityLevelOption[]>([]);
   const [selectedQualityLevel, setSelectedQualityLevel] = useState<number>(AUTO_QUALITY_LEVEL);
+  const [captionsOn, setCaptionsOn] = useState(false);
 
   const hideControlsTimeoutRef = useRef<number | null>(null);
   const wasPlayingBeforeScrubRef = useRef(false);
@@ -249,6 +259,33 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       setIsMuted(true);
     }
   }, [setVideoVolume, showControls]);
+
+  // Sync the local CC state with the underlying <track>'s mode. We default
+  // `default` on the track so browsers will turn it on when the user has
+  // captions enabled globally — mirror that here on first ready.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !captionsVttUrl) return;
+    const tracks = video.textTracks;
+    if (tracks.length === 0) return;
+    const handler = () => {
+      const t = tracks[0];
+      setCaptionsOn(t?.mode === "showing");
+    };
+    handler();
+    tracks.addEventListener("change", handler);
+    return () => tracks.removeEventListener("change", handler);
+  }, [captionsVttUrl, isMediaReady]);
+
+  const toggleCaptions = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.textTracks.length === 0) return;
+    showControls();
+    const track = video.textTracks[0];
+    const next = track.mode === "showing" ? "hidden" : "showing";
+    track.mode = next;
+    setCaptionsOn(next === "showing");
+  }, [showControls]);
 
   const cyclePlaybackRate = useCallback(() => {
     const video = videoRef.current;
@@ -727,26 +764,48 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         {groupedMarkers.map((marker) => {
           const isResolved = marker.comment.resolved;
           const isActive = Math.abs(displayTime - marker.comment.timestampSeconds) < 1.5;
+          const tooltipBody = (marker.comment.text ?? "")
+            .split("\n")[0]
+            .slice(0, 80);
+          const tooltipAuthor = marker.comment.userName ?? "Comment";
           return (
-            <button
+            <div
               key={marker.comment._id}
-              type="button"
-              className={cn(
-                "absolute top-1/2 z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black/40 shadow",
-                isResolved ? "bg-green-400" : "bg-orange-400",
-                isActive && "ring-2 ring-white/60"
-              )}
+              className="absolute top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 group"
               style={{ left: `${marker.position}%` }}
-              onPointerDown={(e) => { e.stopPropagation(); }}
-              onClick={(e) => {
-                e.stopPropagation();
-                applyTime(marker.comment.timestampSeconds);
-                onMarkerClick?.(marker.comment);
-                showControls();
-              }}
-              aria-label={`Jump to comment at ${formatTimestamp(marker.comment.timestampSeconds)}`}
-              title={`Comment at ${formatTimestamp(marker.comment.timestampSeconds)}`}
-            />
+            >
+              <button
+                type="button"
+                className={cn(
+                  "block h-3 w-3 rounded-full border border-black/40 shadow",
+                  isResolved ? "bg-green-400" : "bg-orange-400",
+                  isActive && "ring-2 ring-white/60"
+                )}
+                onPointerDown={(e) => { e.stopPropagation(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  applyTime(marker.comment.timestampSeconds);
+                  onMarkerClick?.(marker.comment);
+                  showControls();
+                }}
+                aria-label={`Jump to comment at ${formatTimestamp(marker.comment.timestampSeconds)}`}
+              />
+              {/* Hover preview — brutalist tooltip showing author + first
+                  line of the comment. Pointer-events-none so the marker
+                  click still works. */}
+              {tooltipBody && (
+                <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 whitespace-nowrap border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1 text-[11px] font-medium text-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] group-hover:block">
+                  <span className="font-bold">{tooltipAuthor}</span>
+                  <span className="mx-1 text-[#888]">·</span>
+                  <span className="text-[#C2410C] font-mono">
+                    {formatTimestamp(marker.comment.timestampSeconds)}
+                  </span>
+                  <div className="mt-0.5 max-w-[260px] truncate text-[#1a1a1a]/80">
+                    {tooltipBody}
+                  </div>
+                </div>
+              )}
+            </div>
           );
         })}
 
@@ -825,6 +884,23 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           >
             {playbackRate}x
           </button>
+
+          {captionsVttUrl && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); toggleCaptions(); }}
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-full border transition",
+                captionsOn
+                  ? "border-white/40 bg-white/20 text-white"
+                  : "border-white/10 bg-white/5 text-white/80 hover:border-white/25 hover:bg-white/15",
+              )}
+              aria-label={captionsOn ? "Hide captions" : "Show captions"}
+              title={captionsOn ? "Hide captions (CC)" : "Show captions (CC)"}
+            >
+              {captionsOn ? <Captions className="h-4 w-4" /> : <CaptionsOff className="h-4 w-4" />}
+            </button>
+          )}
 
           <div className="relative">
             <button
@@ -971,6 +1047,33 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           if (e.key.toLowerCase() === "m") {
             e.preventDefault();
             toggleMute();
+            return;
+          }
+          // [ / ] — jump to previous / next comment marker.
+          if (e.key === "[" || e.key === "]") {
+            if (groupedMarkers.length === 0) return;
+            e.preventDefault();
+            const sorted = [...groupedMarkers].sort(
+              (a, b) => a.comment.timestampSeconds - b.comment.timestampSeconds,
+            );
+            const now = videoRef.current?.currentTime ?? 0;
+            // Treat the current marker as "passed" so repeated taps step
+            // forward (within a 0.25s deadband).
+            let target;
+            if (e.key === "]") {
+              target = sorted.find((m) => m.comment.timestampSeconds > now + 0.25);
+              if (!target) target = sorted[0];
+            } else {
+              target = [...sorted]
+                .reverse()
+                .find((m) => m.comment.timestampSeconds < now - 0.25);
+              if (!target) target = sorted[sorted.length - 1];
+            }
+            if (target) {
+              applyTime(target.comment.timestampSeconds);
+              onMarkerClick?.(target.comment);
+              showControls();
+            }
           }
         }}
         onContextMenu={(e) => {
@@ -994,11 +1097,22 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           )}
           playsInline
           preload="auto"
+          crossOrigin={captionsVttUrl ? "anonymous" : undefined}
           onClick={(e) => {
             e.stopPropagation();
             togglePlay();
           }}
-        />
+        >
+          {captionsVttUrl && (
+            <track
+              kind="captions"
+              srcLang="en"
+              label="English (auto)"
+              src={captionsVttUrl}
+              default
+            />
+          )}
+        </video>
 
         {!isMediaReady && (
           <div className="pointer-events-none absolute inset-0 z-[5]">

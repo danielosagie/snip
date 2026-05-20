@@ -40,6 +40,8 @@ import { Route as DashboardTeamSlugSettingsPayoutsRouteImport } from './routes/d
 import { Route as DashboardTeamSlugSettingsFoldersRouteImport } from './routes/dashboard/$teamSlug.settings.folders'
 import { Route as DashboardTeamSlugProjectIdContractRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract'
 import { Route as DashboardTeamSlugProjectIdVideoIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.$videoId'
+import { Route as DashboardTeamSlugProjectIdContractContractIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract.$contractId'
+import { Route as SignTokenRouteImport } from './routes/sign.$token'
 
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
@@ -635,6 +637,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/dashboard/$teamSlug/$projectId/$videoId'
       preLoaderRoute: typeof DashboardTeamSlugProjectIdVideoIdRouteImport
       parentRoute: typeof DashboardTeamSlugProjectIdRoute
+    }
+    '/dashboard/$teamSlug/$projectId/contract/$contractId': {
+      id: '/dashboard/$teamSlug/$projectId/contract/$contractId'
+      path: '/contract/$contractId'
+      fullPath: '/dashboard/$teamSlug/$projectId/contract/$contractId'
+      preLoaderRoute: typeof DashboardTeamSlugProjectIdContractContractIdRouteImport
+      parentRoute: typeof DashboardTeamSlugProjectIdRoute
+    }
+    '/sign/$token': {
+      id: '/sign/$token'
+      path: '/sign/$token'
+      fullPath: '/sign/$token'
+      preLoaderRoute: typeof SignTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }

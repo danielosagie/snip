@@ -34,7 +34,12 @@ const IMAGE_CONTENT_TYPES = new Set([
   "image/gif",
   "image/avif",
   "image/tiff",
+  "image/x-tiff",
   "image/bmp",
+  "image/heic",
+  "image/heif",
+  "image/heic-sequence",
+  "image/heif-sequence",
 ]);
 
 export function isImageContentType(contentType: string | null | undefined): boolean {

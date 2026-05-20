@@ -104,6 +104,67 @@ export default function PricingPage() {
               </Link>
             </div>
           </div>
+
+          {/* Enterprise PAYG — full-width brutalist strip below the two
+              flat tiers. Zero base; everything metered.  */}
+          <div className="mt-16 bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_#1a1a1a] p-8 md:p-12">
+            <div className="flex flex-col md:flex-row md:items-end gap-6 md:gap-12 mb-10">
+              <div className="flex-1">
+                <div className="text-xl font-bold uppercase tracking-widest text-[#888] mb-2">
+                  Enterprise
+                </div>
+                <div className="text-6xl md:text-7xl font-black tracking-tighter">
+                  Pay-as-you-go
+                </div>
+                <p className="text-lg md:text-xl font-medium text-[#1a1a1a] mt-4 max-w-2xl">
+                  Zero base. Pay only for what you actually store, ship, and
+                  transcribe. Built for teams whose footage volume swings wildly
+                  month to month.
+                </p>
+              </div>
+              <a
+                href="mailto:hi@snip.app?subject=Enterprise%20pricing"
+                className="inline-block bg-[#1a1a1a] text-[#f0f0e8] text-center px-8 py-4 border-2 border-[#1a1a1a] font-black uppercase hover:bg-[#C2410C] transition-colors whitespace-nowrap"
+              >
+                Talk to sales
+              </a>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border-t-2 border-[#1a1a1a] pt-8">
+              <div className="border-2 border-[#1a1a1a] p-5 bg-[#FFEDD5]">
+                <div className="text-xs font-bold uppercase tracking-widest text-[#888]">
+                  Storage
+                </div>
+                <div className="text-3xl font-black tracking-tighter mt-2">
+                  $0.05<span className="text-base text-[#888]"> / GB-mo</span>
+                </div>
+              </div>
+              <div className="border-2 border-[#1a1a1a] p-5 bg-[#FFEDD5]">
+                <div className="text-xs font-bold uppercase tracking-widest text-[#888]">
+                  Egress
+                </div>
+                <div className="text-3xl font-black tracking-tighter mt-2">
+                  $0.10<span className="text-base text-[#888]"> / GB</span>
+                </div>
+              </div>
+              <div className="border-2 border-[#1a1a1a] p-5 bg-[#FFEDD5]">
+                <div className="text-xs font-bold uppercase tracking-widest text-[#888]">
+                  Seats
+                </div>
+                <div className="text-3xl font-black tracking-tighter mt-2">
+                  $5<span className="text-base text-[#888]"> / seat / mo</span>
+                </div>
+              </div>
+              <div className="border-2 border-[#1a1a1a] p-5 bg-[#FFEDD5]">
+                <div className="text-xs font-bold uppercase tracking-widest text-[#888]">
+                  Transcription
+                </div>
+                <div className="text-3xl font-black tracking-tighter mt-2">
+                  $1<span className="text-base text-[#888]"> / 1k min</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

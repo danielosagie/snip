@@ -34,15 +34,88 @@ const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
 // archives, .prproj, etc.) uploads straight to object storage and shows
 // up as a plain file in the project grid. This matches the
 // Google-Drive-as-default-experience the team wants.
+//
+// ProRes / DNxHD / DNxHR are wrapped in QuickTime (.mov), so they arrive
+// as video/quicktime and Mux ingests them natively. R3D / BRAW often
+// arrive as application/octet-stream — those route to Mux via the
+// extension fallback below.
 const MUX_VIDEO_CONTENT_TYPES = new Set([
   "video/mp4",
   "video/quicktime",
   "video/webm",
   "video/x-matroska",
+  "video/mp2t",
+  "video/x-msvideo",
+  "video/x-ms-wmv",
+  "video/x-flv",
+  "video/3gpp",
+  "video/3gpp2",
+  "video/ogg",
+  "video/mxf",
+  "application/mxf",
+  "application/mp4",
+  "video/mp4v-es",
+  "video/iso.segment",
 ]);
 
-function isMuxVideoType(contentType: string): boolean {
-  return MUX_VIDEO_CONTENT_TYPES.has(normalizeContentType(contentType));
+// When the browser couldn't determine a real video MIME (common for ProRes,
+// DNxHR, R3D, BRAW) the upload arrives as application/octet-stream. Fall
+// back to extension sniffing so these still hit Mux.
+const MUX_VIDEO_EXT_FALLBACKS = new Set([
+  "mov",
+  "mp4",
+  "m4v",
+  "mkv",
+  "webm",
+  "mxf",
+  "ts",
+  "m2ts",
+  "mts",
+  "avi",
+  "flv",
+  "wmv",
+  "3gp",
+  "3g2",
+  "ogv",
+  "r3d",
+  "braw",
+  "mpg",
+  "mpeg",
+]);
+
+const AUDIO_CONTENT_TYPES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aac",
+  "audio/x-m4a",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/flac",
+  "audio/x-flac",
+  "audio/x-aiff",
+  "audio/aiff",
+  "audio/webm",
+]);
+
+function isMuxVideoType(contentType: string, filenameOrKey?: string): boolean {
+  if (MUX_VIDEO_CONTENT_TYPES.has(normalizeContentType(contentType))) {
+    return true;
+  }
+  const normalized = normalizeContentType(contentType);
+  if (normalized === "application/octet-stream" || normalized === "") {
+    if (filenameOrKey) {
+      const ext = getExtensionFromKey(filenameOrKey, "");
+      if (ext && MUX_VIDEO_EXT_FALLBACKS.has(ext)) return true;
+    }
+  }
+  return false;
+}
+
+export function isAudioContentType(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  return AUDIO_CONTENT_TYPES.has(normalizeContentType(contentType));
 }
 
 function getExtensionFromKey(key: string, fallback = "mp4") {
@@ -334,7 +407,7 @@ export const markUploadComplete = action({
         contentType: normalizedContentType,
       });
 
-      if (isMuxVideoType(normalizedContentType)) {
+      if (isMuxVideoType(normalizedContentType, video.s3Key)) {
         // Video path — kick off Mux ingest as before.
         await ctx.runMutation(internal.videos.markAsProcessing, {
           videoId: args.videoId,
@@ -601,6 +674,32 @@ export const getPublicDownloadUrl = action({
       title: result.video.title,
       contentType: result.video.contentType,
     });
+  },
+});
+
+/**
+ * Returns short-TTL signed URLs for every frame of an image sequence.
+ * Used by the asset detail page to render the frame grid alongside the
+ * stitched playback (when ready). Gated on team membership via the
+ * existing video access check.
+ */
+export const getSequenceFrameUrls = action({
+  args: { videoId: v.id("videos") },
+  returns: v.array(v.object({ key: v.string(), url: v.string() })),
+  handler: async (ctx, args): Promise<Array<{ key: string; url: string }>> => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+    if (!video || video.kind !== "image_sequence") return [];
+    const keys = (video as { sequenceFrameKeys?: string[] }).sequenceFrameKeys ?? [];
+    if (keys.length === 0) return [];
+    const out: Array<{ key: string; url: string }> = [];
+    for (const key of keys) {
+      const url = await buildSignedBucketObjectUrl(key, { expiresIn: 600 });
+      out.push({ key, url });
+    }
+    return out;
   },
 });
 
