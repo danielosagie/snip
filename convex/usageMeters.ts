@@ -98,6 +98,26 @@ export const incrementEgress = mutation({
   },
 });
 
+/**
+ * Egress increment that doesn't require an authenticated caller —
+ * used from public/share-grant download paths where we resolve the
+ * workspace owner from the video's team server-side.
+ */
+export const internalIncrementEgress = internalMutation({
+  args: {
+    ownerClerkId: v.string(),
+    bytes: v.number(),
+  },
+  handler: async (ctx, args) => {
+    if (args.bytes <= 0) return;
+    const row = await getOrCreateRow(ctx, args.ownerClerkId);
+    if (!row) return;
+    await ctx.db.patch(row._id, {
+      egressBytesGb: row.egressBytesGb + args.bytes / ONE_GIB,
+    });
+  },
+});
+
 export const incrementTranscribedMinutes = internalMutation({
   args: {
     workspaceOwnerClerkId: v.string(),
@@ -187,5 +207,97 @@ export const getOwnerMeterRow = internalQuery({
       )
       .unique();
     return row;
+  },
+});
+
+/**
+ * Resolve a video → its team's workspace owner Clerk ID. Used by the
+ * download/transcript meter wiring so an event on any video lands on
+ * the right `workspaceOwnerClerkId` row.
+ *
+ * Returns null when the video, project, or team is missing — callers
+ * should treat that as "skip metering for this event".
+ */
+export const resolveVideoWorkspaceOwner = internalQuery({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return null;
+    const project = await ctx.db.get(video.projectId);
+    if (!project) return null;
+    const team = await ctx.db.get(project.teamId);
+    if (!team) return null;
+    return {
+      ownerClerkId: team.ownerClerkId,
+      teamId: team._id,
+      durationSec: video.duration ?? null,
+      fileSize: video.fileSize ?? null,
+    };
+  },
+});
+
+/**
+ * Sum storage bytes (sum of `videos.fileSize`) for a workspace owner.
+ * Used by the daily cron's storage snapshot step. Walks every team the
+ * owner belongs to and sums non-deleted video sizes.
+ */
+export const sumStorageForOwner = internalQuery({
+  args: { ownerClerkId: v.string() },
+  handler: async (ctx, args) => {
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", args.ownerClerkId))
+      .collect();
+    const teamIds = new Set(memberships.map((m) => m.teamId));
+    let totalBytes = 0;
+    for (const teamId of teamIds) {
+      const team = await ctx.db.get(teamId);
+      if (!team || team.ownerClerkId !== args.ownerClerkId) continue;
+      // Walk every project on the team, then every non-deleted video.
+      const projects = await ctx.db
+        .query("projects")
+        .withIndex("by_team", (q) => q.eq("teamId", teamId))
+        .collect();
+      for (const project of projects) {
+        if (project.deletedAt) continue;
+        const videos = await ctx.db
+          .query("videos")
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
+          .collect();
+        for (const video of videos) {
+          if (video.deletedAt) continue;
+          totalBytes += video.fileSize ?? 0;
+        }
+      }
+    }
+    return { totalBytes };
+  },
+});
+
+/**
+ * Count distinct collaborators across the owner's teams — same logic
+ * `workspaceBilling.computeSeatCount` uses, exposed for the cron.
+ */
+export const countSeatsForOwner = internalQuery({
+  args: { ownerClerkId: v.string() },
+  handler: async (ctx, args) => {
+    const ownerMemberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", args.ownerClerkId))
+      .collect();
+    const distinct = new Set<string>();
+    distinct.add(args.ownerClerkId);
+    for (const m of ownerMemberships) {
+      const team = await ctx.db.get(m.teamId);
+      if (!team || team.ownerClerkId !== args.ownerClerkId) continue;
+      const teamMembers = await ctx.db
+        .query("teamMembers")
+        .withIndex("by_team", (q) => q.eq("teamId", m.teamId))
+        .collect();
+      for (const member of teamMembers) {
+        distinct.add(member.userClerkId);
+      }
+    }
+    return { seatCount: distinct.size };
   },
 });

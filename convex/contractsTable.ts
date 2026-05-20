@@ -312,6 +312,111 @@ export const removeRecipient = mutation({
   },
 });
 
+// ─── Fields ──────────────────────────────────────────────────────────
+
+const FIELD_TYPES = [
+  "signature",
+  "initials",
+  "date",
+  "text",
+  "checkbox",
+  "name",
+  "email",
+] as const;
+
+const fieldTypeValidator = v.union(
+  ...FIELD_TYPES.map((t) => v.literal(t)),
+);
+
+export const addField = mutation({
+  args: {
+    contractId: v.id("contracts"),
+    recipientId: v.id("contractRecipients"),
+    type: fieldTypeValidator,
+    pageIndex: v.optional(v.number()),
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    required: v.optional(v.boolean()),
+  },
+  returns: v.id("contractFields"),
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    if (contract.status !== "draft") {
+      throw new Error("Fields can only be edited on draft contracts.");
+    }
+    const recipient = await ctx.db.get(args.recipientId);
+    if (!recipient || recipient.contractId !== args.contractId) {
+      throw new Error("Recipient does not belong to this contract.");
+    }
+    return await ctx.db.insert("contractFields", {
+      contractId: args.contractId,
+      recipientId: args.recipientId,
+      type: args.type,
+      pageIndex: args.pageIndex ?? 0,
+      // Defaults are sensible centered-bottom for a signature-shaped
+      // field; the future drag-on-PDF editor will overwrite these.
+      x: args.x ?? 0.1,
+      y: args.y ?? 0.85,
+      width: args.width ?? 0.3,
+      height: args.height ?? 0.06,
+      required: args.required ?? true,
+    });
+  },
+});
+
+export const updateField = mutation({
+  args: {
+    fieldId: v.id("contractFields"),
+    pageIndex: v.optional(v.number()),
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    required: v.optional(v.boolean()),
+    type: v.optional(fieldTypeValidator),
+    recipientId: v.optional(v.id("contractRecipients")),
+  },
+  handler: async (ctx, args) => {
+    const field = await ctx.db.get(args.fieldId);
+    if (!field) throw new Error("Field not found.");
+    const contract = await requireContractAccess(ctx, field.contractId, "member");
+    if (contract.status !== "draft") {
+      throw new Error("Fields can only be edited on draft contracts.");
+    }
+    if (args.recipientId) {
+      const newRecipient = await ctx.db.get(args.recipientId);
+      if (!newRecipient || newRecipient.contractId !== field.contractId) {
+        throw new Error("Target recipient does not belong to this contract.");
+      }
+    }
+    const patch: Partial<Doc<"contractFields">> = {};
+    if (args.pageIndex !== undefined) patch.pageIndex = args.pageIndex;
+    if (args.x !== undefined) patch.x = args.x;
+    if (args.y !== undefined) patch.y = args.y;
+    if (args.width !== undefined) patch.width = args.width;
+    if (args.height !== undefined) patch.height = args.height;
+    if (args.required !== undefined) patch.required = args.required;
+    if (args.type !== undefined) patch.type = args.type;
+    if (args.recipientId !== undefined) patch.recipientId = args.recipientId;
+    await ctx.db.patch(args.fieldId, patch);
+  },
+});
+
+export const removeField = mutation({
+  args: { fieldId: v.id("contractFields") },
+  handler: async (ctx, args) => {
+    const field = await ctx.db.get(args.fieldId);
+    if (!field) return;
+    const contract = await requireContractAccess(ctx, field.contractId, "member");
+    if (contract.status !== "draft") {
+      throw new Error("Fields can only be edited on draft contracts.");
+    }
+    await ctx.db.delete(args.fieldId);
+  },
+});
+
 // ─── State machine: send for signature ───────────────────────────────
 
 export const sendForSignature = mutation({

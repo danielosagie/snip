@@ -214,6 +214,8 @@ function BillingRoute() {
                 includedSeats={subscription.includedSeats}
               />
 
+              {subscription.plan === "enterprise" && <EnterpriseUsage />}
+
               <PayoutsSection />
             </>
           )}
@@ -557,6 +559,86 @@ function formatMoney(cents: number, currency: string) {
  * are in one place. Receiving client money is still team-scoped, so this
  * lists every team the user belongs to with its own Connect card.
  */
+/**
+ * Pay-as-you-go usage table. Only rendered for enterprise subscribers.
+ * Reads `usageMeters.getCurrentPeriod` which returns the current
+ * billing period's running totals (or zeros if nothing's recorded
+ * yet). Values are local — the daily cron pushes them to Stripe.
+ */
+function EnterpriseUsage() {
+  const period = useQuery(api.usageMeters.getCurrentPeriod, {});
+  const tiers = useQuery(api.workspaceBilling.listTiers, {});
+  const enterprise = tiers?.find((t) => t.plan === "enterprise");
+  if (!period || !enterprise?.meters) return null;
+
+  const rates = enterprise.meters;
+
+  const rows = [
+    {
+      label: "Storage",
+      value: period.storageBytesGbMonths,
+      unit: "GB-mo",
+      cents: rates.storageGbMonthCents,
+      rateUnit: "/ GB-mo",
+    },
+    {
+      label: "Egress",
+      value: period.egressBytesGb,
+      unit: "GB",
+      cents: rates.egressGbCents,
+      rateUnit: "/ GB",
+    },
+    {
+      label: "Seats",
+      value: period.seatCount,
+      unit: "",
+      cents: rates.perSeatCents,
+      rateUnit: "/ seat / mo",
+    },
+    {
+      label: "Transcription",
+      value: period.transcribedMinutes / 1000,
+      unit: "1k min",
+      cents: rates.transcriptionPer1kMinCents,
+      rateUnit: "/ 1k min",
+    },
+  ];
+
+  return (
+    <div className="mt-8">
+      <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
+        This period's usage
+      </h2>
+      <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+        <div className="grid grid-cols-4 divide-x-2 divide-[#1a1a1a]/15">
+          {rows.map((row) => (
+            <div key={row.label} className="p-4">
+              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+                {row.label}
+              </div>
+              <div className="mt-2 text-2xl font-black tracking-tighter text-[#1a1a1a]">
+                {row.value.toFixed(2)}
+                {row.unit && (
+                  <span className="text-xs text-[#888] ml-1 font-mono font-normal">
+                    {row.unit}
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] text-[#C2410C] font-mono mt-1">
+                ${(row.cents / 100).toFixed(2)} {row.rateUnit}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="border-t-2 border-[#1a1a1a] px-4 py-2 text-[10px] font-mono text-[#888]">
+          Reported daily to Stripe at 03:00 UTC. Period ends{" "}
+          {new Date(period.periodEnd).toLocaleDateString()}.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PayoutsSection() {
   const teams = useQuery(api.teams.list, {});
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});

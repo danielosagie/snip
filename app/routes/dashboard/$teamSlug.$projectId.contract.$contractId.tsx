@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
 import { ArrowLeft, Plus, Send, Trash2, X } from "lucide-react";
@@ -14,7 +14,18 @@ import { ArrowLeft, Plus, Send, Trash2, X } from "lucide-react";
 type ContractDetail = NonNullable<FunctionReturnType<typeof api.contractsTable.get>>;
 type ContractDoc = ContractDetail["contract"];
 type RecipientDoc = ContractDetail["recipients"][number];
+type FieldDoc = ContractDetail["fields"][number];
 type AuditDoc = ContractDetail["audit"][number];
+
+const FIELD_TYPE_LABELS: Record<FieldDoc["type"], string> = {
+  signature: "Signature",
+  initials: "Initials",
+  date: "Date",
+  text: "Text",
+  checkbox: "Checkbox",
+  name: "Name",
+  email: "Email",
+};
 
 export const Route = createFileRoute(
   "/dashboard/$teamSlug/$projectId/contract/$contractId",
@@ -101,6 +112,11 @@ function ContractEditorPage() {
               contract={data.contract}
               recipients={data.recipients}
             />
+            <FieldsPanel
+              contract={data.contract}
+              recipients={data.recipients}
+              fields={data.fields}
+            />
             <AuditLogPanel audit={data.audit} />
           </div>
         </div>
@@ -113,20 +129,36 @@ function ContractBody({ contract }: { contract: ContractDoc }) {
   const update = useMutation(api.contractsTable.update);
   const [body, setBody] = useState<string>(contract.contentHtml ?? "");
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const isEditable = contract.status === "draft";
 
+  // Re-sync local state if the contract row changes from outside (e.g.
+  // a coworker editing) — but only when we don't have local edits in
+  // flight, to avoid stomping a half-typed sentence.
   useEffect(() => {
+    if (dirty) return;
     setBody(contract.contentHtml ?? "");
-  }, [contract._id, contract.contentHtml]);
+  }, [contract._id, contract.contentHtml, dirty]);
 
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await update({ contractId: contract._id, contentHtml: body });
-    } finally {
-      setSaving(false);
+  // Debounced autosave: wait 1.2s after the last keystroke. Matches the
+  // single-contract editor's feel without a heavy CRDT layer.
+  useEffect(() => {
+    if (!isEditable || !dirty) return;
+    if (body === contract.contentHtml) {
+      setDirty(false);
+      return;
     }
-  };
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await update({ contractId: contract._id, contentHtml: body });
+        setDirty(false);
+      } finally {
+        setSaving(false);
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [body, contract._id, contract.contentHtml, dirty, isEditable, update]);
 
   return (
     <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] p-6">
@@ -135,29 +167,20 @@ function ContractBody({ contract }: { contract: ContractDoc }) {
           Body
         </h2>
         {isEditable && (
-          <Button
-            variant="outline"
-            onClick={handleSave}
-            disabled={saving || body === contract.contentHtml}
-          >
-            {saving ? "Saving…" : "Save"}
-          </Button>
+          <span className="text-[10px] font-mono uppercase tracking-wider text-[#888]">
+            {saving ? "Saving…" : dirty ? "Unsaved" : "Saved"}
+          </span>
         )}
       </div>
-      {isEditable ? (
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={20}
-          className="w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] p-4 font-mono text-sm rounded-none resize-y focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
-          placeholder="Paste or write the contract body. HTML is supported — the signing page renders it as-is."
-        />
-      ) : (
-        <div
-          className="prose prose-sm max-w-none border-2 border-[#1a1a1a]/10 bg-white p-4"
-          dangerouslySetInnerHTML={{ __html: contract.contentHtml || "<p><em>(empty)</em></p>" }}
-        />
-      )}
+      <ContractDocPreview
+        html={body}
+        editable={isEditable}
+        resyncWithHtml={!dirty}
+        onChange={(next) => {
+          setBody(next);
+          setDirty(true);
+        }}
+      />
     </div>
   );
 }
@@ -315,6 +338,148 @@ function RecipientsPanel({
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function FieldsPanel({
+  contract,
+  recipients,
+  fields,
+}: {
+  contract: ContractDoc;
+  recipients: RecipientDoc[];
+  fields: FieldDoc[];
+}) {
+  const addField = useMutation(api.contractsTable.addField);
+  const removeField = useMutation(api.contractsTable.removeField);
+  const [selectedRecipient, setSelectedRecipient] = useState<Id<"contractRecipients"> | "">("");
+  const [selectedType, setSelectedType] = useState<FieldDoc["type"]>("signature");
+  const isDraft = contract.status === "draft";
+
+  // Default the selected recipient to the first signer so a single
+  // click adds a sensible field.
+  useEffect(() => {
+    if (selectedRecipient) return;
+    const firstSigner = recipients.find((r) => r.role === "signer");
+    if (firstSigner) setSelectedRecipient(firstSigner._id);
+  }, [recipients, selectedRecipient]);
+
+  const handleAdd = async () => {
+    if (!selectedRecipient) return;
+    try {
+      await addField({
+        contractId: contract._id,
+        recipientId: selectedRecipient,
+        type: selectedType,
+      });
+    } catch (err) {
+      console.error("addField failed", err);
+      alert(err instanceof Error ? err.message : "Failed to add field.");
+    }
+  };
+
+  // Group fields by recipient for the list display.
+  const fieldsByRecipient = new Map<string, FieldDoc[]>();
+  for (const f of fields) {
+    const key = f.recipientId as string;
+    const arr = fieldsByRecipient.get(key) ?? [];
+    arr.push(f);
+    fieldsByRecipient.set(key, arr);
+  }
+
+  return (
+    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] p-5">
+      <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1">
+        Fields
+      </h3>
+      <p className="text-[11px] text-[#888] mb-3 leading-snug">
+        Required entries each recipient must fill before signing.
+        Signature is implicit even with no field.
+      </p>
+
+      <ul className="space-y-3 mb-4">
+        {recipients.length === 0 && (
+          <li className="text-xs text-[#888] italic">
+            Add a recipient first.
+          </li>
+        )}
+        {recipients.map((r) => {
+          const rfs = fieldsByRecipient.get(r._id as string) ?? [];
+          return (
+            <li key={r._id}>
+              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#C2410C]">
+                {r.name}
+              </div>
+              {rfs.length === 0 ? (
+                <div className="text-[11px] text-[#888] italic mt-1">
+                  No extra fields.
+                </div>
+              ) : (
+                <ul className="mt-1 space-y-1">
+                  {rfs.map((f) => (
+                    <li
+                      key={f._id}
+                      className="flex items-center justify-between gap-2 border-2 border-[#1a1a1a]/15 px-2.5 py-1.5 bg-[#f0f0e8] text-xs"
+                    >
+                      <span className="font-bold text-[#1a1a1a]">
+                        {FIELD_TYPE_LABELS[f.type]}
+                        {f.required && <span className="text-[#C2410C] ml-1">*</span>}
+                      </span>
+                      {isDraft && (
+                        <button
+                          type="button"
+                          onClick={() => removeField({ fieldId: f._id })}
+                          aria-label="Remove field"
+                          className="h-6 w-6 inline-flex items-center justify-center border-2 border-[#1a1a1a]/30 bg-[#f0f0e8] hover:bg-[#dc2626] hover:text-[#f0f0e8] transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {isDraft && recipients.length > 0 && (
+        <div className="space-y-2 border-t-2 border-[#1a1a1a]/15 pt-3">
+          <select
+            value={selectedRecipient}
+            onChange={(e) => setSelectedRecipient(e.target.value as Id<"contractRecipients">)}
+            className="w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] h-9 px-2 text-sm rounded-none focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
+          >
+            {recipients.map((r) => (
+              <option key={r._id} value={r._id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedType}
+            onChange={(e) => setSelectedType(e.target.value as FieldDoc["type"])}
+            className="w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] h-9 px-2 text-sm rounded-none focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
+          >
+            {(Object.keys(FIELD_TYPE_LABELS) as FieldDoc["type"][]).map((t) => (
+              <option key={t} value={t}>
+                {FIELD_TYPE_LABELS[t]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={!selectedRecipient}
+            className="w-full inline-flex items-center justify-center gap-1.5 h-9 text-xs font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add field
+          </button>
+        </div>
+      )}
     </div>
   );
 }

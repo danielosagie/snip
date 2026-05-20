@@ -271,6 +271,39 @@ async function requireVideoMemberAccess(
   }
 }
 
+/**
+ * Best-effort egress metering. Called at signed-URL generation time —
+ * a slight overcount because the user may abandon the download, but
+ * cheaper than instrumenting actual byte transfer at the CDN. Silently
+ * no-ops when we can't resolve the workspace owner or when fileSize is
+ * unknown. Reported to Stripe by the daily PAYG cron.
+ *
+ * `hintBytes` lets the caller pass a known fileSize without an extra
+ * lookup; when omitted we read it via the resolver query.
+ */
+async function recordEgressBytes(
+  ctx: ActionCtx,
+  videoId: Id<"videos">,
+  hintBytes?: number,
+): Promise<void> {
+  try {
+    const owner = await ctx.runQuery(
+      internal.usageMeters.resolveVideoWorkspaceOwner,
+      { videoId },
+    );
+    if (!owner) return;
+    const bytes = hintBytes ?? owner.fileSize ?? 0;
+    if (bytes <= 0) return;
+    await ctx.runMutation(internal.usageMeters.internalIncrementEgress, {
+      ownerClerkId: owner.ownerClerkId,
+      bytes,
+    });
+  } catch (err) {
+    // Never let metering break a real download.
+    console.error("recordEgressBytes failed", err);
+  }
+}
+
 function buildPublicPlaybackSession(
   playbackId: string,
 ): { url: string; posterUrl: string } {
@@ -639,6 +672,7 @@ export const getDownloadUrl = action({
       throw new Error("Original bucket file not found for this video");
     }
 
+    await recordEgressBytes(ctx, args.videoId, video.fileSize);
     return await buildDownloadResult(key, {
       title: video.title,
       contentType: video.contentType,
@@ -670,6 +704,7 @@ export const getPublicDownloadUrl = action({
       throw new Error("Original bucket file not found for this video");
     }
 
+    await recordEgressBytes(ctx, result.video._id as Id<"videos">);
     return await buildDownloadResult(key, {
       title: result.video.title,
       contentType: result.video.contentType,
@@ -752,6 +787,7 @@ export const getSharedDownloadUrl = action({
       throw new Error("Original bucket file not found for this video");
     }
 
+    await recordEgressBytes(ctx, result.video._id as Id<"videos">);
     return await buildDownloadResult(key, {
       title: result.video.title,
       contentType: result.video.contentType,

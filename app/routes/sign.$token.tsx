@@ -1,10 +1,27 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
+import * as React from "react";
 import { useEffect, useRef, useState } from "react";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
+import { Id } from "@convex/_generated/dataModel";
 import { Input } from "@/components/ui/input";
 import { SnipMark } from "@/components/SnipMark";
+import { cn } from "@/lib/utils";
 import { Check, X } from "lucide-react";
+
+type SignData = NonNullable<FunctionReturnType<typeof api.contractsTable.getByToken>>;
+type SignFieldDoc = SignData["fields"][number];
+
+const FIELD_TYPE_LABELS: Record<SignFieldDoc["type"], string> = {
+  signature: "Signature",
+  initials: "Initials",
+  date: "Date",
+  text: "Text",
+  checkbox: "Checkbox",
+  name: "Name",
+  email: "Email",
+};
 
 export const Route = createFileRoute("/sign/$token")({
   component: SignPage,
@@ -35,6 +52,7 @@ function SignPage() {
   const [agreed, setAgreed] = useState(false);
   const [declineReason, setDeclineReason] = useState("");
   const [showDeclineForm, setShowDeclineForm] = useState(false);
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const padRef = useRef<SignaturePadHandle | null>(null);
 
   const sign = useMutation(api.contractsTable.sign);
@@ -100,17 +118,35 @@ function SignPage() {
     );
   }
 
-  const canSubmit = typedName.trim().length > 1 && agreed && !submitting;
+  // Only fields tagged required gate submit. Checkboxes pass when
+  // checked OR explicitly unchecked (any answer is valid as long as
+  // the user touched it); we treat missing value as not answered.
+  const requiredFields = data.fields.filter((f) => f.required);
+  const allRequiredFilled = requiredFields.every((f) => {
+    const v = fieldValues[f._id as string];
+    if (f.type === "checkbox") return v !== undefined;
+    return typeof v === "string" && v.trim().length > 0;
+  });
+
+  const canSubmit =
+    typedName.trim().length > 1 && agreed && allRequiredFilled && !submitting;
 
   const handleSign = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
       const drawn = padRef.current?.toDataUrl();
+      const fvPayload = Object.entries(fieldValues)
+        .filter(([, value]) => value !== undefined && value !== "")
+        .map(([fieldId, value]) => ({
+          fieldId: fieldId as Id<"contractFields">,
+          value,
+        }));
       await sign({
         token,
         typedSignatureName: typedName.trim(),
         signatureDataUrl: drawn,
+        fieldValues: fvPayload.length > 0 ? fvPayload : undefined,
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
       });
       setSubmitted(true);
@@ -170,6 +206,18 @@ function SignPage() {
             <h2 className="text-xl font-black uppercase tracking-tighter text-[#1a1a1a]">
               Sign
             </h2>
+
+            {data.fields.length > 0 && (
+              <FieldInputs
+                fields={data.fields}
+                values={fieldValues}
+                onChange={(id, value) =>
+                  setFieldValues((prev) => ({ ...prev, [id]: value }))
+                }
+                recipientName={data.recipient.name}
+                recipientEmail={data.recipient.email}
+              />
+            )}
 
             <div>
               <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1.5">
@@ -440,6 +488,115 @@ const SignaturePad = (() => {
   return React.forwardRef<SignaturePadHandle, {}>(SignaturePadImpl);
 })();
 
-// Local React import so the IIFE has access without polluting the top
-// of the file with unused imports for the simple usage above.
-import * as React from "react";
+// ─── Field inputs (inline on the signing page) ───────────────────────
+
+function FieldInputs({
+  fields,
+  values,
+  onChange,
+  recipientName,
+  recipientEmail,
+}: {
+  fields: SignFieldDoc[];
+  values: Record<string, string>;
+  onChange: (id: string, value: string) => void;
+  recipientName: string;
+  recipientEmail: string;
+}) {
+  // "signature" fields are subsumed by the typed-name + drawn-signature
+  // controls below, so we don't render an extra input for them.
+  const visible = fields.filter((f) => f.type !== "signature");
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="border-2 border-[#1a1a1a] bg-white p-4">
+      <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#C2410C] mb-3">
+        Fill these in
+      </div>
+      <ul className="space-y-3">
+        {visible.map((f) => {
+          const id = f._id as string;
+          const value = values[id] ?? "";
+          const label = (
+            <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1">
+              {FIELD_TYPE_LABELS[f.type]}
+              {f.required && <span className="text-[#C2410C] ml-1">*</span>}
+            </label>
+          );
+          if (f.type === "checkbox") {
+            return (
+              <li key={id}>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={value === "true"}
+                    onChange={(e) => onChange(id, e.target.checked ? "true" : "false")}
+                    className="mt-1 h-4 w-4 accent-[#C2410C]"
+                  />
+                  <span className="text-sm text-[#1a1a1a]">
+                    {FIELD_TYPE_LABELS[f.type]}
+                    {f.required && <span className="text-[#C2410C] ml-1">*</span>}
+                  </span>
+                </label>
+              </li>
+            );
+          }
+          if (f.type === "date") {
+            return (
+              <li key={id}>
+                {label}
+                <Input
+                  type="date"
+                  value={value}
+                  onChange={(e) => onChange(id, e.target.value)}
+                  className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10"
+                />
+              </li>
+            );
+          }
+          if (f.type === "name") {
+            return (
+              <li key={id}>
+                {label}
+                <Input
+                  value={value || recipientName}
+                  onChange={(e) => onChange(id, e.target.value)}
+                  className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10"
+                />
+              </li>
+            );
+          }
+          if (f.type === "email") {
+            return (
+              <li key={id}>
+                {label}
+                <Input
+                  type="email"
+                  value={value || recipientEmail}
+                  onChange={(e) => onChange(id, e.target.value)}
+                  className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10"
+                />
+              </li>
+            );
+          }
+          // initials, text
+          return (
+            <li key={id}>
+              {label}
+              <Input
+                value={value}
+                onChange={(e) => onChange(id, e.target.value)}
+                placeholder={f.type === "initials" ? "AB" : ""}
+                maxLength={f.type === "initials" ? 5 : undefined}
+                className={cn(
+                  "border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10",
+                  f.type === "initials" && "max-w-[120px] uppercase font-bold tracking-widest",
+                )}
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

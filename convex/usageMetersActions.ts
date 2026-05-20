@@ -84,6 +84,33 @@ export const runDailyReport = internalAction({
 
     for (const sub of subs) {
       if (!sub.stripeCustomerId) continue;
+
+      // Snapshot storage + seats before reading the meter row so the
+      // values we report to Stripe include today's data point.
+      try {
+        const storage = await ctx.runQuery(
+          internal.usageMeters.sumStorageForOwner,
+          { ownerClerkId: sub.ownerClerkId },
+        );
+        await ctx.runMutation(internal.usageMeters.snapshotStorageDelta, {
+          workspaceOwnerClerkId: sub.ownerClerkId,
+          bytesNow: storage.totalBytes,
+        });
+        const seats = await ctx.runQuery(
+          internal.usageMeters.countSeatsForOwner,
+          { ownerClerkId: sub.ownerClerkId },
+        );
+        await ctx.runMutation(internal.usageMeters.updateSeatCount, {
+          workspaceOwnerClerkId: sub.ownerClerkId,
+          seatCount: seats.seatCount,
+        });
+      } catch (err) {
+        console.error("usageMeters: snapshot failed", {
+          ownerClerkId: sub.ownerClerkId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       const meter = await ctx.runQuery(
         internal.usageMeters.getOwnerMeterRow,
         { ownerClerkId: sub.ownerClerkId },
