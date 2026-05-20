@@ -30,7 +30,6 @@ import {
 } from "@/components/projects/ProjectToolbar";
 import { ProjectAddButton } from "@/components/projects/ProjectAddButton";
 import { FolderRow } from "@/components/folders/FolderRow";
-import { ContractTile } from "@/components/contracts/ContractTile";
 import { ContractListSection } from "@/components/contracts/ContractListSection";
 import {
   DropdownMenu,
@@ -109,6 +108,26 @@ type VideoIntentTargetProps = {
   ) => void;
   children: ReactNode;
 };
+
+// Content types that have an in-app focused view (the asset detail
+// page). Click in the project grid → navigate to the editor view
+// instead of triggering a download. Everything else (zips, source
+// files, etc.) downloads on click as before.
+const DOC_CONTENT_TYPES = new Set([
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/x-markdown",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
+function computeHasFocusedView(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  if (contentType.startsWith("image/")) return true;
+  if (contentType.startsWith("text/")) return true;
+  return DOC_CONTENT_TYPES.has(contentType);
+}
 
 function VideoIntentTarget({
   className,
@@ -911,6 +930,16 @@ export default function ProjectPage({
                 void handleMoveFolder(droppedId, targetId)
               }
             />
+            {/* Contracts share folder-tile styling and sit alongside
+                them as the project's organizational/metadata strip.
+                Hidden when empty AND the viewer can't create one. */}
+            {currentFolderId === null && (
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                canEdit={canUpload}
+              />
+            )}
             <div className="px-6 pt-4 pb-6">
               {(filteredFolders?.length ?? 0) > 0 ? (
                 <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
@@ -918,19 +947,9 @@ export default function ProjectPage({
                 </div>
               ) : null}
               <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-              {/* Contract pinned to the front of the grid when at
-                  project root. Contracts live one-per-project today
-                  (not in a folder), so we only show the tile when
-                  the user isn't deep inside a folder. */}
-              {currentFolderId === null ? (
-                <ContractTile
-                  teamSlug={resolvedTeamSlug}
-                  projectId={project._id}
-                  projectName={project.name}
-                  contract={project.contract ?? null}
-                  canDelete={canUpload}
-                />
-              ) : null}
+              {/* The contract (legacy embedded + new multi-contracts) now
+                  renders in the folder-styled ContractListSection above
+                  the FolderRow. Keeping the file grid pure files. */}
               {filteredVideos?.map((video) => {
                 // Non-video assets (PDF, docs, images, source files) take
                 // a separate Drive-style tile — no thumbnail, no
@@ -944,9 +963,7 @@ export default function ProjectPage({
                   video.status === "uploading" ||
                   video.status === "processing";
                 if (!isPlayableVideo) {
-                  const hasFocusedView =
-                    (video.contentType?.startsWith("image/") ?? false) ||
-                    video.contentType === "application/pdf";
+                  const hasFocusedView = computeHasFocusedView(video.contentType);
                   return (
                     <FileTile
                       key={video._id}
@@ -1118,16 +1135,6 @@ export default function ProjectPage({
               })}
               </div>
             </div>
-            {/* Multi-contract list — pinned BELOW the file grid as project
-                metadata, separated from the working content. Hidden when
-                empty AND the viewer can't create one. */}
-            {currentFolderId === null && (
-              <ContractListSection
-                projectId={project._id}
-                teamSlug={resolvedTeamSlug}
-                canEdit={canUpload}
-              />
-            )}
           </div>
         ) : (
           /* List View - Horizontal rows */
@@ -1147,6 +1154,13 @@ export default function ProjectPage({
                 void handleMoveFolder(droppedId, targetId)
               }
             />
+            {currentFolderId === null && (
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                canEdit={canUpload}
+              />
+            )}
             <div className="divide-y-2 divide-[#1a1a1a]">
             {filteredVideos?.map((video) => {
               const isPlayableVideo =
@@ -1334,15 +1348,6 @@ export default function ProjectPage({
               );
             })}
             </div>
-            {/* Multi-contract list — pinned BELOW the file list as project
-                metadata, separated from the working content. */}
-            {currentFolderId === null && (
-              <ContractListSection
-                projectId={project._id}
-                teamSlug={resolvedTeamSlug}
-                canEdit={canUpload}
-              />
-            )}
           </div>
         )}
         {/* Timeline history used to live here as a panel under the grid.

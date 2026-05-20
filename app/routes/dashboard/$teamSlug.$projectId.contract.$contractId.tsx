@@ -9,7 +9,22 @@ import { DashboardHeader } from "@/components/DashboardHeader";
 import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
-import { ArrowLeft, Plus, Send, Trash2, X } from "lucide-react";
+import {
+  ArrowLeft,
+  AtSign,
+  Calendar,
+  CheckSquare,
+  ChevronDown,
+  FileSignature as FileSignatureIcon,
+  GripVertical,
+  Pencil,
+  Plus,
+  Send,
+  Trash2,
+  Type,
+  User,
+  X,
+} from "lucide-react";
 
 type ContractDetail = NonNullable<FunctionReturnType<typeof api.contractsTable.get>>;
 type ContractDoc = ContractDetail["contract"];
@@ -20,12 +35,38 @@ type AuditDoc = ContractDetail["audit"][number];
 const FIELD_TYPE_LABELS: Record<FieldDoc["type"], string> = {
   signature: "Signature",
   initials: "Initials",
-  date: "Date",
-  text: "Text",
+  date: "Date signed",
+  text: "Text field",
   checkbox: "Checkbox",
   name: "Name",
   email: "Email",
 };
+
+const FIELD_TYPE_ICONS: Record<
+  FieldDoc["type"],
+  React.ComponentType<{ className?: string; strokeWidth?: number }>
+> = {
+  signature: FileSignatureIcon,
+  initials: Pencil,
+  date: Calendar,
+  text: Type,
+  checkbox: CheckSquare,
+  name: User,
+  email: AtSign,
+};
+
+// Grouping inspired by the Google Docs eSignature panel — manually
+// filled fields the recipient must complete, then auto-filled fields
+// the system stamps at sign time.
+const FIELDS_FILLABLE: FieldDoc["type"][] = [
+  "signature",
+  "initials",
+  "name",
+  "text",
+  "checkbox",
+  "email",
+];
+const FIELDS_AUTO: FieldDoc["type"][] = ["date"];
 
 export const Route = createFileRoute(
   "/dashboard/$teamSlug/$projectId/contract/$contractId",
@@ -342,6 +383,25 @@ function RecipientsPanel({
   );
 }
 
+/**
+ * Brutalist take on the Google Docs eSignature side panel:
+ *
+ *   1. Header with feather icon + "eSignature" title.
+ *   2. "Insert fields for" — recipient selector (avatar circle +
+ *      name + chevron). Click cycles through signers.
+ *   3. "Fillable fields" — draggable pill list (Signature, Initials,
+ *      Name, Text, Checkbox, Email). Each row clickable to add the
+ *      field to the currently-selected recipient.
+ *   4. "Auto filled fields" — same shape but for system-stamped
+ *      fields (Date signed).
+ *   5. Per-recipient placed-fields list below.
+ *   6. Sticky "Request eSignature" CTA at the bottom that fires the
+ *      contract's `sendForSignature` mutation.
+ *
+ * Drag-on-PDF placement is still v3 — until then "drag" just adds
+ * the field with default coords; the placed list shows what's
+ * attached to each recipient.
+ */
 function FieldsPanel({
   contract,
   recipients,
@@ -353,8 +413,10 @@ function FieldsPanel({
 }) {
   const addField = useMutation(api.contractsTable.addField);
   const removeField = useMutation(api.contractsTable.removeField);
+  const sendForSignature = useMutation(api.contractsTable.sendForSignature);
   const [selectedRecipient, setSelectedRecipient] = useState<Id<"contractRecipients"> | "">("");
-  const [selectedType, setSelectedType] = useState<FieldDoc["type"]>("signature");
+  const [recipientMenuOpen, setRecipientMenuOpen] = useState(false);
+  const [sending, setSending] = useState(false);
   const isDraft = contract.status === "draft";
 
   // Default the selected recipient to the first signer so a single
@@ -365,13 +427,13 @@ function FieldsPanel({
     if (firstSigner) setSelectedRecipient(firstSigner._id);
   }, [recipients, selectedRecipient]);
 
-  const handleAdd = async () => {
+  const handleAddType = async (type: FieldDoc["type"]) => {
     if (!selectedRecipient) return;
     try {
       await addField({
         contractId: contract._id,
         recipientId: selectedRecipient,
-        type: selectedType,
+        type,
       });
     } catch (err) {
       console.error("addField failed", err);
@@ -388,99 +450,230 @@ function FieldsPanel({
     fieldsByRecipient.set(key, arr);
   }
 
+  const currentRecipient = recipients.find((r) => r._id === selectedRecipient);
+  const requestDisabled =
+    !isDraft || recipients.filter((r) => r.role === "signer").length === 0;
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await sendForSignature({ contractId: contract._id });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Couldn't send for signature.");
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
-    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] p-5">
-      <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1">
-        Fields
-      </h3>
-      <p className="text-[11px] text-[#888] mb-3 leading-snug">
-        Required entries each recipient must fill before signing.
-        Signature is implicit even with no field.
-      </p>
-
-      <ul className="space-y-3 mb-4">
-        {recipients.length === 0 && (
-          <li className="text-xs text-[#888] italic">
-            Add a recipient first.
-          </li>
-        )}
-        {recipients.map((r) => {
-          const rfs = fieldsByRecipient.get(r._id as string) ?? [];
-          return (
-            <li key={r._id}>
-              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#C2410C]">
-                {r.name}
-              </div>
-              {rfs.length === 0 ? (
-                <div className="text-[11px] text-[#888] italic mt-1">
-                  No extra fields.
-                </div>
-              ) : (
-                <ul className="mt-1 space-y-1">
-                  {rfs.map((f) => (
-                    <li
-                      key={f._id}
-                      className="flex items-center justify-between gap-2 border-2 border-[#1a1a1a]/15 px-2.5 py-1.5 bg-[#f0f0e8] text-xs"
-                    >
-                      <span className="font-bold text-[#1a1a1a]">
-                        {FIELD_TYPE_LABELS[f.type]}
-                        {f.required && <span className="text-[#C2410C] ml-1">*</span>}
-                      </span>
-                      {isDraft && (
-                        <button
-                          type="button"
-                          onClick={() => removeField({ fieldId: f._id })}
-                          aria-label="Remove field"
-                          className="h-6 w-6 inline-flex items-center justify-center border-2 border-[#1a1a1a]/30 bg-[#f0f0e8] hover:bg-[#dc2626] hover:text-[#f0f0e8] transition-colors"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-
-      {isDraft && recipients.length > 0 && (
-        <div className="space-y-2 border-t-2 border-[#1a1a1a]/15 pt-3">
-          <select
-            value={selectedRecipient}
-            onChange={(e) => setSelectedRecipient(e.target.value as Id<"contractRecipients">)}
-            className="w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] h-9 px-2 text-sm rounded-none focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
-          >
-            {recipients.map((r) => (
-              <option key={r._id} value={r._id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value as FieldDoc["type"])}
-            className="w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] h-9 px-2 text-sm rounded-none focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
-          >
-            {(Object.keys(FIELD_TYPE_LABELS) as FieldDoc["type"][]).map((t) => (
-              <option key={t} value={t}>
-                {FIELD_TYPE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleAdd}
-            disabled={!selectedRecipient}
-            className="w-full inline-flex items-center justify-center gap-1.5 h-9 text-xs font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add field
-          </button>
+    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] flex flex-col">
+      {/* Header strip */}
+      <div className="flex items-center justify-between border-b-2 border-[#1a1a1a] px-4 py-3 bg-[#1a1a1a] text-[#f0f0e8]">
+        <div className="flex items-center gap-2">
+          <FileSignatureIcon className="h-4 w-4 text-[#C2410C]" strokeWidth={2} />
+          <h3 className="text-xs font-black uppercase tracking-wider">
+            eSignature
+          </h3>
         </div>
-      )}
+      </div>
+
+      <div className="p-4 space-y-5">
+        {/* Insert fields for */}
+        <div>
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1.5">
+            Insert fields for
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setRecipientMenuOpen((v) => !v)}
+              disabled={recipients.length === 0 || !isDraft}
+              className="w-full inline-flex items-center justify-between gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 h-10 disabled:opacity-50 hover:bg-[#FFEDD5] transition-colors"
+            >
+              <span className="inline-flex items-center gap-2 min-w-0">
+                <span className="h-6 w-6 shrink-0 rounded-full border-2 border-[#1a1a1a] bg-[#FFEDD5]" />
+                <span className="text-sm font-bold text-[#1a1a1a] truncate">
+                  {currentRecipient?.name ?? "Add a signer first"}
+                </span>
+              </span>
+              <ChevronDown className="h-4 w-4 text-[#1a1a1a] shrink-0" />
+            </button>
+            {recipientMenuOpen && recipients.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-1 z-20 border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a]">
+                {recipients.map((r) => (
+                  <button
+                    key={r._id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedRecipient(r._id);
+                      setRecipientMenuOpen(false);
+                    }}
+                    className={cn(
+                      "w-full inline-flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors hover:bg-[#FFEDD5]",
+                      r._id === selectedRecipient && "bg-[#FFEDD5]",
+                    )}
+                  >
+                    <span className="h-5 w-5 shrink-0 rounded-full border-2 border-[#1a1a1a] bg-[#f0f0e8]" />
+                    <span className="font-bold text-[#1a1a1a] flex-1 truncate">
+                      {r.name}
+                    </span>
+                    <span className="text-[10px] font-mono uppercase text-[#888]">
+                      {r.role}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Fillable fields */}
+        <div>
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1.5">
+            Fillable fields
+          </div>
+          <ul className="space-y-1.5">
+            {FIELDS_FILLABLE.map((type) => (
+              <FieldChip
+                key={type}
+                type={type}
+                disabled={!isDraft || !selectedRecipient}
+                onClick={() => void handleAddType(type)}
+              />
+            ))}
+          </ul>
+        </div>
+
+        {/* Auto-filled fields */}
+        <div>
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1.5">
+            Auto filled fields
+          </div>
+          <ul className="space-y-1.5">
+            {FIELDS_AUTO.map((type) => (
+              <FieldChip
+                key={type}
+                type={type}
+                disabled={!isDraft || !selectedRecipient}
+                onClick={() => void handleAddType(type)}
+              />
+            ))}
+          </ul>
+        </div>
+
+        {/* Placed fields per recipient — kept compact since the panel
+            stays a sidebar. */}
+        {fields.length > 0 && (
+          <div>
+            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1.5">
+              Placed fields
+            </div>
+            <ul className="space-y-2">
+              {recipients.map((r) => {
+                const rfs = fieldsByRecipient.get(r._id as string) ?? [];
+                if (rfs.length === 0) return null;
+                return (
+                  <li key={r._id}>
+                    <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#C2410C]">
+                      {r.name}
+                    </div>
+                    <ul className="mt-1 space-y-1">
+                      {rfs.map((f) => {
+                        const Icon = FIELD_TYPE_ICONS[f.type];
+                        return (
+                          <li
+                            key={f._id}
+                            className="flex items-center gap-2 border border-[#1a1a1a]/15 px-2 py-1 bg-[#f0f0e8] text-xs"
+                          >
+                            <Icon
+                              className="h-3.5 w-3.5 text-[#C2410C]"
+                              strokeWidth={1.75}
+                            />
+                            <span className="font-bold text-[#1a1a1a] flex-1">
+                              {FIELD_TYPE_LABELS[f.type]}
+                            </span>
+                            {isDraft && (
+                              <button
+                                type="button"
+                                onClick={() => removeField({ fieldId: f._id })}
+                                aria-label="Remove field"
+                                className="h-5 w-5 inline-flex items-center justify-center hover:bg-[#dc2626] hover:text-[#f0f0e8] transition-colors"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom CTA strip — matches the Google Docs pattern. */}
+      <div className="border-t-2 border-[#1a1a1a] p-4 space-y-2 bg-[#f0f0e8]">
+        {requestDisabled && (
+          <p className="text-[10px] text-[#888] text-center leading-snug">
+            {!isDraft
+              ? "Contract is no longer a draft."
+              : "Add at least one signer to enable signing requests."}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => void handleSend()}
+          disabled={requestDisabled || sending}
+          className={cn(
+            "w-full inline-flex items-center justify-center gap-2 h-11 text-xs font-black uppercase tracking-wider border-2 border-[#1a1a1a] transition-all",
+            requestDisabled || sending
+              ? "bg-[#e8e8e0] text-[#888] cursor-not-allowed"
+              : "bg-[#1a1a1a] text-[#f0f0e8] hover:bg-[#C2410C] shadow-[4px_4px_0px_0px_#1a1a1a] active:translate-y-[1px] active:translate-x-[1px] active:shadow-[2px_2px_0px_0px_#1a1a1a]",
+          )}
+        >
+          <Send className="h-3.5 w-3.5" />
+          {sending ? "Sending…" : "Request eSignature"}
+        </button>
+      </div>
     </div>
+  );
+}
+
+function FieldChip({
+  type,
+  disabled,
+  onClick,
+}: {
+  type: FieldDoc["type"];
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const Icon = FIELD_TYPE_ICONS[type];
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={cn(
+          "w-full inline-flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 h-10 transition-colors",
+          disabled
+            ? "opacity-50 cursor-not-allowed"
+            : "hover:bg-[#FFEDD5] cursor-grab active:cursor-grabbing",
+        )}
+        draggable={!disabled}
+        title="Click to add a field for the selected recipient"
+      >
+        <GripVertical className="h-4 w-4 text-[#888]" />
+        <Icon className="h-4 w-4 text-[#C2410C]" strokeWidth={1.75} />
+        <span className="text-sm font-bold text-[#1a1a1a]">
+          {FIELD_TYPE_LABELS[type]}
+        </span>
+      </button>
+    </li>
   );
 }
 
