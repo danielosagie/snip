@@ -1206,6 +1206,8 @@ export const setMuxPreviewAssetReference = internalMutation({
     await ctx.db.patch(args.videoId, {
       muxPreviewAssetId: args.muxPreviewAssetId,
       muxPreviewAssetStatus: "preparing",
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
       watermarkOverlayKey: args.watermarkOverlayKey,
     });
   },
@@ -1220,6 +1222,8 @@ export const setMuxPreviewPlaybackId = internalMutation({
     await ctx.db.patch(args.videoId, {
       muxPreviewPlaybackId: args.muxPreviewPlaybackId,
       muxPreviewAssetStatus: "ready",
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
     });
   },
 });
@@ -1227,10 +1231,32 @@ export const setMuxPreviewPlaybackId = internalMutation({
 export const setMuxPreviewAssetErrored = internalMutation({
   args: {
     videoId: v.id("videos"),
+    reason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.videoId, {
       muxPreviewAssetStatus: "errored",
+      muxPreviewAssetError: args.reason,
+      muxPreviewAssetUpdatedAt: Date.now(),
+    });
+  },
+});
+
+// Owner-triggered reset: clears preview state so
+// `ensurePreviewAssetForShareLink` runs again on the next viewer poll (or
+// when explicitly re-scheduled by the retry action).
+export const clearMuxPreviewAsset = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      muxPreviewAssetId: undefined,
+      muxPreviewPlaybackId: undefined,
+      muxPreviewAssetStatus: undefined,
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
+      watermarkOverlayKey: undefined,
     });
   },
 });
@@ -1333,6 +1359,7 @@ export const getByShareGrantWithPaywall = query({
         clientEmail: resolved.shareLink.clientEmail ?? null,
         clientLabel: resolved.shareLink.clientLabel ?? null,
         allowDownload: resolved.shareLink.allowDownload,
+        createdByClerkId: resolved.shareLink.createdByClerkId,
       },
       video: {
         _id: video._id,
@@ -1346,6 +1373,8 @@ export const getByShareGrantWithPaywall = query({
         muxPreviewAssetId: video.muxPreviewAssetId,
         muxPreviewPlaybackId: video.muxPreviewPlaybackId,
         muxPreviewAssetStatus: video.muxPreviewAssetStatus,
+        muxPreviewAssetError: video.muxPreviewAssetError ?? null,
+        muxPreviewAssetUpdatedAt: video.muxPreviewAssetUpdatedAt ?? null,
         imagePreviewS3Key: video.imagePreviewS3Key ?? null,
         imagePreviewStatus: video.imagePreviewStatus ?? null,
       },

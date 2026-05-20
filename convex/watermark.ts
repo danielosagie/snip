@@ -1,9 +1,10 @@
 "use node";
 
 import { v } from "convex/values";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { internalAction } from "./_generated/server";
-import { BUCKET_NAME, buildPublicUrl, getS3Client, isStorageConfigured } from "./s3";
+import { BUCKET_NAME, getS3Client, isStorageConfigured } from "./s3";
 import { isFeatureEnabled } from "./featureFlags";
 
 /**
@@ -116,22 +117,32 @@ export const generateForShareLink = internalAction({
 
     const key = `${OVERLAY_BUCKET_PREFIX}/${args.shareLinkId}/${Date.now()}.png`;
     const s3 = getS3Client();
+    // No public-read ACL: R2 silently ignores object ACLs (public access is a
+    // bucket-level setting), and a misconfigured bucket would 403 Mux when
+    // it tries to fetch the overlay. We sign a long-lived GET URL below
+    // instead so Mux can fetch the overlay regardless of bucket policy.
     await s3.send(
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: key,
         Body: png,
         ContentType: "image/png",
-        // Watermarks must be publicly fetchable by Mux's ingest workers.
-        ACL: "public-read",
         CacheControl: "public, max-age=31536000, immutable",
       }),
+    );
+
+    // 7-day TTL is the SigV4 ceiling. Mux fetches the overlay at ingest
+    // time so the URL only needs to outlive the ingest queue.
+    const fetchUrl = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
+      { expiresIn: 60 * 60 * 24 * 7 },
     );
 
     return {
       status: "ok" as const,
       s3Key: key,
-      publicUrl: buildPublicUrl(key),
+      publicUrl: fetchUrl,
     };
   },
 });

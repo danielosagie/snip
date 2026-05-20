@@ -289,6 +289,10 @@ export const getGrantUnlockState = query({
       }),
       v.null(),
     ),
+    // True when the authenticated viewer is the share link's creator.
+    // The share page uses this to render the owner-verification banner
+    // (toggle between client-view watermarked preview and full-res).
+    isOwner: v.boolean(),
   }),
   handler: async (ctx, args) => {
     const grant = await ctx.db
@@ -296,17 +300,34 @@ export const getGrantUnlockState = query({
       .withIndex("by_token", (q) => q.eq("token", args.grantToken))
       .unique();
     if (!grant || grant.expiresAt <= Date.now()) {
-      return { valid: false, paid: false, expiresAt: null, paywall: null };
+      return {
+        valid: false,
+        paid: false,
+        expiresAt: null,
+        paywall: null,
+        isOwner: false,
+      };
     }
     const shareLink = await ctx.db.get(grant.shareLinkId);
     if (!shareLink) {
-      return { valid: false, paid: false, expiresAt: null, paywall: null };
+      return {
+        valid: false,
+        paid: false,
+        expiresAt: null,
+        paywall: null,
+        isOwner: false,
+      };
     }
+    const identity = await ctx.auth.getUserIdentity();
+    const isOwner =
+      identity?.subject != null &&
+      identity.subject === shareLink.createdByClerkId;
     return {
       valid: true,
       paid: Boolean(grant.paidAt),
       expiresAt: grant.expiresAt,
       paywall: shareLink.paywall ?? null,
+      isOwner,
     };
   },
 });

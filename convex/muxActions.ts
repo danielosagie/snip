@@ -359,6 +359,7 @@ export const processWebhook = internalAction({
           if (resolved.isPreview) {
             await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
               videoId: resolved.videoId,
+              reason: `mux_asset_errored:${errorMessage}`,
             });
             break;
           }
