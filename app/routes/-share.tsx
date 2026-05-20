@@ -41,6 +41,9 @@ export default function SharePage() {
   const getPaywalledPlayback = useAction(api.videoActions.getSharedPaywalledPlayback);
   const getImagePreview = useAction(api.videoActions.getSharedImagePreview);
   const getFileAccess = useAction(api.videoActions.getSharedFileAccess);
+  const retryPreviewAsset = useAction(
+    api.videoActions.retryPreviewAssetForShareLink,
+  );
   const createCheckoutForGrant = useAction(
     api.paymentsActions.createCheckoutForGrant,
   );
@@ -69,7 +72,14 @@ export default function SharePage() {
       | "unsupported"
       | "locked";
     tokenExpiresAt: number | null;
+    previewError?: string | null;
   } | null>(null);
+  // Owner-only verification toggle. Defaults to "client" so an owner
+  // viewing their own link still exercises the real watermark pipeline —
+  // they can flip to "owner" to bypass the paywall and stream full-res.
+  const [viewAs, setViewAs] = useState<"client" | "owner">("client");
+  const [isRetryingPreview, setIsRetryingPreview] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [isCreatingCheckout, setIsCreatingCheckout] = useState(false);
@@ -96,6 +106,7 @@ export default function SharePage() {
   const paywall = unlockState?.paywall ?? null;
   const isPaid = Boolean(unlockState?.paid);
   const isPaywalled = Boolean(paywall);
+  const isOwner = Boolean(unlockState?.isOwner);
   const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
 
   // For bundle shares, the active item is the one currently being viewed /
@@ -245,10 +256,12 @@ export default function SharePage() {
         | "unsupported"
         | "locked";
       tokenExpiresAt: number | null;
+      previewError?: string | null;
     }> = isImage
       ? getImagePreview({
           grantToken,
           itemVideoId: activeItemId ?? undefined,
+          viewAs,
         }).then((s) => ({
           kind: "image" as const,
           url: s.url,
@@ -261,12 +274,14 @@ export default function SharePage() {
         ? getPaywalledPlayback({
             grantToken,
             itemVideoId: activeItemId ?? undefined,
+            viewAs,
           }).then((s) => ({
             kind: "video" as const,
             url: s.url,
             posterUrl: s.posterUrl,
             mode: s.mode,
             tokenExpiresAt: s.tokenExpiresAt,
+            previewError: s.previewError,
           }))
         : getFileAccess({
             grantToken,
@@ -319,6 +334,7 @@ export default function SharePage() {
     bundleItems,
     summary,
     getFileAccess,
+    viewAs,
   ]);
 
   // Heartbeat — refresh the signed Mux JWT before it expires. Token TTL is
@@ -360,6 +376,33 @@ export default function SharePage() {
     const timer = window.setTimeout(() => setPreviewTakingLong(true), 90_000);
     return () => window.clearTimeout(timer);
   }, [playbackSession?.mode]);
+
+  const handleRetryPreview = useCallback(async () => {
+    if (!grantToken || isRetryingPreview) return;
+    setIsRetryingPreview(true);
+    setRetryError(null);
+    try {
+      const result = await retryPreviewAsset({
+        grantToken,
+        itemVideoId: activeItemId ?? undefined,
+      });
+      if (result.status === "ok") {
+        setReloadTrigger((n) => n + 1);
+      } else if (result.status === "notOwner") {
+        setRetryError("Only the share link owner can retry preview generation.");
+      } else if (result.status === "noPaywall") {
+        setRetryError("This link is not paywalled.");
+      } else {
+        setRetryError("Session expired. Please reload.");
+      }
+    } catch (err) {
+      setRetryError(
+        err instanceof Error ? err.message : "Couldn't retry preview generation.",
+      );
+    } finally {
+      setIsRetryingPreview(false);
+    }
+  }, [activeItemId, grantToken, isRetryingPreview, retryPreviewAsset]);
 
   const handlePay = useCallback(async () => {
     if (!grantToken || isCreatingCheckout) return;
@@ -607,6 +650,11 @@ export default function SharePage() {
   const isPreviewPending = playbackSession?.mode === "preview_pending";
   const isPreviewUnavailable = playbackSession?.mode === "preview_unavailable";
   const isFullMode = playbackSession?.mode === "full";
+  // The watermarked-preview pipeline only runs for video uploads — image
+  // and file paywalled shares don't have a "preview asset" concept. The
+  // owner viewAs toggle + retry controls are video-specific, so gate the
+  // banner on the playback session's media kind.
+  const isVideoPlayback = playbackSession?.kind === "video";
   const downloadAllowed = !isPaywalled || isPaid;
 
   if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
@@ -735,7 +783,80 @@ export default function SharePage() {
           </section>
         ) : null}
 
-        {paywall && !isPaid ? (
+        {paywall && isOwner && isVideoPlayback ? (
+          <section className="border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-5 flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-xs font-mono uppercase tracking-widest opacity-80">
+                  Owner preview — payment not required
+                </div>
+                <div className="font-black text-xl tracking-tight">
+                  {isPreviewMode
+                    ? "Watermarked preview ready"
+                    : isPreviewPending
+                      ? "Watermarked preview rendering"
+                      : isPreviewUnavailable
+                        ? "Watermarked preview failed"
+                        : isFullMode
+                          ? "Full-resolution"
+                          : "Loading"}
+                </div>
+                {isPreviewUnavailable && playbackSession?.previewError ? (
+                  <div className="text-xs font-mono opacity-80 mt-1">
+                    {playbackSession.previewError}
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-0 border-2 border-[#f0f0e8] self-start">
+                <button
+                  type="button"
+                  onClick={() => setViewAs("client")}
+                  className={`px-3 py-2 text-xs font-bold uppercase tracking-widest ${
+                    viewAs === "client"
+                      ? "bg-[#f0f0e8] text-[#1a1a1a]"
+                      : "text-[#f0f0e8] hover:bg-[#333]"
+                  }`}
+                >
+                  Client (watermarked)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewAs("owner")}
+                  className={`px-3 py-2 text-xs font-bold uppercase tracking-widest border-l-2 border-[#f0f0e8] ${
+                    viewAs === "owner"
+                      ? "bg-[#f0f0e8] text-[#1a1a1a]"
+                      : "text-[#f0f0e8] hover:bg-[#333]"
+                  }`}
+                >
+                  Full-res
+                </button>
+              </div>
+            </div>
+            {viewAs === "client" &&
+            (isPreviewUnavailable || (isPreviewPending && previewTakingLong)) ? (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-xs">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRetryPreview()}
+                  disabled={isRetryingPreview || !grantToken}
+                  className="border-[#f0f0e8] text-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
+                >
+                  {isRetryingPreview ? "Retrying…" : "Retry preview generation"}
+                </Button>
+                {retryError ? (
+                  <span className="text-[#ffd1d1]">{retryError}</span>
+                ) : (
+                  <span className="opacity-70">
+                    Re-runs the watermark + Mux ingest pipeline for this link.
+                  </span>
+                )}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {paywall && !isPaid && !isOwner ? (
           <section className="border-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8] p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-xs font-mono uppercase tracking-widest opacity-80">
@@ -897,6 +1018,11 @@ export default function SharePage() {
                       The watermarked preview couldn’t be generated for this
                       delivery.
                     </p>
+                    {isOwner && playbackSession?.previewError ? (
+                      <p className="text-xs font-mono text-white/70 max-w-sm break-all">
+                        {playbackSession.previewError}
+                      </p>
+                    ) : null}
                     {paywall && !isPaid ? (
                       <p className="text-xs text-white/60 max-w-sm">
                         You can still pay above — the full-resolution video

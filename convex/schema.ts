@@ -226,6 +226,12 @@ export default defineSchema({
         v.literal("errored")
       )
     ),
+    // Persisted reason when muxPreviewAssetStatus flips to "errored", and
+    // the wall-clock time of the most recent write to the preview-asset
+    // fields. Used by the share page to surface why the preview died and
+    // by the playback action to stall-detect a stuck "preparing" asset.
+    muxPreviewAssetError: v.optional(v.string()),
+    muxPreviewAssetUpdatedAt: v.optional(v.number()),
     watermarkOverlayKey: v.optional(v.string()),
     // Image-class items (jpg/png/webp/gif) skip Mux and get a sharp-rendered
     // watermarked low-res preview instead. Same gating semantics as the video

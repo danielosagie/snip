@@ -1,9 +1,14 @@
 "use node";
 
 import { v } from "convex/values";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { internalAction } from "./_generated/server";
-import { BUCKET_NAME, buildPublicUrl, getS3Client, isStorageConfigured } from "./s3";
+import { BUCKET_NAME, getS3Client, isStorageConfigured } from "./s3";
 import { isFeatureEnabled } from "./featureFlags";
 
 /**
@@ -20,6 +25,11 @@ import { isFeatureEnabled } from "./featureFlags";
  */
 
 const OVERLAY_BUCKET_PREFIX = "watermarks";
+// One global generic preview overlay reused across every paywalled video.
+// The per-recipient identifier no longer travels in burned-in pixels — it
+// rides in the signed playback JWT + Convex log line so the preview asset
+// itself can be pre-ingested at upload time and served instantly.
+const GENERIC_OVERLAY_KEY = `${OVERLAY_BUCKET_PREFIX}/_global/preview-v1.png`;
 
 function escapeSvgText(value: string): string {
   return value
@@ -116,22 +126,94 @@ export const generateForShareLink = internalAction({
 
     const key = `${OVERLAY_BUCKET_PREFIX}/${args.shareLinkId}/${Date.now()}.png`;
     const s3 = getS3Client();
+    // No public-read ACL: R2 silently ignores object ACLs (public access is a
+    // bucket-level setting), and a misconfigured bucket would 403 Mux when
+    // it tries to fetch the overlay. We sign a long-lived GET URL below
+    // instead so Mux can fetch the overlay regardless of bucket policy.
     await s3.send(
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: key,
         Body: png,
         ContentType: "image/png",
-        // Watermarks must be publicly fetchable by Mux's ingest workers.
-        ACL: "public-read",
         CacheControl: "public, max-age=31536000, immutable",
       }),
+    );
+
+    // 7-day TTL is the SigV4 ceiling. Mux fetches the overlay at ingest
+    // time so the URL only needs to outlive the ingest queue.
+    const fetchUrl = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
+      { expiresIn: 60 * 60 * 24 * 7 },
     );
 
     return {
       status: "ok" as const,
       s3Key: key,
-      publicUrl: buildPublicUrl(key),
+      publicUrl: fetchUrl,
+    };
+  },
+});
+
+/**
+ * Idempotently uploads (or finds) the single global preview overlay PNG
+ * and returns a freshly-signed 7-day GET URL Mux can fetch. Used by the
+ * per-video preview-asset pipeline so every paywalled video reuses the
+ * same pre-rendered overlay — no per-link ingest required.
+ */
+export const ensureGenericPreviewOverlay = internalAction({
+  args: {},
+  returns: v.object({
+    status: v.union(v.literal("ok"), v.literal("disabled")),
+    s3Key: v.union(v.string(), v.null()),
+    publicUrl: v.union(v.string(), v.null()),
+    reason: v.optional(v.string()),
+  }),
+  handler: async () => {
+    if (!isFeatureEnabled("watermarkPipeline") || !isStorageConfigured()) {
+      return {
+        status: "disabled" as const,
+        s3Key: null,
+        publicUrl: null,
+        reason: "Watermark pipeline requires Mux + object storage env vars.",
+      };
+    }
+
+    const s3 = getS3Client();
+    let exists = false;
+    try {
+      await s3.send(
+        new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: GENERIC_OVERLAY_KEY }),
+      );
+      exists = true;
+    } catch {
+      exists = false;
+    }
+
+    if (!exists) {
+      const svg = buildWatermarkSvg("PREVIEW", "DO NOT REDISTRIBUTE");
+      const png = await renderPng(svg);
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: GENERIC_OVERLAY_KEY,
+          Body: png,
+          ContentType: "image/png",
+          CacheControl: "public, max-age=31536000, immutable",
+        }),
+      );
+    }
+
+    const fetchUrl = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: BUCKET_NAME, Key: GENERIC_OVERLAY_KEY }),
+      { expiresIn: 60 * 60 * 24 * 7 },
+    );
+    return {
+      status: "ok" as const,
+      s3Key: GENERIC_OVERLAY_KEY,
+      publicUrl: fetchUrl,
     };
   },
 });

@@ -798,6 +798,8 @@ export const getSharedImagePreview = action({
   args: {
     grantToken: v.string(),
     itemVideoId: v.optional(v.id("videos")),
+    // Owner-only bypass; see getSharedPaywalledPlayback for full rationale.
+    viewAs: v.optional(v.union(v.literal("client"), v.literal("owner"))),
   },
   returns: v.object({
     mode: v.union(
@@ -851,7 +853,12 @@ export const getSharedImagePreview = action({
     }
 
     const TTL_SECONDS = 300;
-    const paid = Boolean(grant.paidAt);
+    const identity = await ctx.auth.getUserIdentity();
+    const isOwner =
+      identity?.subject != null &&
+      identity.subject === shareLink.createdByClerkId;
+    const viewAsOwner = isOwner && args.viewAs === "owner";
+    const paid = Boolean(grant.paidAt) || viewAsOwner;
 
     // No paywall — hand over the original directly.
     if (!shareLink.paywall) {
@@ -927,6 +934,13 @@ export const getSharedPaywalledPlayback = action({
   args: {
     grantToken: v.string(),
     itemVideoId: v.optional(v.id("videos")),
+    // Owner verification toggle. The owner of a paywalled share link can
+    // pass "owner" to bypass the paywall entirely and stream the full-res
+    // signed asset; non-owners passing it get the standard client-view path
+    // (the owner check is server-side via Clerk identity). Defaults to
+    // "client" so anonymous + recipient viewers exercise the real
+    // watermarked-preview pipeline.
+    viewAs: v.optional(v.union(v.literal("client"), v.literal("owner"))),
   },
   returns: v.object({
     mode: v.union(
@@ -947,6 +961,7 @@ export const getSharedPaywalledPlayback = action({
       }),
       v.null(),
     ),
+    previewError: v.union(v.string(), v.null()),
   }),
   handler: async (
     ctx,
@@ -957,6 +972,7 @@ export const getSharedPaywalledPlayback = action({
     posterUrl: string;
     tokenExpiresAt: number | null;
     paywall: { priceCents: number; currency: string; description?: string } | null;
+    previewError: string | null;
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
       grantToken: args.grantToken,
@@ -968,6 +984,50 @@ export const getSharedPaywalledPlayback = action({
     if (video.status !== "ready" || !video.muxPlaybackId) {
       throw new Error("Video is not ready yet.");
     }
+
+    // Owner detection. The viewer is the owner iff their Clerk subject
+    // matches the share link's creator. When they explicitly ask for
+    // viewAs="owner", we serve full-res signed playback regardless of
+    // grant.paidAt. The default viewAs="client" goes through the real
+    // watermarked-preview pipeline so an owner browsing their own link
+    // still proves the pipeline works.
+    const identity = await ctx.auth.getUserIdentity();
+    const isOwner =
+      identity?.subject != null &&
+      identity.subject === shareLink.createdByClerkId;
+    const viewAsOwner = isOwner && args.viewAs === "owner";
+
+    // Per-recipient forensic log line. The preview asset itself is reused
+    // across every paywalled share link for this video (so it can be
+    // pre-baked at upload time for instant playback), which means the
+    // burned-in pixels no longer carry per-link identifiers. The
+    // attribution channel instead is this structured log line on every
+    // signed-token issuance: `grantId` and `shareLinkId` tie a Mux
+    // playback session (Mux Data logs the JWT's expiry + asset id) back
+    // to a specific recipient. `grantToken` itself is the bearer
+    // credential that grants access to the paywalled stream — it is
+    // deliberately NOT logged so anyone with read access to the Convex
+    // logs cannot replay it. `grantId` is the stable, non-secret join
+    // key for forensic correlation.
+    const logTokenIssue = (
+      mode: "preview" | "full",
+      playbackId: string,
+      tokenExpiresAt: number,
+    ) => {
+      console.info("playback_token_issued", {
+        videoId: video._id,
+        shareLinkId: shareLink._id,
+        grantId: grant._id,
+        clientEmail: shareLink.clientEmail ?? null,
+        clientLabel: shareLink.clientLabel ?? null,
+        recipientClerkId: identity?.subject ?? null,
+        playbackId,
+        mode,
+        viewAsOwner,
+        tokenExpiresAt,
+        issuedAt: Date.now(),
+      });
+    };
 
     // No paywall → behave like the existing public flow.
     if (!shareLink.paywall) {
@@ -982,10 +1042,11 @@ export const getSharedPaywalledPlayback = action({
         posterUrl: buildMuxThumbnailUrl(playbackId),
         tokenExpiresAt: null,
         paywall: null,
+        previewError: null,
       };
     }
 
-    const paid = Boolean(grant.paidAt);
+    const paid = Boolean(grant.paidAt) || viewAsOwner;
     const TTL_SECONDS = 300; // 5 minutes — refreshed via heartbeat.
 
     // Demo bypass: paywall set but no signed-playback keys. Fall back to
@@ -1006,6 +1067,7 @@ export const getSharedPaywalledPlayback = action({
         posterUrl: buildMuxThumbnailUrl(playbackId),
         tokenExpiresAt: null,
         paywall: shareLink.paywall,
+        previewError: null,
       };
     }
 
@@ -1025,12 +1087,15 @@ export const getSharedPaywalledPlayback = action({
       }
       const videoToken = await signPlaybackToken(fullSignedId, `${TTL_SECONDS}s`);
       const thumbToken = await signThumbnailToken(fullSignedId, `${TTL_SECONDS}s`);
+      const tokenExpiresAt = Date.now() + TTL_SECONDS * 1000;
+      logTokenIssue("full", fullSignedId, tokenExpiresAt);
       return {
         mode: "full" as const,
         url: buildMuxPlaybackUrl(fullSignedId, videoToken),
         posterUrl: buildMuxThumbnailUrl(fullSignedId, thumbToken),
-        tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+        tokenExpiresAt,
         paywall: shareLink.paywall,
+        previewError: null,
       };
     }
 
@@ -1046,6 +1111,7 @@ export const getSharedPaywalledPlayback = action({
         posterUrl: "",
         tokenExpiresAt: null,
         paywall: shareLink.paywall,
+        previewError: null,
       };
       const unavailable = {
         mode: "preview_unavailable" as const,
@@ -1053,6 +1119,7 @@ export const getSharedPaywalledPlayback = action({
         posterUrl: "",
         tokenExpiresAt: null,
         paywall: shareLink.paywall,
+        previewError: video.muxPreviewAssetError ?? null,
       };
 
       // A prior poll or webhook already saw Mux fail this preview asset.
@@ -1063,13 +1130,13 @@ export const getSharedPaywalledPlayback = action({
       }
 
       if (!video.muxPreviewAssetId) {
+        // Steady state: this branch only fires for legacy videos that
+        // uploaded before the per-video pre-warm shipped. The per-video
+        // action is idempotent and reuses the global overlay.
         await ctx.scheduler.runAfter(
           0,
-          api.videoActions.ensurePreviewAssetForShareLink,
-          {
-            shareLinkId: shareLink._id,
-            itemVideoId: args.itemVideoId,
-          },
+          api.videoActions.ensurePreviewAssetForVideo,
+          { videoId: video._id },
         );
         return pending;
       }
@@ -1090,22 +1157,51 @@ export const getSharedPaywalledPlayback = action({
           await ctx.runMutation(internal.videos.setMuxPreviewPlaybackId, {
             videoId: video._id,
             muxPreviewPlaybackId: signedId,
+            expectedAssetId: video.muxPreviewAssetId,
           });
           const videoToken = await signPlaybackToken(signedId, `${TTL_SECONDS}s`);
           const thumbToken = await signThumbnailToken(signedId, `${TTL_SECONDS}s`);
+          const tokenExpiresAt = Date.now() + TTL_SECONDS * 1000;
+          logTokenIssue("preview", signedId, tokenExpiresAt);
           return {
             mode: "preview" as const,
             url: buildMuxPreviewUrl(signedId, videoToken),
             posterUrl: buildMuxThumbnailUrl(signedId, thumbToken),
-            tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+            tokenExpiresAt,
             paywall: shareLink.paywall,
+            previewError: null,
           };
         }
         if (asset.status === "errored") {
+          const muxErrors = (asset as { errors?: { messages?: string[] } })
+            .errors;
+          const reason = `mux_asset_errored:${
+            muxErrors?.messages?.[0] ?? "unknown"
+          }`;
           await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
             videoId: video._id,
+            reason,
+            expectedAssetId: video.muxPreviewAssetId,
           });
-          return unavailable;
+          return { ...unavailable, previewError: reason };
+        }
+
+        // Stall detection: Mux still reports preparing, but we've been
+        // waiting more than 5 minutes since the asset reference was
+        // written. Either Mux is stuck or our webhook is being dropped
+        // AND the asset never reached ready. Mark it errored so the
+        // share page surfaces a real failure instead of a spinner. The
+        // 5-minute ceiling is well above Mux's typical sub-minute ingest
+        // for 360p basic transcodes.
+        const updatedAt = video.muxPreviewAssetUpdatedAt ?? null;
+        if (updatedAt != null && Date.now() - updatedAt > 5 * 60 * 1000) {
+          const reason = "mux_ingest_timeout";
+          await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
+            videoId: video._id,
+            reason,
+            expectedAssetId: video.muxPreviewAssetId,
+          });
+          return { ...unavailable, previewError: reason };
         }
       } catch (err) {
         // Transient Mux lookup failure — keep showing the pending state;
@@ -1121,13 +1217,233 @@ export const getSharedPaywalledPlayback = action({
     }
     const videoToken = await signPlaybackToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
     const thumbToken = await signThumbnailToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
+    const tokenExpiresAt = Date.now() + TTL_SECONDS * 1000;
+    logTokenIssue("preview", video.muxPreviewPlaybackId, tokenExpiresAt);
     return {
       mode: "preview" as const,
       url: buildMuxPreviewUrl(video.muxPreviewPlaybackId, videoToken),
       posterUrl: buildMuxThumbnailUrl(video.muxPreviewPlaybackId, thumbToken),
-      tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+      tokenExpiresAt,
       paywall: shareLink.paywall,
+      previewError: null,
     };
+  },
+});
+
+/**
+ * Owner-only: clears the preview asset state and re-schedules the watermark
+ * pipeline for a paywalled share link. Lets the owner kick a stuck preview
+ * after fixing env without recreating the share link.
+ */
+export const retryPreviewAssetForShareLink = action({
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("ok"),
+      v.literal("notOwner"),
+      v.literal("invalidGrant"),
+      v.literal("noPaywall"),
+    ),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status: "ok" | "notOwner" | "invalidGrant" | "noPaywall";
+  }> => {
+    const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
+      grantToken: args.grantToken,
+      itemVideoId: args.itemVideoId,
+    });
+    if (!resolved) return { status: "invalidGrant" as const };
+    const { video, shareLink } = resolved;
+    if (!shareLink.paywall) return { status: "noPaywall" as const };
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (
+      !identity?.subject ||
+      identity.subject !== shareLink.createdByClerkId
+    ) {
+      return { status: "notOwner" as const };
+    }
+
+    await ctx.runMutation(internal.videos.clearMuxPreviewAsset, {
+      videoId: video._id,
+    });
+    await ctx.scheduler.runAfter(
+      0,
+      api.videoActions.ensurePreviewAssetForVideo,
+      { videoId: video._id },
+    );
+    return { status: "ok" as const };
+  },
+});
+
+/**
+ * Pre-warm the watermarked Mux preview asset for a video. Scheduled the
+ * moment `markAsReady` flips a video to ready — by the time anyone creates
+ * a paywalled share link, the preview asset is already ingesting (and
+ * usually finished). Uses a single global overlay PNG; per-recipient
+ * forensic attribution rides in the signed playback JWT + Convex logs
+ * issued at viewing time, not burned into the pixels. Idempotent.
+ */
+export const ensurePreviewAssetForVideo = action({
+  args: {
+    videoId: v.id("videos"),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("ok"),
+      v.literal("alreadyExists"),
+      v.literal("disabled"),
+      v.literal("missingSourceVideo"),
+      v.literal("notReady"),
+    ),
+    reason: v.optional(v.string()),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status:
+      | "ok"
+      | "alreadyExists"
+      | "disabled"
+      | "missingSourceVideo"
+      | "notReady";
+    reason?: string;
+  }> => {
+    const recordError = async (reason: string, error?: unknown) => {
+      console.error("Preview asset pipeline failure", {
+        videoId: args.videoId,
+        reason,
+        error: error instanceof Error ? error.message : error,
+      });
+      await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
+        videoId: args.videoId,
+        reason,
+      });
+    };
+
+    if (!isFeatureEnabled("watermarkPipeline")) {
+      await recordError("watermark_pipeline_disabled");
+      return {
+        status: "disabled" as const,
+        reason: "Watermark/Mux ingest not configured.",
+      };
+    }
+
+    const video = await ctx.runQuery(api.videos.getForPreviewGen, {
+      videoId: args.videoId,
+    });
+    if (!video?.s3Key || !video.contentType) {
+      await recordError("missing_source_video");
+      return {
+        status: "missingSourceVideo" as const,
+        reason: "Original upload missing for this video.",
+      };
+    }
+    if (video.muxPreviewAssetId) {
+      return { status: "alreadyExists" as const };
+    }
+    // Only video uploads can go through the Mux ingest pipeline. Image
+    // and file paywalled shares are handled elsewhere — guard against a
+    // stray scheduler firing for a non-video record. Also require the
+    // upload to be fully done (status: "ready"); kicking off preview
+    // ingest while the source is still uploading would race the signed
+    // S3 URL against the upload itself.
+    if (!video.contentType.startsWith("video/")) {
+      return {
+        status: "notReady" as const,
+        reason: "Not a video upload — preview pipeline only runs for video/*.",
+      };
+    }
+    if (video.status !== "ready") {
+      return {
+        status: "notReady" as const,
+        reason: `Source upload not finished (status=${video.status}). markAsReady will reschedule once Mux finishes the full asset.`,
+      };
+    }
+
+    // Atomic claim — fences concurrent schedulers so only one of them
+    // actually calls Mux. Without this, the upload-complete scheduler
+    // and the legacy-video safety net in `shareLinks.create` could both
+    // start an ingest for the same video and double-bill Mux storage.
+    const claim = await ctx.runMutation(
+      internal.videos.claimPreviewGeneration,
+      { videoId: video._id },
+    );
+    if (!claim.claimed) {
+      if (claim.reason === "already_has_asset") {
+        return { status: "alreadyExists" as const };
+      }
+      return {
+        status: "alreadyExists" as const,
+        reason:
+          claim.reason === "in_flight"
+            ? "Another scheduler is already running this preview generation."
+            : "Could not claim preview generation.",
+      };
+    }
+
+    let overlayKey: string;
+    let overlayFetchUrl: string;
+    try {
+      const overlay = await ctx.runAction(
+        internal.watermark.ensureGenericPreviewOverlay,
+        {},
+      );
+      if (
+        overlay.status === "disabled" ||
+        !overlay.publicUrl ||
+        !overlay.s3Key
+      ) {
+        await recordError("watermark_storage_unavailable");
+        return {
+          status: "disabled" as const,
+          reason: overlay.reason ?? "Watermark generation unavailable.",
+        };
+      }
+      overlayKey = overlay.s3Key;
+      overlayFetchUrl = overlay.publicUrl;
+    } catch (err) {
+      await recordError(
+        `watermark_gen_failed:${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+      throw err;
+    }
+
+    try {
+      const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+        expiresIn: 60 * 60 * 6,
+      });
+      const previewAsset = await createPreviewMuxAsset(
+        video._id,
+        ingestUrl,
+        overlayFetchUrl,
+      );
+      if (!previewAsset.id) {
+        await recordError("mux_create_failed:no_asset_id");
+        throw new Error("Mux did not return an asset id for the preview.");
+      }
+      await ctx.runMutation(internal.videos.setMuxPreviewAssetReference, {
+        videoId: video._id,
+        muxPreviewAssetId: previewAsset.id,
+        watermarkOverlayKey: overlayKey,
+      });
+    } catch (err) {
+      await recordError(
+        `mux_create_failed:${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+      throw err;
+    }
+
+    return { status: "ok" as const };
   },
 });
 
@@ -1135,6 +1451,11 @@ export const getSharedPaywalledPlayback = action({
  * Kicked off when an agency attaches a paywall to a share link. Generates a
  * per-link watermark and creates the matching Mux preview asset. Idempotent
  * — if a preview asset already exists for this video, returns early.
+ *
+ * Kept for backward compatibility with existing scheduler jobs and for
+ * paywalled shares created on videos that uploaded before the per-video
+ * pre-warm shipped. New code paths should call `ensurePreviewAssetForVideo`
+ * directly.
  */
 export const ensurePreviewAssetForShareLink = action({
   args: {
@@ -1162,20 +1483,46 @@ export const ensurePreviewAssetForShareLink = action({
     status: "ok" | "alreadyExists" | "disabled" | "missingSourceVideo";
     reason?: string;
   }> => {
+    // Resolve the target video id up front so every failure path can persist
+    // a terminal `errored` status on the video. Without this, a misconfigured
+    // pipeline left the share page polling forever — no status field ever
+    // flipped, so the spinner never resolved.
+    const link = await ctx.runQuery(internal.shareLinks.getInternal, {
+      shareLinkId: args.shareLinkId,
+    });
+    if (!link) throw new Error("Share link not found");
+    const targetVideoId = args.itemVideoId ?? link.videoId;
+
+    const recordError = async (reason: string, error?: unknown) => {
+      console.error("Preview asset pipeline failure", {
+        videoId: targetVideoId,
+        shareLinkId: args.shareLinkId,
+        reason,
+        error: error instanceof Error ? error.message : error,
+      });
+      if (targetVideoId) {
+        await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
+          videoId: targetVideoId,
+          reason,
+        });
+      }
+    };
+
     if (!isFeatureEnabled("watermarkPipeline")) {
+      await recordError("watermark_pipeline_disabled");
       return {
         status: "disabled" as const,
         reason: "Watermark/Mux ingest not configured.",
       };
     }
 
-    const link = await ctx.runQuery(internal.shareLinks.getInternal, {
-      shareLinkId: args.shareLinkId,
-    });
-    if (!link) throw new Error("Share link not found");
-
-    const targetVideoId = args.itemVideoId ?? link.videoId;
     if (!targetVideoId) {
+      // No video to record against (bundle link with no itemVideoId). The
+      // caller already validated this — surface the reason for logs.
+      console.error("Preview asset pipeline failure", {
+        shareLinkId: args.shareLinkId,
+        reason: "missing_item_video_id",
+      });
       return {
         status: "missingSourceVideo" as const,
         reason: "Bundle share links require itemVideoId.",
@@ -1186,6 +1533,7 @@ export const ensurePreviewAssetForShareLink = action({
       videoId: targetVideoId,
     });
     if (!video?.s3Key || !video.contentType) {
+      await recordError("missing_source_video");
       return {
         status: "missingSourceVideo" as const,
         reason: "Original upload missing for this video.",
@@ -1197,35 +1545,64 @@ export const ensurePreviewAssetForShareLink = action({
 
     const primaryLabel =
       link.clientEmail ?? link.clientLabel ?? `share/${link.token.slice(0, 8)}`;
-    const watermark = await ctx.runAction(internal.watermark.generateForShareLink, {
-      shareLinkId: args.shareLinkId,
-      primaryLabel,
-      secondaryLabel: "PREVIEW — DO NOT REDISTRIBUTE",
-    });
-    if (watermark.status === "disabled" || !watermark.publicUrl || !watermark.s3Key) {
-      return {
-        status: "disabled" as const,
-        reason: watermark.reason ?? "Watermark generation unavailable.",
-      };
+
+    let watermarkS3Key: string;
+    let watermarkFetchUrl: string;
+    try {
+      const watermark = await ctx.runAction(
+        internal.watermark.generateForShareLink,
+        {
+          shareLinkId: args.shareLinkId,
+          primaryLabel,
+          secondaryLabel: "PREVIEW — DO NOT REDISTRIBUTE",
+        },
+      );
+      if (
+        watermark.status === "disabled" ||
+        !watermark.publicUrl ||
+        !watermark.s3Key
+      ) {
+        await recordError("watermark_storage_unavailable");
+        return {
+          status: "disabled" as const,
+          reason: watermark.reason ?? "Watermark generation unavailable.",
+        };
+      }
+      watermarkS3Key = watermark.s3Key;
+      watermarkFetchUrl = watermark.publicUrl;
+    } catch (err) {
+      await recordError(
+        `watermark_gen_failed:${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+      throw err;
     }
 
-    const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
-      expiresIn: 60 * 60 * 6,
-    });
-    const previewAsset = await createPreviewMuxAsset(
-      video._id,
-      ingestUrl,
-      watermark.publicUrl,
-    );
-    if (!previewAsset.id) {
-      throw new Error("Mux did not return an asset id for the preview.");
+    try {
+      const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+        expiresIn: 60 * 60 * 6,
+      });
+      const previewAsset = await createPreviewMuxAsset(
+        video._id,
+        ingestUrl,
+        watermarkFetchUrl,
+      );
+      if (!previewAsset.id) {
+        await recordError("mux_create_failed:no_asset_id");
+        throw new Error("Mux did not return an asset id for the preview.");
+      }
+      await ctx.runMutation(internal.videos.setMuxPreviewAssetReference, {
+        videoId: video._id,
+        muxPreviewAssetId: previewAsset.id,
+        watermarkOverlayKey: watermarkS3Key,
+      });
+    } catch (err) {
+      await recordError(
+        `mux_create_failed:${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
+      throw err;
     }
-
-    await ctx.runMutation(internal.videos.setMuxPreviewAssetReference, {
-      videoId: video._id,
-      muxPreviewAssetId: previewAsset.id,
-      watermarkOverlayKey: watermark.s3Key,
-    });
 
     return { status: "ok" as const };
   },

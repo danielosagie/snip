@@ -8,7 +8,7 @@ import { resolveBundleVideos } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
 import { indexSearchable, removeSearchableForVideo } from "./search";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { prefEnabled, resolveUserEmail } from "./notifications";
 
 const workflowStatusValidator = v.union(
@@ -1080,6 +1080,19 @@ export const markAsReady = internalMutation({
       status: "ready",
     });
 
+    // Pre-warm the watermarked preview asset right as the full asset
+    // becomes available. By the time anyone creates a paywalled share
+    // link against this video, the preview is already in Mux and ready
+    // for instant playback. Skipped if the video already has a preview
+    // asset (legacy lazy path) — the action itself is idempotent.
+    if (!before?.muxPreviewAssetId) {
+      await ctx.scheduler.runAfter(
+        0,
+        api.videoActions.ensurePreviewAssetForVideo,
+        { videoId: args.videoId },
+      );
+    }
+
     // "Long upload finished" email — only if it took >5min, the
     // uploader opted in, and we can resolve their address. Best-effort,
     // no-ops without RESEND_API_KEY/APP_URL.
@@ -1206,6 +1219,8 @@ export const setMuxPreviewAssetReference = internalMutation({
     await ctx.db.patch(args.videoId, {
       muxPreviewAssetId: args.muxPreviewAssetId,
       muxPreviewAssetStatus: "preparing",
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
       watermarkOverlayKey: args.watermarkOverlayKey,
     });
   },
@@ -1215,11 +1230,29 @@ export const setMuxPreviewPlaybackId = internalMutation({
   args: {
     videoId: v.id("videos"),
     muxPreviewPlaybackId: v.string(),
+    // Set by webhook + poll callers to fence stale events from a prior
+    // generation. After an owner retry the video's `muxPreviewAssetId`
+    // points at the NEW asset; a late `video.asset.ready` event for the
+    // discarded old asset would otherwise overwrite the new state.
+    expectedAssetId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (args.expectedAssetId) {
+      const current = await ctx.db.get(args.videoId);
+      if (current?.muxPreviewAssetId !== args.expectedAssetId) {
+        console.log("Ignoring stale preview ready event", {
+          videoId: args.videoId,
+          expectedAssetId: args.expectedAssetId,
+          currentAssetId: current?.muxPreviewAssetId,
+        });
+        return;
+      }
+    }
     await ctx.db.patch(args.videoId, {
       muxPreviewPlaybackId: args.muxPreviewPlaybackId,
       muxPreviewAssetStatus: "ready",
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
     });
   },
 });
@@ -1227,10 +1260,47 @@ export const setMuxPreviewPlaybackId = internalMutation({
 export const setMuxPreviewAssetErrored = internalMutation({
   args: {
     videoId: v.id("videos"),
+    reason: v.optional(v.string()),
+    // Same stale-event guard as setMuxPreviewPlaybackId. Pre-Mux callers
+    // (the action itself recording its own watermark-pipeline failures
+    // before any asset id exists) omit this and unconditionally land.
+    expectedAssetId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.expectedAssetId) {
+      const current = await ctx.db.get(args.videoId);
+      if (current?.muxPreviewAssetId !== args.expectedAssetId) {
+        console.log("Ignoring stale preview errored event", {
+          videoId: args.videoId,
+          expectedAssetId: args.expectedAssetId,
+          currentAssetId: current?.muxPreviewAssetId,
+        });
+        return;
+      }
+    }
+    await ctx.db.patch(args.videoId, {
+      muxPreviewAssetStatus: "errored",
+      muxPreviewAssetError: args.reason,
+      muxPreviewAssetUpdatedAt: Date.now(),
+    });
+  },
+});
+
+// Owner-triggered reset: clears preview state so `ensurePreviewAssetForVideo`
+// runs again on the next viewer poll (or when explicitly re-scheduled by
+// the retry action).
+export const clearMuxPreviewAsset = internalMutation({
+  args: {
+    videoId: v.id("videos"),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.videoId, {
-      muxPreviewAssetStatus: "errored",
+      muxPreviewAssetId: undefined,
+      muxPreviewPlaybackId: undefined,
+      muxPreviewAssetStatus: undefined,
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
+      watermarkOverlayKey: undefined,
     });
   },
 });
@@ -1289,7 +1359,7 @@ export const getVideoByMuxPreviewAssetId = internalQuery({
   },
 });
 
-/** Lightweight read used by ensurePreviewAssetForShareLink before triggering ingest. */
+/** Lightweight read used by ensurePreviewAssetForVideo before triggering ingest. */
 export const getForPreviewGen = query({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
@@ -1299,10 +1369,57 @@ export const getForPreviewGen = query({
       _id: video._id,
       s3Key: video.s3Key,
       contentType: video.contentType,
+      status: video.status,
+      muxAssetStatus: video.muxAssetStatus,
       muxPreviewAssetId: video.muxPreviewAssetId,
+      muxPreviewAssetStatus: video.muxPreviewAssetStatus,
+      muxPreviewAssetUpdatedAt: video.muxPreviewAssetUpdatedAt,
       muxPreviewPlaybackId: video.muxPreviewPlaybackId,
       title: video.title,
     };
+  },
+});
+
+/**
+ * Atomic claim used by `ensurePreviewAssetForVideo` to fence concurrent
+ * schedulers (e.g. one from `markAsReady` + one from `shareLinks.create`
+ * for the same video). Inside a single Convex mutation the read+patch is
+ * transactional, so exactly one caller observes `claimed: true` for a
+ * given `(videoId, generation)` race. An in-flight claim is considered
+ * stale after 10 minutes — that's well past the Mux ingest budget but
+ * short enough that a wedged scheduler doesn't block retries forever.
+ */
+export const claimPreviewGeneration = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.object({
+    claimed: v.boolean(),
+    reason: v.optional(
+      v.union(
+        v.literal("video_missing"),
+        v.literal("already_has_asset"),
+        v.literal("in_flight"),
+      ),
+    ),
+  }),
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return { claimed: false, reason: "video_missing" as const };
+    if (video.muxPreviewAssetId) {
+      return { claimed: false, reason: "already_has_asset" as const };
+    }
+    const inFlight =
+      video.muxPreviewAssetStatus === "preparing" &&
+      typeof video.muxPreviewAssetUpdatedAt === "number" &&
+      Date.now() - video.muxPreviewAssetUpdatedAt < 10 * 60 * 1000;
+    if (inFlight) {
+      return { claimed: false, reason: "in_flight" as const };
+    }
+    await ctx.db.patch(args.videoId, {
+      muxPreviewAssetStatus: "preparing",
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: Date.now(),
+    });
+    return { claimed: true };
   },
 });
 
@@ -1333,6 +1450,7 @@ export const getByShareGrantWithPaywall = query({
         clientEmail: resolved.shareLink.clientEmail ?? null,
         clientLabel: resolved.shareLink.clientLabel ?? null,
         allowDownload: resolved.shareLink.allowDownload,
+        createdByClerkId: resolved.shareLink.createdByClerkId,
       },
       video: {
         _id: video._id,
@@ -1346,6 +1464,8 @@ export const getByShareGrantWithPaywall = query({
         muxPreviewAssetId: video.muxPreviewAssetId,
         muxPreviewPlaybackId: video.muxPreviewPlaybackId,
         muxPreviewAssetStatus: video.muxPreviewAssetStatus,
+        muxPreviewAssetError: video.muxPreviewAssetError ?? null,
+        muxPreviewAssetUpdatedAt: video.muxPreviewAssetUpdatedAt ?? null,
         imagePreviewS3Key: video.imagePreviewS3Key ?? null,
         imagePreviewStatus: video.imagePreviewStatus ?? null,
       },
