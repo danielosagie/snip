@@ -1,0 +1,34 @@
+# Vercel CLI honors this file in preference to .gitignore. Without it
+# the upload sweep picks up `desktop/release/` (the built DMG + Electron
+# framework binary) and hits Vercel's 100 MB per-file upload limit.
+#
+# Keep this lean: only exclude things Vercel definitely doesn't need
+# to build the web app. The desktop tree is a sibling artifact (built
+# separately by .github/workflows/desktop-dmg.yml) and Vercel never
+# needs any of it.
+
+# Desktop Electron app + its build artifacts (DMG, Electron framework)
+desktop/
+
+# Local build output — Vercel runs its own build in the cloud
+dist/
+
+# Deps + caches — Vercel installs cleanly
+node_modules/
+.cache/
+.turbo/
+
+# Secrets — should never leave the dev machine
+.env
+.env.local
+.env.*.local
+
+# OS / editor cruft
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Source maps (optional, keeps the upload lean — drop this line if you
+# want the deploy to ship them)
+*.map
