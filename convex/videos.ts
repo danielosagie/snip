@@ -8,7 +8,7 @@ import { resolveBundleVideos } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
 import { indexSearchable, removeSearchableForVideo } from "./search";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { prefEnabled, resolveUserEmail } from "./notifications";
 
 const workflowStatusValidator = v.union(
@@ -1080,6 +1080,19 @@ export const markAsReady = internalMutation({
       status: "ready",
     });
 
+    // Pre-warm the watermarked preview asset right as the full asset
+    // becomes available. By the time anyone creates a paywalled share
+    // link against this video, the preview is already in Mux and ready
+    // for instant playback. Skipped if the video already has a preview
+    // asset (legacy lazy path) — the action itself is idempotent.
+    if (!before?.muxPreviewAssetId) {
+      await ctx.scheduler.runAfter(
+        0,
+        api.videoActions.ensurePreviewAssetForVideo,
+        { videoId: args.videoId },
+      );
+    }
+
     // "Long upload finished" email — only if it took >5min, the
     // uploader opted in, and we can resolve their address. Best-effort,
     // no-ops without RESEND_API_KEY/APP_URL.
@@ -1242,9 +1255,9 @@ export const setMuxPreviewAssetErrored = internalMutation({
   },
 });
 
-// Owner-triggered reset: clears preview state so
-// `ensurePreviewAssetForShareLink` runs again on the next viewer poll (or
-// when explicitly re-scheduled by the retry action).
+// Owner-triggered reset: clears preview state so `ensurePreviewAssetForVideo`
+// runs again on the next viewer poll (or when explicitly re-scheduled by
+// the retry action).
 export const clearMuxPreviewAsset = internalMutation({
   args: {
     videoId: v.id("videos"),
@@ -1315,7 +1328,7 @@ export const getVideoByMuxPreviewAssetId = internalQuery({
   },
 });
 
-/** Lightweight read used by ensurePreviewAssetForShareLink before triggering ingest. */
+/** Lightweight read used by ensurePreviewAssetForVideo before triggering ingest. */
 export const getForPreviewGen = query({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {

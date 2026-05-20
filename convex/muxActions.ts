@@ -181,8 +181,8 @@ export const processWebhook = internalAction({
           }
 
           // Preview assets don't go through setMuxAssetReference — the asset
-          // ID is recorded by ensurePreviewAssetForShareLink before ingest,
-          // so the asset.ready handler is the one that matters there.
+          // ID is recorded by ensurePreviewAssetForVideo before ingest, so
+          // the asset.ready handler is the one that matters there.
           if (resolved.isPreview) {
             console.log("Skipping setMuxAssetReference for preview asset", {
               videoId: resolved.videoId,

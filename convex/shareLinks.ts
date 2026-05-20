@@ -198,16 +198,17 @@ export const create = mutation({
       clientEmail: args.clientEmail?.trim() || undefined,
     });
 
-    // Paywalled links need a watermarked 360p preview asset before the first
-    // viewer arrives. For single-video links we kick off ingest immediately;
-    // for bundle links we defer to first-view per-item (each video in the
-    // bundle gets its own preview asset lazily) since live folders can have
-    // arbitrary contents.
+    // Paywalled links need a watermarked 360p preview asset. In the steady
+    // state the per-video preview is already pre-baked (scheduled the moment
+    // the full asset is ready in `videos.markAsReady`). We schedule it again
+    // as a safety net for legacy videos that uploaded before pre-warm
+    // shipped — `ensurePreviewAssetForVideo` is idempotent. Bundle links
+    // defer to first-view since bundles can have arbitrary contents.
     if (paywall && args.videoId) {
       await ctx.scheduler.runAfter(
         0,
-        api.videoActions.ensurePreviewAssetForShareLink,
-        { shareLinkId },
+        api.videoActions.ensurePreviewAssetForVideo,
+        { videoId: args.videoId },
       );
     }
 
