@@ -158,9 +158,20 @@ export const upsertContract = mutation({
     // already sent or signed reverts it to a draft — the prior signature
     // no longer matches the text, so it has to go back out for signature.
     // (Signing is demo/local today; production e-sign isn't wired yet.)
+    //
+    // CRITICAL: preserve the wizard-generated payload (`clauses`,
+    // `wizardAnswers`, `projectType`) — these aren't part of the body
+    // editor's `contractInputValidator`, so without explicit pass-through
+    // every body auto-save would silently drop the outline the user just
+    // built with the wizard. Flat fields (scope, priceCents, etc.) still
+    // overwrite from input so clearing works as expected.
     await ctx.db.patch(args.projectId, {
       contract: {
         ...args.contract,
+        // Wizard-owned state, never sent by the body editor.
+        clauses: existing?.clauses,
+        wizardAnswers: existing?.wizardAnswers,
+        projectType: existing?.projectType,
         // Preserve fields we don't accept on input.
         docxS3Key: existing?.docxS3Key,
         sentForSignatureAt: undefined,
