@@ -1,17 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@convex/_generated/api";
+import { Id } from "@convex/_generated/dataModel";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   CreditCard,
   Users,
   Receipt,
   Check,
+  CheckCircle,
   AlertCircle,
+  ExternalLink,
+  RefreshCw,
   HardDrive,
+  Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
@@ -201,6 +213,8 @@ function BillingRoute() {
                 seatCount={subscription.seatCount}
                 includedSeats={subscription.includedSeats}
               />
+
+              <PayoutsSection />
             </>
           )}
         </div>
@@ -535,4 +549,249 @@ function formatMoney(cents: number, currency: string) {
     currency: currency.toUpperCase(),
     maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
   });
+}
+
+/**
+ * Payouts (per-team Stripe Connect) used to live under each team's
+ * settings. It now sits with billing so all money-in/money-out controls
+ * are in one place. Receiving client money is still team-scoped, so this
+ * lists every team the user belongs to with its own Connect card.
+ */
+function PayoutsSection() {
+  const teams = useQuery(api.teams.list, {});
+  const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
+
+  return (
+    <section className="mt-10">
+      <div className="flex items-center gap-2 mb-1">
+        <Wallet className="h-4 w-4" />
+        <h2 className="font-black text-sm uppercase tracking-tight">Payouts</h2>
+      </div>
+      <p className="text-sm text-[#666] mb-4 max-w-prose">
+        Connect Stripe to collect payments from clients on paywalled delivery
+        links. Snip never touches the money — it goes straight to your Stripe
+        account. Each team has its own connected account.
+      </p>
+
+      {featureStatus && !featureStatus.stripeConnect ? (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-[#dc2626]" />
+              <CardTitle>Stripe not configured</CardTitle>
+            </div>
+            <CardDescription>
+              Set <code className="bg-[#e8e8e0] px-1">STRIPE_SECRET_KEY</code>{" "}
+              and{" "}
+              <code className="bg-[#e8e8e0] px-1">STRIPE_WEBHOOK_SECRET</code>{" "}
+              on this deployment before teams can collect client payments.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : teams === undefined ? (
+        <div className="text-sm text-[#888]">Loading payout accounts…</div>
+      ) : teams.length === 0 ? (
+        <div className="text-sm text-[#888]">
+          You're not on any teams yet.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {teams.map((team) => (
+            <TeamPayoutCard
+              key={team._id}
+              teamId={team._id as Id<"teams">}
+              teamName={team.name}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TeamPayoutCard({
+  teamId,
+  teamName,
+}: {
+  teamId: Id<"teams">;
+  teamName: string;
+}) {
+  const onboardingStatus = useQuery(api.stripeConnect.getOnboardingStatus, {
+    teamId,
+  });
+  const createAccount = useAction(api.stripeConnectActions.createConnectAccount);
+  const createOnboardingLink = useAction(
+    api.stripeConnectActions.createOnboardingLink,
+  );
+  const refreshStatus = useAction(api.stripeConnectActions.refreshAccountStatus);
+
+  const [busy, setBusy] = useState<null | "create" | "link" | "refresh">(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const status = onboardingStatus?.status ?? null;
+
+  // Reconcile once on mount when an account exists but isn't active yet,
+  // so a just-completed Stripe onboarding reflects without a manual click
+  // (and without depending on the account.updated webhook arriving).
+  useEffect(() => {
+    if (!onboardingStatus?.stripeAccountId || status === "active") return;
+    void refreshStatus({ teamId }).catch(() => {});
+  }, [onboardingStatus?.stripeAccountId, status, refreshStatus, teamId]);
+
+  const returnUrl = `${window.location.origin}/dashboard/billing?stripe=return`;
+  const refreshUrl = `${window.location.origin}/dashboard/billing?stripe=refresh`;
+
+  const handleConnect = async () => {
+    setError(null);
+    setBusy("create");
+    try {
+      const result = await createAccount({ teamId });
+      if (result.status === "disabled") {
+        setError(result.reason ?? "Stripe is not configured on this deployment.");
+        return;
+      }
+      setBusy("link");
+      const link = await createOnboardingLink({ teamId, returnUrl, refreshUrl });
+      if (link.status === "ok" && link.url) {
+        window.location.href = link.url;
+        return;
+      }
+      setError(link.reason ?? "Could not start Stripe onboarding.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not connect Stripe.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleContinue = async () => {
+    setError(null);
+    setBusy("link");
+    try {
+      const link = await createOnboardingLink({ teamId, returnUrl, refreshUrl });
+      if (link.status === "ok" && link.url) {
+        window.location.href = link.url;
+        return;
+      }
+      setError(link.reason ?? "Could not continue onboarding.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setError(null);
+    setBusy("refresh");
+    try {
+      const result = await refreshStatus({ teamId });
+      if (result.status === "disabled") {
+        setError(result.reason ?? "Stripe not configured.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Refresh failed.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <CardTitle>{teamName}</CardTitle>
+            <CardDescription>
+              Stripe Express account — Stripe handles compliance, payouts, and
+              onboarding.
+            </CardDescription>
+          </div>
+          {status === "active" ? (
+            <Badge variant="success">
+              <CheckCircle className="h-3 w-3 mr-1" /> Active
+            </Badge>
+          ) : status === "pending" ? (
+            <Badge variant="secondary">Pending</Badge>
+          ) : status === "restricted" ? (
+            <Badge variant="destructive">Restricted</Badge>
+          ) : status === "disabled" ? (
+            <Badge variant="destructive">Disabled</Badge>
+          ) : (
+            <Badge variant="secondary">Not connected</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {onboardingStatus === undefined ? (
+          <div className="text-sm text-[#888]">Loading status…</div>
+        ) : (
+          <>
+            <dl className="grid grid-cols-2 gap-2 text-sm">
+              <dt className="text-[#888]">Account ID</dt>
+              <dd className="font-mono truncate">
+                {onboardingStatus.stripeAccountId ?? "—"}
+              </dd>
+              <dt className="text-[#888]">Charges enabled</dt>
+              <dd>{onboardingStatus.chargesEnabled ? "Yes" : "No"}</dd>
+              <dt className="text-[#888]">Payouts enabled</dt>
+              <dd>{onboardingStatus.payoutsEnabled ? "Yes" : "No"}</dd>
+            </dl>
+
+            {!onboardingStatus.stripeAccountId ? (
+              <Button
+                onClick={() => void handleConnect()}
+                disabled={busy !== null || !onboardingStatus.canManageBilling}
+                className="w-full bg-[#FF6600] hover:bg-[#FF7A1F]"
+              >
+                {busy === "create" || busy === "link"
+                  ? "Opening Stripe…"
+                  : "Connect Stripe"}
+              </Button>
+            ) : status !== "active" ? (
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => void handleContinue()}
+                  disabled={busy !== null || !onboardingStatus.canManageBilling}
+                  className="flex-1 bg-[#FF6600] hover:bg-[#FF7A1F]"
+                >
+                  {busy === "link" ? "Opening…" : "Continue onboarding"}
+                  <ExternalLink className="h-3 w-3 ml-2" />
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void handleRefresh()}
+                  disabled={busy !== null}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  {busy === "refresh" ? "…" : "Refresh"}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => void handleRefresh()}
+                disabled={busy !== null}
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                {busy === "refresh" ? "Refreshing…" : "Refresh status"}
+              </Button>
+            )}
+
+            {!onboardingStatus.canManageBilling ? (
+              <p className="text-xs text-[#888]">
+                Only the team owner can manage payout settings.
+              </p>
+            ) : null}
+
+            {error ? (
+              <div className="text-sm text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
+                {error}
+              </div>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }

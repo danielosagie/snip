@@ -1,6 +1,6 @@
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,7 +59,6 @@ const ROLE_HELP: Record<Role, string> = {
 export default function TeamSettingsPage() {
   const params = useParams({ strict: false });
   const navigate = useNavigate({});
-  const pathname = useLocation().pathname;
   const convex = useConvex();
   const teamSlug = typeof params.teamSlug === "string" ? params.teamSlug : "";
 
@@ -88,22 +87,24 @@ export default function TeamSettingsPage() {
     return prewarmTeam(convex, { teamSlug: team.slug });
   });
 
-  const canonicalSettingsPath = context
-    ? `${context.canonicalPath}/settings`
-    : null;
-  const isSettingsPath = pathname.endsWith("/settings");
-  const shouldCanonicalize =
-    isSettingsPath &&
-    !!canonicalSettingsPath &&
-    pathname !== canonicalSettingsPath;
+  // resolveContext looks the team up by exact slug, so a team that
+  // resolves is already canonical for this route. The previous
+  // hand-rolled `pathname.endsWith("/settings")` comparison could stay
+  // true forever (canonicalPath never matching pathname), which both
+  // wedged the page on "Loading…" and fired an endless replace-navigate
+  // loop — that's the "settings won't load" bug. Trust the server's
+  // authoritative `isCanonical` signal instead, and never block the
+  // render on a redirect that's merely in flight.
+  const needsCanonicalRedirect =
+    context != null && context.isCanonical === false;
 
   useEffect(() => {
-    if (shouldCanonicalize && canonicalSettingsPath) {
-      navigate({ to: canonicalSettingsPath, replace: true });
+    if (needsCanonicalRedirect && context) {
+      navigate({ to: `${context.canonicalPath}/settings`, replace: true });
     }
-  }, [shouldCanonicalize, canonicalSettingsPath, navigate]);
+  }, [needsCanonicalRedirect, context, navigate]);
 
-  if (context === undefined || shouldCanonicalize) {
+  if (context === undefined) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-[#888]">Loading…</div>

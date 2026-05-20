@@ -64,6 +64,7 @@ export default function SharePage() {
       | "public"
       | "preview"
       | "preview_pending"
+      | "preview_unavailable"
       | "full"
       | "unsupported"
       | "locked";
@@ -239,6 +240,7 @@ export default function SharePage() {
         | "public"
         | "preview"
         | "preview_pending"
+        | "preview_unavailable"
         | "full"
         | "unsupported"
         | "locked";
@@ -335,13 +337,28 @@ export default function SharePage() {
   }, [playbackSession?.tokenExpiresAt]);
 
   // While the watermarked preview asset is still ingesting, poll every 5s so
-  // the share page auto-recovers without a manual refresh.
+  // the share page auto-recovers without a manual refresh. The server-side
+  // action polls Mux directly on each tick, so this resolves even if the
+  // Mux webhook never reaches the deployment.
   useEffect(() => {
     if (playbackSession?.mode !== "preview_pending") return;
     const timer = window.setInterval(() => {
       setReloadTrigger((n) => n + 1);
     }, 5_000);
     return () => window.clearInterval(timer);
+  }, [playbackSession?.mode]);
+
+  // If the preview has been "pending" for a while, stop showing the
+  // optimistic "30–90 seconds" copy and tell the viewer the truth: they
+  // can pay now and we'll unlock full-res the moment it's ready.
+  const [previewTakingLong, setPreviewTakingLong] = useState(false);
+  useEffect(() => {
+    if (playbackSession?.mode !== "preview_pending") {
+      setPreviewTakingLong(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setPreviewTakingLong(true), 90_000);
+    return () => window.clearTimeout(timer);
   }, [playbackSession?.mode]);
 
   const handlePay = useCallback(async () => {
@@ -588,6 +605,7 @@ export default function SharePage() {
     : video?.description ?? null;
   const isPreviewMode = playbackSession?.mode === "preview";
   const isPreviewPending = playbackSession?.mode === "preview_pending";
+  const isPreviewUnavailable = playbackSession?.mode === "preview_unavailable";
   const isFullMode = playbackSession?.mode === "full";
   const downloadAllowed = !isPaywalled || isPaid;
 
@@ -765,6 +783,7 @@ export default function SharePage() {
           </section>
         ) : null}
 
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 lg:items-start">
         <div className="relative border-2 border-[#1a1a1a] overflow-hidden">
           {playbackSession?.url && playbackSession.kind === "video" ? (
             <>
@@ -871,23 +890,49 @@ export default function SharePage() {
               ) : null}
               <div className="absolute inset-0 bg-black/45" />
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white px-4 text-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
-                <p className="text-sm font-medium text-white/85">
-                  {isPreviewPending
-                    ? "Preparing watermarked preview… this usually takes 30–90 seconds."
-                    : playbackError ?? (isLoadingPlayback ? "Loading stream..." : "Preparing stream...")}
-                </p>
-                {isPreviewPending && paywall && !isPaid ? (
-                  <p className="text-xs text-white/60 max-w-sm">
-                    You can pay now and the full-resolution stream will unlock as soon as the preview is ready.
-                  </p>
-                ) : null}
+                {isPreviewUnavailable ? (
+                  <>
+                    <AlertCircle className="h-8 w-8 text-white/80" />
+                    <p className="text-sm font-medium text-white/85 max-w-sm">
+                      The watermarked preview couldn’t be generated for this
+                      delivery.
+                    </p>
+                    {paywall && !isPaid ? (
+                      <p className="text-xs text-white/60 max-w-sm">
+                        You can still pay above — the full-resolution video
+                        unlocks immediately and doesn’t depend on the preview.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-white/60 max-w-sm">
+                        Ask the owner to re-share this file if the issue
+                        persists.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+                    <p className="text-sm font-medium text-white/85">
+                      {isPreviewPending
+                        ? previewTakingLong
+                          ? "Still preparing the watermarked preview — this one’s taking longer than usual."
+                          : "Preparing watermarked preview… this usually takes 30–90 seconds."
+                        : playbackError ?? (isLoadingPlayback ? "Loading stream..." : "Preparing stream...")}
+                    </p>
+                    {isPreviewPending && paywall && !isPaid ? (
+                      <p className="text-xs text-white/60 max-w-sm">
+                        You can pay now and the full-resolution stream will
+                        unlock as soon as it’s ready.
+                      </p>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           )}
         </div>
 
-        <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-4 space-y-4">
+        <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-4 space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
           <div className="flex items-center justify-between">
             <h2 className="font-black text-[#1a1a1a]">Comments</h2>
             <span className="text-xs text-[#888] font-mono">{formatTimestamp(currentTime)}</span>
@@ -968,6 +1013,7 @@ export default function SharePage() {
             </div>
           )}
         </section>
+        </div>
       </main>
 
       <footer className="border-t-2 border-[#1a1a1a] px-6 py-4 mt-8">

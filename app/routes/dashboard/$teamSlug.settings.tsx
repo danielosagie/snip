@@ -16,9 +16,8 @@ const TABS = [
   // The Members tab is the index route — its `to` is the bare settings
   // path. Folder permissions is the snip Desktop ACL surface that used
   // to live in the desktop SettingsView; it belongs here because grants
-  // are team-scoped.
+  // are team-scoped. Payouts moved to /dashboard/billing.
   { label: "Members", suffix: "" },
-  { label: "Payouts", suffix: "/payouts" },
   { label: "Folder permissions", suffix: "/folders" },
 ] as const;
 

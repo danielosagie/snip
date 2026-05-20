@@ -2,8 +2,9 @@
 
 import { v } from "convex/values";
 import Stripe from "stripe";
-import { action } from "./_generated/server";
+import { action, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 import { isFeatureEnabled } from "./featureFlags";
 
 /**
@@ -33,6 +34,61 @@ function computeApplicationFee(amountCents: number): number {
   if (PLATFORM_FEE_BASIS_POINTS <= 0) return 0;
   const fee = Math.floor((amountCents * PLATFORM_FEE_BASIS_POINTS) / 10000);
   return Math.max(0, fee);
+}
+
+// Mirror of stripeConnectActions.deriveConnectStatus — duplicated because
+// Convex "use node" files can only export actions, so the helper can't be
+// shared across them (http.ts keeps its own copy for the same reason).
+function deriveConnectStatus(
+  account: Stripe.Account,
+): "pending" | "active" | "restricted" {
+  const detailsSubmitted = account.details_submitted === true;
+  const chargesEnabled = account.charges_enabled === true;
+  const requirements = account.requirements;
+  const hasOverdue =
+    Boolean(requirements?.currently_due?.length) ||
+    Boolean(requirements?.past_due?.length) ||
+    Boolean(requirements?.disabled_reason);
+
+  if (chargesEnabled && detailsSubmitted && !hasOverdue) return "active";
+  if (detailsSubmitted && hasOverdue) return "restricted";
+  return "pending";
+}
+
+/**
+ * The cached `stripeConnectStatus` only flips to "active" via the
+ * `account.updated` webhook (or a manual refresh on the payouts page). If
+ * that webhook never reaches this deployment — wrong endpoint, env, or a
+ * dropped delivery — a fully-onboarded team is permanently treated as
+ * "not connected" and clients can never pay. Before blocking checkout,
+ * ask Stripe for the live account state and sync it back. Returns the
+ * effective status after reconciliation.
+ */
+async function reconcileConnectStatus(
+  ctx: ActionCtx,
+  stripe: Stripe,
+  team: { _id: Id<"teams">; stripeConnectAccountId: string },
+): Promise<"pending" | "active" | "restricted" | "disabled"> {
+  try {
+    const account = await stripe.accounts.retrieve(
+      team.stripeConnectAccountId,
+    );
+    const status = deriveConnectStatus(account);
+    await ctx.runMutation(internal.stripeConnect.recordAccountStatus, {
+      teamId: team._id,
+      status,
+      chargesEnabled: account.charges_enabled ?? false,
+      payoutsEnabled: account.payouts_enabled ?? false,
+    });
+    return status;
+  } catch (err) {
+    console.error("Stripe Connect live status refresh failed", {
+      teamId: team._id,
+      stripeConnectAccountId: team.stripeConnectAccountId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return "pending";
+  }
 }
 
 export const createCheckoutForGrant = action({
@@ -100,7 +156,15 @@ export const createCheckoutForGrant = action({
         reason: "This team hasn't connected Stripe yet.",
       };
     }
-    if (lookup.team.stripeConnectStatus !== "active") {
+    let connectStatus: "pending" | "active" | "restricted" | "disabled" =
+      lookup.team.stripeConnectStatus ?? "pending";
+    if (connectStatus !== "active") {
+      connectStatus = await reconcileConnectStatus(ctx, stripe, {
+        _id: lookup.team._id,
+        stripeConnectAccountId: lookup.team.stripeConnectAccountId,
+      });
+    }
+    if (connectStatus !== "active") {
       return {
         status: "teamNotConnected",
         url: null,
@@ -231,7 +295,15 @@ export const createCheckoutForVideo = action({
         reason: "This team hasn't connected Stripe yet.",
       };
     }
-    if (lookup.team.stripeConnectStatus !== "active") {
+    let connectStatus: "pending" | "active" | "restricted" | "disabled" =
+      lookup.team.stripeConnectStatus ?? "pending";
+    if (connectStatus !== "active") {
+      connectStatus = await reconcileConnectStatus(ctx, stripe, {
+        _id: lookup.team._id,
+        stripeConnectAccountId: lookup.team.stripeConnectAccountId,
+      });
+    }
+    if (connectStatus !== "active") {
       return {
         status: "teamNotConnected",
         url: null,

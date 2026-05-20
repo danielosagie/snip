@@ -354,7 +354,12 @@ export const processWebhook = internalAction({
           });
           // For a failed preview, don't poison the main video — the original
           // playback path still works, just the paywalled preview is broken.
+          // Record the terminal status so the share page can stop spinning
+          // and surface "preview unavailable" instead of waiting forever.
           if (resolved.isPreview) {
+            await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
+              videoId: resolved.videoId,
+            });
             break;
           }
           await ctx.runMutation(internal.videos.markAsFailed, {

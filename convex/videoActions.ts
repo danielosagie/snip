@@ -932,6 +932,7 @@ export const getSharedPaywalledPlayback = action({
     mode: v.union(
       v.literal("preview"),
       v.literal("preview_pending"),
+      v.literal("preview_unavailable"),
       v.literal("full"),
       v.literal("public"),
     ),
@@ -951,7 +952,7 @@ export const getSharedPaywalledPlayback = action({
     ctx,
     args,
   ): Promise<{
-    mode: "preview" | "preview_pending" | "full" | "public";
+    mode: "preview" | "preview_pending" | "preview_unavailable" | "full" | "public";
     url: string;
     posterUrl: string;
     tokenExpiresAt: number | null;
@@ -1039,6 +1040,28 @@ export const getSharedPaywalledPlayback = action({
     // links that pre-dated the auto-schedule on create, and for each item
     // in a bundle share on its first view.
     if (!video.muxPreviewPlaybackId) {
+      const pending = {
+        mode: "preview_pending" as const,
+        url: "",
+        posterUrl: "",
+        tokenExpiresAt: null,
+        paywall: shareLink.paywall,
+      };
+      const unavailable = {
+        mode: "preview_unavailable" as const,
+        url: "",
+        posterUrl: "",
+        tokenExpiresAt: null,
+        paywall: shareLink.paywall,
+      };
+
+      // A prior poll or webhook already saw Mux fail this preview asset.
+      // Stop pretending it's still rendering — paying still works and
+      // unlocks the full-res stream, which doesn't need the preview.
+      if (video.muxPreviewAssetStatus === "errored") {
+        return unavailable;
+      }
+
       if (!video.muxPreviewAssetId) {
         await ctx.scheduler.runAfter(
           0,
@@ -1048,14 +1071,53 @@ export const getSharedPaywalledPlayback = action({
             itemVideoId: args.itemVideoId,
           },
         );
+        return pending;
       }
-      return {
-        mode: "preview_pending" as const,
-        url: "",
-        posterUrl: "",
-        tokenExpiresAt: null,
-        paywall: shareLink.paywall,
-      };
+
+      // The preview asset exists but has no playback id yet. Normally the
+      // Mux `video.asset.ready` webhook fills this in — but if that webhook
+      // never reaches this deployment (misconfigured endpoint, wrong env,
+      // dropped delivery) the share page would spin forever. Poll Mux
+      // directly so playback self-heals with zero webhook dependency.
+      try {
+        const asset = await getMuxAsset(video.muxPreviewAssetId);
+        if (asset.status === "ready") {
+          const signedId =
+            (asset.playback_ids ?? []).find(
+              (entry) => entry.policy === "signed" && entry.id,
+            )?.id ??
+            (await createSignedPlaybackId(video.muxPreviewAssetId)).id;
+          await ctx.runMutation(internal.videos.setMuxPreviewPlaybackId, {
+            videoId: video._id,
+            muxPreviewPlaybackId: signedId,
+          });
+          const videoToken = await signPlaybackToken(signedId, `${TTL_SECONDS}s`);
+          const thumbToken = await signThumbnailToken(signedId, `${TTL_SECONDS}s`);
+          return {
+            mode: "preview" as const,
+            url: buildMuxPreviewUrl(signedId, videoToken),
+            posterUrl: buildMuxThumbnailUrl(signedId, thumbToken),
+            tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+            paywall: shareLink.paywall,
+          };
+        }
+        if (asset.status === "errored") {
+          await ctx.runMutation(internal.videos.setMuxPreviewAssetErrored, {
+            videoId: video._id,
+          });
+          return unavailable;
+        }
+      } catch (err) {
+        // Transient Mux lookup failure — keep showing the pending state;
+        // the client polls and we'll try again on the next tick.
+        console.error("Mux preview asset poll failed", {
+          videoId: video._id,
+          muxPreviewAssetId: video.muxPreviewAssetId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      return pending;
     }
     const videoToken = await signPlaybackToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
     const thumbToken = await signThumbnailToken(video.muxPreviewPlaybackId, `${TTL_SECONDS}s`);
