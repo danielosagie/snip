@@ -314,6 +314,10 @@ export const processWebhook = internalAction({
             id: assetId,
           });
           if (!resolved || resolved.isPreview) break;
+          await ctx.runMutation(internal.videos.setMuxCaptionsTrackId, {
+            videoId: resolved.videoId,
+            trackId,
+          });
           await ctx.scheduler.runAfter(
             0,
             internal.transcripts.indexTranscript,

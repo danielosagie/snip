@@ -115,6 +115,25 @@ export const indexTranscript = internalAction({
       buf.push(cue.text);
     }
     await flush();
+
+    // Best-effort PAYG meter increment. The video's duration field is
+    // populated by Mux's `video.asset.ready` webhook well before
+    // `track.ready` fires for the captions track, so this normally
+    // sees a real number. Silent skip when duration is unknown.
+    try {
+      const owner = await ctx.runQuery(
+        internal.usageMeters.resolveVideoWorkspaceOwner,
+        { videoId: args.videoId },
+      );
+      if (owner && owner.durationSec && owner.durationSec > 0) {
+        await ctx.runMutation(internal.usageMeters.incrementTranscribedMinutes, {
+          workspaceOwnerClerkId: owner.ownerClerkId,
+          durationMs: owner.durationSec * 1000,
+        });
+      }
+    } catch (err) {
+      console.error("transcript metering failed", err);
+    }
   },
 });
 

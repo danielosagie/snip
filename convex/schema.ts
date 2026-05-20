@@ -214,6 +214,10 @@ export default defineSchema({
         v.literal("errored")
       )
     ),
+    // Mux auto-generated captions track. Populated by muxActions when
+    // `video.asset.track.ready` fires for a text track. The captions VTT
+    // URL is `https://stream.mux.com/{muxPlaybackId}/text/{muxCaptionsTrackId}.vtt`.
+    muxCaptionsTrackId: v.optional(v.string()),
     // Mux "preview" asset — a separate ingest with a per-team watermark overlay
     // and resolution capped at 360p. Shown pre-payment on paywalled share links.
     // Mux overlays are applied at ingest time, hence the second asset.
@@ -289,6 +293,44 @@ export default defineSchema({
     versionNumber: v.optional(v.number()),
     isCurrentVersion: v.optional(v.boolean()),
     versionLabel: v.optional(v.string()),
+    // Asset classification. Missing/undefined behaves as "video" (the
+    // legacy default) — most rows in production are videos so the field
+    // is only persisted on new sequence/image/audio assets to avoid a
+    // backfill. Currently:
+    //   "image_sequence" → DPX/EXR/PNG sequence (sequenceFrameKeys set)
+    //   "audio"          → mp3/wav/etc. (downloaded only, no player yet)
+    // We don't tag "video" or "image" explicitly — those derive from
+    // muxAssetId / imagePreviewS3Key / contentType as today.
+    kind: v.optional(
+      v.union(
+        v.literal("video"),
+        v.literal("image"),
+        v.literal("audio"),
+        v.literal("image_sequence"),
+      ),
+    ),
+    // Image sequence fields. Populated when an upload batch contains 3+
+    // files matching a `name.NNNN.ext` pattern. Frame keys are R2 keys
+    // for the original frames in zero-padded index order. The optional
+    // stitched MP4 / Mux asset uses the existing muxAssetId/muxPlaybackId
+    // fields so the player can reuse the normal playback flow.
+    sequenceFrameKeys: v.optional(v.array(v.string())),
+    sequenceFps: v.optional(v.number()),
+    sequenceStem: v.optional(v.string()),
+    sequenceFrameExt: v.optional(v.string()),
+    // Status of the optional ffmpeg → Mux stitching job. Pending/preparing
+    // while we transcode; ready once muxPlaybackId is set; errored if the
+    // ffmpeg binary isn't available on the runtime. The frame-grid UI
+    // works regardless of this status.
+    sequenceStitchStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("preparing"),
+        v.literal("ready"),
+        v.literal("errored"),
+      ),
+    ),
+    sequenceStitchError: v.optional(v.string()),
     // Soft-delete marker. When set, the video disappears from project /
     // folder listings and shows up in the "Recently deleted" page where
     // it can be restored or purged. Mirrors the same pattern on projects.
@@ -543,10 +585,244 @@ export default defineSchema({
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
     canceledAt: v.optional(v.number()),
+    // Enterprise pay-as-you-go: separate metered Stripe Price IDs for
+    // storage / egress / seats / transcription. Only populated when
+    // `plan === "enterprise"`; flat-tier subs leave this undefined.
+    stripeMeterIds: v.optional(
+      v.object({
+        storage: v.string(),
+        egress: v.string(),
+        seats: v.string(),
+        transcription: v.string(),
+      }),
+    ),
   })
     .index("by_owner", ["ownerClerkId"])
     .index("by_stripe_customer", ["stripeCustomerId"])
     .index("by_stripe_subscription", ["stripeSubscriptionId"]),
+
+  /**
+   * Per-billing-period usage tally for enterprise pay-as-you-go
+   * subscribers. We bump these locally as work happens (egress on a
+   * download, transcribed minutes when Mux returns a finished track,
+   * storage as a daily snapshot) and push the deltas to Stripe via the
+   * Meter Events API in a daily cron.
+   *
+   * `lastReportedAt` is the most recent successful Stripe report — used
+   * to compute the delta since the last push so retries don't double-
+   * count. The local row is the source of truth; Stripe is a write-only
+   * mirror.
+   */
+  usageMeters: defineTable({
+    workspaceOwnerClerkId: v.string(),
+    periodStart: v.number(),
+    periodEnd: v.number(),
+    storageBytesGbMonths: v.number(),
+    egressBytesGb: v.number(),
+    seatCount: v.number(),
+    transcribedMinutes: v.number(),
+    lastReportedAt: v.optional(v.number()),
+  })
+    .index("by_owner", ["workspaceOwnerClerkId"])
+    .index("by_owner_period", ["workspaceOwnerClerkId", "periodStart"]),
+
+  /**
+   * Multi-contract container, native to snip. Replaces the singleton
+   * `projects.contract` embedded field, which stays for one release as
+   * a read-fallback during migration (see contractsBackfill.ts). A
+   * project can have an unbounded number of these — typical agency
+   * relationships need a master agreement, per-engagement SOWs, an NDA
+   * for new collaborators, etc.
+   *
+   * Designed to support a Documenso-equivalent e-sign flow in-product,
+   * without calling out to an external API:
+   *   • `contentHtml` is the editable contract body (Tiptap output).
+   *   • `signablePdfS3Key` holds the rendered PDF generated when the
+   *     author hits "Send for signature" (R2-cached).
+   *   • `signedPdfS3Key` holds the final stamped + audited PDF after
+   *     all signers complete.
+   *   • The state machine (`status`) is enforced by the mutations in
+   *     `contractsTable.ts`.
+   */
+  contracts: defineTable({
+    projectId: v.id("projects"),
+    teamId: v.id("teams"),
+    title: v.string(),
+    kind: v.union(
+      v.literal("master"),
+      v.literal("sow"),
+      v.literal("nda"),
+      v.literal("release"),
+      v.literal("custom"),
+    ),
+    // Editable body (Tiptap HTML) + the wizard-generated clauses (same
+    // shape as projects.contract.clauses).
+    contentHtml: v.string(),
+    clauses: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          sectionKey: v.string(),
+          title: v.string(),
+          bodyHtml: v.string(),
+          state: v.union(
+            v.literal("draft"),
+            v.literal("pending"),
+            v.literal("accepted"),
+            v.literal("disputed"),
+          ),
+          required: v.boolean(),
+          order: v.number(),
+          sourceAnswerId: v.optional(v.string()),
+          proposedBody: v.optional(v.string()),
+        }),
+      ),
+    ),
+    projectType: v.optional(
+      v.union(
+        v.literal("logo_design"),
+        v.literal("video_production"),
+        v.literal("web_design"),
+        v.literal("photography"),
+        v.literal("brand_identity"),
+        v.literal("copywriting"),
+        v.literal("music"),
+        v.literal("animation"),
+        v.literal("custom"),
+      ),
+    ),
+    wizardAnswers: v.optional(v.string()),
+    priceCents: v.optional(v.number()),
+    currency: v.optional(v.string()),
+    deadline: v.optional(v.string()),
+    clientName: v.optional(v.string()),
+    clientEmail: v.optional(v.string()),
+    docxS3Key: v.optional(v.string()),
+    originalFilename: v.optional(v.string()),
+    lastSavedAt: v.optional(v.number()),
+    // Signing artefacts.
+    signablePdfS3Key: v.optional(v.string()),
+    signedPdfS3Key: v.optional(v.string()),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("pending"),
+      v.literal("completed"),
+      v.literal("declined"),
+      v.literal("voided"),
+      v.literal("expired"),
+    ),
+    sentForSignatureAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+    createdByClerkId: v.string(),
+    createdByName: v.string(),
+    deletedAt: v.optional(v.number()),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_and_status", ["projectId", "status"])
+    .index("by_status", ["status"]),
+
+  /**
+   * Recipients of a contract. Each row carries an opaque signing-link
+   * token that maps an external visitor to a single recipient; the
+   * token is checked on every public sign route hit.
+   *
+   * `order` controls sequential signing (1..n). When `order=1` signs,
+   * the mutation flips order=2 to status=pending; this lets a CEO
+   * sign first, then the client.
+   */
+  contractRecipients: defineTable({
+    contractId: v.id("contracts"),
+    projectId: v.id("projects"),
+    name: v.string(),
+    email: v.string(),
+    role: v.union(
+      v.literal("signer"),
+      v.literal("approver"),
+      v.literal("viewer"),
+      v.literal("cc"),
+    ),
+    order: v.number(),
+    token: v.string(),
+    tokenExpiresAt: v.number(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("viewed"),
+      v.literal("signed"),
+      v.literal("declined"),
+    ),
+    signedAt: v.optional(v.number()),
+    viewedAt: v.optional(v.number()),
+    signatureDataUrl: v.optional(v.string()),
+    typedSignatureName: v.optional(v.string()),
+    signedIp: v.optional(v.string()),
+    signedUserAgent: v.optional(v.string()),
+  })
+    .index("by_contract", ["contractId"])
+    .index("by_token", ["token"])
+    .index("by_contract_and_order", ["contractId", "order"]),
+
+  /**
+   * Fields placed by the contract author on the PDF, to be filled in
+   * by recipients at sign time. Coordinates are normalized to 0..1 of
+   * page width/height so they survive re-renders at different
+   * resolutions.
+   *
+   * v1 wires the typed-signature flow only. The full drag-and-drop
+   * field placement editor is v2 work — until then, only one implicit
+   * "signature" field per recipient is required.
+   */
+  contractFields: defineTable({
+    contractId: v.id("contracts"),
+    recipientId: v.id("contractRecipients"),
+    type: v.union(
+      v.literal("signature"),
+      v.literal("initials"),
+      v.literal("date"),
+      v.literal("text"),
+      v.literal("checkbox"),
+      v.literal("name"),
+      v.literal("email"),
+    ),
+    pageIndex: v.number(),
+    x: v.number(),
+    y: v.number(),
+    width: v.number(),
+    height: v.number(),
+    required: v.boolean(),
+    value: v.optional(v.string()),
+  })
+    .index("by_contract", ["contractId"])
+    .index("by_recipient", ["recipientId"]),
+
+  /**
+   * Append-only audit log for each contract. Captures every meaningful
+   * action — created, sent, viewed, field_filled, signed, declined,
+   * voided, reminder_sent, completed — with the actor, IP, and UA
+   * where available. Rendered into the final PDF's audit page when
+   * `finalizeContract` runs.
+   */
+  contractAuditEvents: defineTable({
+    contractId: v.id("contracts"),
+    recipientId: v.optional(v.id("contractRecipients")),
+    action: v.union(
+      v.literal("created"),
+      v.literal("sent"),
+      v.literal("viewed"),
+      v.literal("field_filled"),
+      v.literal("signed"),
+      v.literal("declined"),
+      v.literal("voided"),
+      v.literal("reminder_sent"),
+      v.literal("completed"),
+    ),
+    actorName: v.optional(v.string()),
+    actorEmail: v.optional(v.string()),
+    ip: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
+    metadata: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_contract", ["contractId"]),
 
   /**
    * Contract comments. Project-scoped (one stream per contract), with

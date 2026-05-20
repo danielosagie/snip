@@ -115,6 +115,109 @@ export const create = mutation({
 });
 
 /**
+ * Coalesce a batch of just-uploaded image-sequence frames into a single
+ * `image_sequence` video. The upload manager auto-detects N≥3 files
+ * matching `name.####.ext` in the same drop and calls this after every
+ * frame has reached status:"ready". The first frame (by index) becomes
+ * the sequence head; the others are soft-deleted so they don't clutter
+ * the project grid but remain recoverable from trash.
+ *
+ * No Mux ingest yet — we schedule the optional ffmpeg stitch separately
+ * via internal.imageSequenceActions.stitchSequenceAndIngest. The frame
+ * grid in the asset detail page works regardless of stitch status.
+ */
+export const coalesceIntoSequence = mutation({
+  args: {
+    frameVideoIds: v.array(v.id("videos")),
+    stem: v.string(),
+    ext: v.string(),
+    fps: v.optional(v.number()),
+  },
+  returns: v.object({
+    sequenceVideoId: v.id("videos"),
+  }),
+  handler: async (ctx, args) => {
+    if (args.frameVideoIds.length < 3) {
+      throw new Error("Sequence requires at least 3 frames.");
+    }
+    const frames = await Promise.all(
+      args.frameVideoIds.map((id) => ctx.db.get(id)),
+    );
+    const validFrames = frames.filter(
+      (f): f is NonNullable<typeof f> => f !== null && f.deletedAt === undefined,
+    );
+    if (validFrames.length !== args.frameVideoIds.length) {
+      throw new Error("Some frames no longer exist.");
+    }
+    const projectId = validFrames[0].projectId;
+    for (const f of validFrames) {
+      if (f.projectId !== projectId) {
+        throw new Error("All frames must belong to the same project.");
+      }
+      if (!f.s3Key) {
+        throw new Error("Frame is missing its R2 key — upload may not be complete.");
+      }
+    }
+    // Membership check on the shared project.
+    await requireProjectAccess(ctx, projectId, "member");
+
+    // Sort frames by their parsed sequence index (read from the title
+    // since the upload manager preserves the original filename minus
+    // extension as the title).
+    const orderedFrames = [...validFrames].sort((a, b) => {
+      const ai = extractSequenceIndex(a.title) ?? 0;
+      const bi = extractSequenceIndex(b.title) ?? 0;
+      return ai - bi;
+    });
+
+    const head = orderedFrames[0];
+    const frameKeys = orderedFrames.map((f) => f.s3Key!).filter(Boolean);
+
+    await ctx.db.patch(head._id, {
+      title: args.stem,
+      kind: "image_sequence",
+      sequenceFrameKeys: frameKeys,
+      sequenceFps: args.fps ?? 24,
+      sequenceStem: args.stem,
+      sequenceFrameExt: args.ext,
+      sequenceStitchStatus: "pending",
+      status: "ready",
+      muxAssetStatus: undefined,
+    });
+
+    // Soft-delete the per-frame rows so the project grid shows the
+    // sequence as a single asset. The R2 objects remain because the
+    // sequence head's sequenceFrameKeys references them.
+    const now = Date.now();
+    for (let i = 1; i < orderedFrames.length; i++) {
+      await ctx.db.patch(orderedFrames[i]._id, {
+        deletedAt: now,
+        deletedByName: "Sequence coalesce",
+      });
+    }
+
+    await ctx.scheduler.runAfter(
+      0,
+      internal.imageSequenceActions.stitchSequenceAndIngest,
+      { videoId: head._id },
+    );
+
+    return { sequenceVideoId: head._id };
+  },
+});
+
+/**
+ * Parse the integer frame index from a filename stem. Matches
+ * `name.0010` or `name_0010`, returning 10. Returns null if no match.
+ */
+function extractSequenceIndex(stem: string): number | null {
+  const m = stem.match(/[._](\d{3,6})$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Duplicate a finished video into the same folder. The copy shares the
  * original's underlying media — Mux playback IDs + S3 keys are reused, NOT
  * re-ingested — so it's instant and playable immediately. `remove`/`purge`
@@ -1197,6 +1300,18 @@ export const setMuxPlaybackId = internalMutation({
   },
 });
 
+export const setMuxCaptionsTrackId = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    trackId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      muxCaptionsTrackId: args.trackId,
+    });
+  },
+});
+
 export const setMuxSignedPlaybackId = internalMutation({
   args: {
     videoId: v.id("videos"),
@@ -1318,6 +1433,72 @@ export const getForImagePreview = internalQuery({
       imagePreviewS3Key: video.imagePreviewS3Key ?? null,
       imagePreviewStatus: video.imagePreviewStatus ?? null,
     };
+  },
+});
+
+/**
+ * Lightweight internal accessor for the sequence stitch action. Returns
+ * just the fields the action needs to avoid leaking unrelated data into
+ * the action's working set.
+ */
+export const internalGet = internalQuery({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return null;
+    return {
+      _id: video._id,
+      kind: video.kind ?? null,
+      sequenceFrameKeys: video.sequenceFrameKeys ?? null,
+      sequenceFps: video.sequenceFps ?? null,
+      sequenceFrameExt: video.sequenceFrameExt ?? null,
+      sequenceStem: video.sequenceStem ?? null,
+      sequenceStitchStatus: video.sequenceStitchStatus ?? null,
+      s3Key: video.s3Key ?? null,
+    };
+  },
+});
+
+export const setSequenceStitchStatus = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("preparing"),
+      v.literal("ready"),
+      v.literal("errored"),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      sequenceStitchStatus: args.status,
+    });
+  },
+});
+
+export const setSequenceStitchReady = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    stitchedS3Key: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      sequenceStitchStatus: "ready",
+      s3Key: args.stitchedS3Key,
+    });
+  },
+});
+
+export const setSequenceStitchError = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    error: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      sequenceStitchStatus: "errored",
+      sequenceStitchError: args.error,
+    });
   },
 });
 

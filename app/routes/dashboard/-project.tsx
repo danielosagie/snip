@@ -31,6 +31,7 @@ import {
 import { ProjectAddButton } from "@/components/projects/ProjectAddButton";
 import { FolderRow } from "@/components/folders/FolderRow";
 import { ContractTile } from "@/components/contracts/ContractTile";
+import { ContractListSection } from "@/components/contracts/ContractListSection";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -852,6 +853,16 @@ export default function ProjectPage({
                 void handleMoveFolder(droppedId, targetId)
               }
             />
+            {/* Multi-contract list — sits above the file grid when at
+                project root. Hidden when the project has no contracts
+                AND the viewer can't create one. */}
+            {currentFolderId === null && (
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                canEdit={canUpload}
+              />
+            )}
             <div className="px-6 pt-4 pb-6">
               {(filteredFolders?.length ?? 0) > 0 ? (
                 <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
