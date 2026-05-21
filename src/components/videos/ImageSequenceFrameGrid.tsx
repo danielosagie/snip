@@ -5,24 +5,21 @@ import { cn } from "@/lib/utils";
 
 interface ImageSequenceFrameGridProps {
   frames: Array<{ key: string; url: string }> | null;
-  stitchStatus?: string;
-  stitchError?: string;
 }
 
 /**
- * Frame-grid + scrubbable viewer for image sequences. Renders before
- * the ffmpeg stitch completes (or permanently when stitching fails).
+ * Frame-grid + scrubbable viewer for image sequences.
  *
- *   - Top half: large preview of the currently-selected frame.
+ *   - Top: large preview of the currently-selected frame.
  *   - Bottom: scrubbable horizontal strip of every frame, click to jump.
  *
- * Brutalist styling: black backdrop, cream borders, accent-orange
- * scrubber thumb. Square corners.
+ * This is THE preview for sequences — no server-side video stitching
+ * (ffmpeg doesn't run cleanly in a Convex action). Pure client-side,
+ * dependency-free. Brutalist styling: black backdrop, cream borders,
+ * accent-orange scrubber thumb, square corners.
  */
 export function ImageSequenceFrameGrid({
   frames,
-  stitchStatus,
-  stitchError,
 }: ImageSequenceFrameGridProps) {
   const [index, setIndex] = useState(0);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -51,31 +48,6 @@ export function ImageSequenceFrameGrid({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Stitch status banner — brutalist strip across the top. */}
-      {stitchStatus && stitchStatus !== "ready" && (
-        <div className="flex-shrink-0 flex items-center gap-3 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-4 py-2 text-[12px] font-medium text-[#1a1a1a]">
-          {stitchStatus === "pending" || stitchStatus === "preparing" ? (
-            <>
-              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#C2410C]" />
-              <span className="font-bold">
-                Stitching sequence into a video preview…
-              </span>
-              <span className="text-[#888]">
-                Frame grid stays available below.
-              </span>
-            </>
-          ) : stitchStatus === "errored" ? (
-            <>
-              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#dc2626]" />
-              <span className="font-bold">Stitch failed</span>
-              <span className="text-[#888]">
-                {stitchError ?? "Frame grid is the only preview."}
-              </span>
-            </>
-          ) : null}
-        </div>
-      )}
-
       {/* Large preview of the focused frame. */}
       <div className="flex-1 flex items-center justify-center min-h-0 p-4">
         <img

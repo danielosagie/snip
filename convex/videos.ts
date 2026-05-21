@@ -122,9 +122,10 @@ export const create = mutation({
  * the sequence head; the others are soft-deleted so they don't clutter
  * the project grid but remain recoverable from trash.
  *
- * No Mux ingest yet — we schedule the optional ffmpeg stitch separately
- * via internal.imageSequenceActions.stitchSequenceAndIngest. The frame
- * grid in the asset detail page works regardless of stitch status.
+ * Preview is the client-side frame-grid scrubber in
+ * `ImageSequenceFrameGrid` — no server-side video stitching. (ffmpeg
+ * doesn't run cleanly in a Convex action; the frame grid is the
+ * dependency-free preview that actually works.)
  */
 export const coalesceIntoSequence = mutation({
   args: {
@@ -180,7 +181,6 @@ export const coalesceIntoSequence = mutation({
       sequenceFps: args.fps ?? 24,
       sequenceStem: args.stem,
       sequenceFrameExt: args.ext,
-      sequenceStitchStatus: "pending",
       status: "ready",
       muxAssetStatus: undefined,
     });
@@ -195,12 +195,6 @@ export const coalesceIntoSequence = mutation({
         deletedByName: "Sequence coalesce",
       });
     }
-
-    await ctx.scheduler.runAfter(
-      0,
-      internal.imageSequenceActions.stitchSequenceAndIngest,
-      { videoId: head._id },
-    );
 
     return { sequenceVideoId: head._id };
   },
@@ -1433,72 +1427,6 @@ export const getForImagePreview = internalQuery({
       imagePreviewS3Key: video.imagePreviewS3Key ?? null,
       imagePreviewStatus: video.imagePreviewStatus ?? null,
     };
-  },
-});
-
-/**
- * Lightweight internal accessor for the sequence stitch action. Returns
- * just the fields the action needs to avoid leaking unrelated data into
- * the action's working set.
- */
-export const internalGet = internalQuery({
-  args: { videoId: v.id("videos") },
-  handler: async (ctx, args) => {
-    const video = await ctx.db.get(args.videoId);
-    if (!video) return null;
-    return {
-      _id: video._id,
-      kind: video.kind ?? null,
-      sequenceFrameKeys: video.sequenceFrameKeys ?? null,
-      sequenceFps: video.sequenceFps ?? null,
-      sequenceFrameExt: video.sequenceFrameExt ?? null,
-      sequenceStem: video.sequenceStem ?? null,
-      sequenceStitchStatus: video.sequenceStitchStatus ?? null,
-      s3Key: video.s3Key ?? null,
-    };
-  },
-});
-
-export const setSequenceStitchStatus = internalMutation({
-  args: {
-    videoId: v.id("videos"),
-    status: v.union(
-      v.literal("pending"),
-      v.literal("preparing"),
-      v.literal("ready"),
-      v.literal("errored"),
-    ),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.videoId, {
-      sequenceStitchStatus: args.status,
-    });
-  },
-});
-
-export const setSequenceStitchReady = internalMutation({
-  args: {
-    videoId: v.id("videos"),
-    stitchedS3Key: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.videoId, {
-      sequenceStitchStatus: "ready",
-      s3Key: args.stitchedS3Key,
-    });
-  },
-});
-
-export const setSequenceStitchError = internalMutation({
-  args: {
-    videoId: v.id("videos"),
-    error: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.videoId, {
-      sequenceStitchStatus: "errored",
-      sequenceStitchError: args.error,
-    });
   },
 });
 

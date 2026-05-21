@@ -652,15 +652,7 @@ export default function VideoPage() {
         {/* Video player area — full black, Frame.io style */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
           {isSequenceItem && !activePlaybackUrl ? (
-            <ImageSequenceFrameGrid
-              frames={sequenceFrames}
-              stitchStatus={
-                (video as { sequenceStitchStatus?: string }).sequenceStitchStatus
-              }
-              stitchError={
-                (video as { sequenceStitchError?: string }).sequenceStitchError
-              }
-            />
+            <ImageSequenceFrameGrid frames={sequenceFrames} />
           ) : isImageItem ? (
             activePlaybackUrl ? (
               <div className="flex-1 flex items-center justify-center overflow-auto p-4">
