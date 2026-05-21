@@ -41,8 +41,16 @@ async function ensureFfmpegBinary(): Promise<string> {
   // ffmpeg-static ships a prebuilt ffmpeg binary keyed to the runtime
   // platform. On Convex's runtime the binary may not be executable; we
   // surface a clear error rather than a cryptic spawn EACCES.
-  const mod = await import("ffmpeg-static");
-  const binaryPath = (mod as { default?: string }).default ?? (mod as unknown as string);
+  //
+  // The module specifier is assembled at runtime so esbuild (Convex's
+  // bundler) can't statically resolve it and choke at bundle time on
+  // the prebuilt binary. Convex installs the package at runtime via
+  // node.externalPackages in convex.json. If it's missing the import
+  // rejects and the caller falls back to the frame-grid preview.
+  const specifier = ["ffmpeg", "static"].join("-");
+  const mod = (await import(specifier)) as { default?: string } | string;
+  const binaryPath =
+    (mod as { default?: string }).default ?? (mod as unknown as string);
   if (!binaryPath || typeof binaryPath !== "string") {
     throw new Error("ffmpeg-static did not resolve a binary path.");
   }
