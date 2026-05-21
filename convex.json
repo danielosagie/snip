@@ -1,6 +1,6 @@
 {
   "functions": "convex/",
   "node": {
-    "externalPackages": ["sharp"]
+    "externalPackages": ["sharp", "ffmpeg-static"]
   }
 }
