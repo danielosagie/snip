@@ -18,6 +18,7 @@ import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
 import { Route as WatchPublicIdRouteImport } from './routes/watch.$publicId'
+import { Route as SignTokenRouteImport } from './routes/sign.$token'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
@@ -31,6 +32,7 @@ import { Route as DashboardTeamSlugRouteImport } from './routes/dashboard/$teamS
 import { Route as CompareWipsterRouteImport } from './routes/compare.wipster'
 import { Route as CompareLucidlinkRouteImport } from './routes/compare.lucidlink'
 import { Route as CompareFrameioRouteImport } from './routes/compare.frameio'
+import { Route as CTokenRouteImport } from './routes/c.$token'
 import { Route as DashboardTeamSlugIndexRouteImport } from './routes/dashboard/$teamSlug.index'
 import { Route as DashboardTeamSlugSettingsRouteImport } from './routes/dashboard/$teamSlug.settings'
 import { Route as DashboardTeamSlugProjectIdRouteImport } from './routes/dashboard/$teamSlug.$projectId'
@@ -41,8 +43,6 @@ import { Route as DashboardTeamSlugSettingsFoldersRouteImport } from './routes/d
 import { Route as DashboardTeamSlugProjectIdContractRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract'
 import { Route as DashboardTeamSlugProjectIdVideoIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.$videoId'
 import { Route as DashboardTeamSlugProjectIdContractContractIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract.$contractId'
-import { Route as SignTokenRouteImport } from './routes/sign.$token'
-import { Route as CTokenRouteImport } from './routes/c.$token'
 
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
@@ -87,6 +87,11 @@ const DashboardIndexRoute = DashboardIndexRouteImport.update({
 const WatchPublicIdRoute = WatchPublicIdRouteImport.update({
   id: '/watch/$publicId',
   path: '/watch/$publicId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignTokenRoute = SignTokenRouteImport.update({
+  id: '/sign/$token',
+  path: '/sign/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignUpSplatRoute = SignUpSplatRouteImport.update({
@@ -154,6 +159,11 @@ const CompareFrameioRoute = CompareFrameioRouteImport.update({
   path: '/compare/frameio',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CTokenRoute = CTokenRouteImport.update({
+  id: '/c/$token',
+  path: '/c/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardTeamSlugIndexRoute = DashboardTeamSlugIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -207,6 +217,12 @@ const DashboardTeamSlugProjectIdVideoIdRoute =
     path: '/$videoId',
     getParentRoute: () => DashboardTeamSlugProjectIdRoute,
   } as any)
+const DashboardTeamSlugProjectIdContractContractIdRoute =
+  DashboardTeamSlugProjectIdContractContractIdRouteImport.update({
+    id: '/$contractId',
+    path: '/$contractId',
+    getParentRoute: () => DashboardTeamSlugProjectIdContractRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -216,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
   '/sign-up': typeof SignUpRouteWithChildren
+  '/c/$token': typeof CTokenRoute
   '/compare/frameio': typeof CompareFrameioRoute
   '/compare/lucidlink': typeof CompareLucidlinkRoute
   '/compare/wipster': typeof CompareWipsterRoute
@@ -229,17 +246,19 @@ export interface FileRoutesByFullPath {
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/sign/$token': typeof SignTokenRoute
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdRouteWithChildren
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
-  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRouteWithChildren
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
   '/dashboard/$teamSlug/settings/': typeof DashboardTeamSlugSettingsIndexRoute
+  '/dashboard/$teamSlug/$projectId/contract/$contractId': typeof DashboardTeamSlugProjectIdContractContractIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -248,6 +267,7 @@ export interface FileRoutesByTo {
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
   '/sign-up': typeof SignUpRouteWithChildren
+  '/c/$token': typeof CTokenRoute
   '/compare/frameio': typeof CompareFrameioRoute
   '/compare/lucidlink': typeof CompareLucidlinkRoute
   '/compare/wipster': typeof CompareWipsterRoute
@@ -260,15 +280,17 @@ export interface FileRoutesByTo {
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/sign/$token': typeof SignTokenRoute
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard': typeof DashboardIndexRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
-  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRouteWithChildren
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdIndexRoute
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsIndexRoute
+  '/dashboard/$teamSlug/$projectId/contract/$contractId': typeof DashboardTeamSlugProjectIdContractContractIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -279,6 +301,7 @@ export interface FileRoutesById {
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
   '/sign-up': typeof SignUpRouteWithChildren
+  '/c/$token': typeof CTokenRoute
   '/compare/frameio': typeof CompareFrameioRoute
   '/compare/lucidlink': typeof CompareLucidlinkRoute
   '/compare/wipster': typeof CompareWipsterRoute
@@ -292,17 +315,19 @@ export interface FileRoutesById {
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/sign/$token': typeof SignTokenRoute
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdRouteWithChildren
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
-  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRouteWithChildren
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
   '/dashboard/$teamSlug/settings/': typeof DashboardTeamSlugSettingsIndexRoute
+  '/dashboard/$teamSlug/$projectId/contract/$contractId': typeof DashboardTeamSlugProjectIdContractContractIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -314,6 +339,7 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/sign-in'
     | '/sign-up'
+    | '/c/$token'
     | '/compare/frameio'
     | '/compare/lucidlink'
     | '/compare/wipster'
@@ -327,6 +353,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/sign/$token'
     | '/watch/$publicId'
     | '/dashboard/'
     | '/dashboard/$teamSlug/$projectId'
@@ -338,6 +365,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
     | '/dashboard/$teamSlug/settings/'
+    | '/dashboard/$teamSlug/$projectId/contract/$contractId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -346,6 +374,7 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/sign-in'
     | '/sign-up'
+    | '/c/$token'
     | '/compare/frameio'
     | '/compare/lucidlink'
     | '/compare/wipster'
@@ -358,6 +387,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/sign/$token'
     | '/watch/$publicId'
     | '/dashboard'
     | '/dashboard/$teamSlug'
@@ -367,6 +397,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId'
     | '/dashboard/$teamSlug/settings'
+    | '/dashboard/$teamSlug/$projectId/contract/$contractId'
   id:
     | '__root__'
     | '/'
@@ -376,6 +407,7 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/sign-in'
     | '/sign-up'
+    | '/c/$token'
     | '/compare/frameio'
     | '/compare/lucidlink'
     | '/compare/wipster'
@@ -389,6 +421,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/sign/$token'
     | '/watch/$publicId'
     | '/dashboard/'
     | '/dashboard/$teamSlug/$projectId'
@@ -400,6 +433,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
     | '/dashboard/$teamSlug/settings/'
+    | '/dashboard/$teamSlug/$projectId/contract/$contractId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -410,6 +444,7 @@ export interface RootRouteChildren {
   PricingRoute: typeof PricingRoute
   SignInRoute: typeof SignInRouteWithChildren
   SignUpRoute: typeof SignUpRouteWithChildren
+  CTokenRoute: typeof CTokenRoute
   CompareFrameioRoute: typeof CompareFrameioRoute
   CompareLucidlinkRoute: typeof CompareLucidlinkRoute
   CompareWipsterRoute: typeof CompareWipsterRoute
@@ -417,6 +452,7 @@ export interface RootRouteChildren {
   ForVideoEditorsRoute: typeof ForVideoEditorsRoute
   InviteTokenRoute: typeof InviteTokenRoute
   ShareTokenRoute: typeof ShareTokenRoute
+  SignTokenRoute: typeof SignTokenRoute
   WatchPublicIdRoute: typeof WatchPublicIdRoute
 }
 
@@ -483,6 +519,13 @@ declare module '@tanstack/react-router' {
       path: '/watch/$publicId'
       fullPath: '/watch/$publicId'
       preLoaderRoute: typeof WatchPublicIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign/$token': {
+      id: '/sign/$token'
+      path: '/sign/$token'
+      fullPath: '/sign/$token'
+      preLoaderRoute: typeof SignTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-up/$': {
@@ -576,6 +619,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CompareFrameioRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/c/$token': {
+      id: '/c/$token'
+      path: '/c/$token'
+      fullPath: '/c/$token'
+      preLoaderRoute: typeof CTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard/$teamSlug/': {
       id: '/dashboard/$teamSlug/'
       path: '/'
@@ -641,31 +691,32 @@ declare module '@tanstack/react-router' {
     }
     '/dashboard/$teamSlug/$projectId/contract/$contractId': {
       id: '/dashboard/$teamSlug/$projectId/contract/$contractId'
-      path: '/contract/$contractId'
+      path: '/$contractId'
       fullPath: '/dashboard/$teamSlug/$projectId/contract/$contractId'
       preLoaderRoute: typeof DashboardTeamSlugProjectIdContractContractIdRouteImport
-      parentRoute: typeof DashboardTeamSlugProjectIdRoute
-    }
-    '/sign/$token': {
-      id: '/sign/$token'
-      path: '/sign/$token'
-      fullPath: '/sign/$token'
-      preLoaderRoute: typeof SignTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/c/$token': {
-      id: '/c/$token'
-      path: '/c/$token'
-      fullPath: '/c/$token'
-      preLoaderRoute: typeof CTokenRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DashboardTeamSlugProjectIdContractRoute
     }
   }
 }
 
+interface DashboardTeamSlugProjectIdContractRouteChildren {
+  DashboardTeamSlugProjectIdContractContractIdRoute: typeof DashboardTeamSlugProjectIdContractContractIdRoute
+}
+
+const DashboardTeamSlugProjectIdContractRouteChildren: DashboardTeamSlugProjectIdContractRouteChildren =
+  {
+    DashboardTeamSlugProjectIdContractContractIdRoute:
+      DashboardTeamSlugProjectIdContractContractIdRoute,
+  }
+
+const DashboardTeamSlugProjectIdContractRouteWithChildren =
+  DashboardTeamSlugProjectIdContractRoute._addFileChildren(
+    DashboardTeamSlugProjectIdContractRouteChildren,
+  )
+
 interface DashboardTeamSlugProjectIdRouteChildren {
   DashboardTeamSlugProjectIdVideoIdRoute: typeof DashboardTeamSlugProjectIdVideoIdRoute
-  DashboardTeamSlugProjectIdContractRoute: typeof DashboardTeamSlugProjectIdContractRoute
+  DashboardTeamSlugProjectIdContractRoute: typeof DashboardTeamSlugProjectIdContractRouteWithChildren
   DashboardTeamSlugProjectIdIndexRoute: typeof DashboardTeamSlugProjectIdIndexRoute
 }
 
@@ -674,7 +725,7 @@ const DashboardTeamSlugProjectIdRouteChildren: DashboardTeamSlugProjectIdRouteCh
     DashboardTeamSlugProjectIdVideoIdRoute:
       DashboardTeamSlugProjectIdVideoIdRoute,
     DashboardTeamSlugProjectIdContractRoute:
-      DashboardTeamSlugProjectIdContractRoute,
+      DashboardTeamSlugProjectIdContractRouteWithChildren,
     DashboardTeamSlugProjectIdIndexRoute: DashboardTeamSlugProjectIdIndexRoute,
   }
 
@@ -768,6 +819,7 @@ const rootRouteChildren: RootRouteChildren = {
   PricingRoute: PricingRoute,
   SignInRoute: SignInRouteWithChildren,
   SignUpRoute: SignUpRouteWithChildren,
+  CTokenRoute: CTokenRoute,
   CompareFrameioRoute: CompareFrameioRoute,
   CompareLucidlinkRoute: CompareLucidlinkRoute,
   CompareWipsterRoute: CompareWipsterRoute,
@@ -775,6 +827,7 @@ const rootRouteChildren: RootRouteChildren = {
   ForVideoEditorsRoute: ForVideoEditorsRoute,
   InviteTokenRoute: InviteTokenRoute,
   ShareTokenRoute: ShareTokenRoute,
+  SignTokenRoute: SignTokenRoute,
   WatchPublicIdRoute: WatchPublicIdRoute,
 }
 export const routeTree = rootRouteImport

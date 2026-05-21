@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import type { UploadStatus } from "@/components/upload/UploadProgress";
+import { stitchImageSequence } from "@/lib/stitchImageSequence";
 
 export interface ManagedUploadItem {
   id: string;
@@ -80,7 +81,6 @@ export function useVideoUploadManager() {
   const getUploadUrl = useAction(api.videoActions.getUploadUrl);
   const markUploadComplete = useAction(api.videoActions.markUploadComplete);
   const markUploadFailed = useAction(api.videoActions.markUploadFailed);
-  const coalesceIntoSequence = useMutation(api.videos.coalesceIntoSequence);
   const [uploads, setUploads] = useState<ManagedUploadItem[]>([]);
 
   const uploadFilesToProject = useCallback(
@@ -89,13 +89,78 @@ export function useVideoUploadManager() {
       files: File[],
       folderId?: Id<"folders">,
     ) => {
-      // Detect image-sequence groups up-front so we can coalesce after
-      // the per-file uploads complete. Tracks each frame's videoId in
-      // creation order so the coalesce mutation can collapse them.
+      // Detect image-sequence groups up-front and stitch each into a
+      // single MP4 in the browser (ffmpeg.wasm) BEFORE uploading. The
+      // frames are already here, so there's no server round-trip. The
+      // resulting MP4 then flows through the normal video upload path
+      // and Mux ingest — it plays like any other video. Frames that
+      // belong to a stitched sequence are NOT uploaded individually.
       const sequenceGroups = groupSequenceFrames(files);
-      const sequenceVideoIdsByFile = new Map<File, Id<"videos">>();
+      const framesInSequences = new Set<File>();
+      for (const [, frames] of sequenceGroups) {
+        for (const fr of frames) framesInSequences.add(fr.file);
+      }
 
-      for (const file of files) {
+      const standalone = files.filter((f) => !framesInSequences.has(f));
+      const stitchedClips: File[] = [];
+      for (const [, frames] of sequenceGroups) {
+        const stitchId = createUploadId();
+        const { stem } = frames[0];
+        setUploads((prev) => [
+          ...prev,
+          {
+            id: stitchId,
+            projectId,
+            file: frames[0].file,
+            progress: 0,
+            status: "processing",
+            abortController: new AbortController(),
+          },
+        ]);
+        try {
+          const mp4 = await stitchImageSequence(
+            frames.map((f) => f.file),
+            stem,
+            {
+              fps: 24,
+              onProgress: ({ ratio }) =>
+                setUploads((prev) =>
+                  prev.map((u) =>
+                    u.id === stitchId
+                      ? { ...u, progress: Math.round(ratio * 100) }
+                      : u,
+                  ),
+                ),
+            },
+          );
+          stitchedClips.push(mp4);
+        } catch (err) {
+          console.error("stitchImageSequence failed", err);
+          setUploads((prev) =>
+            prev.map((u) =>
+              u.id === stitchId
+                ? {
+                    ...u,
+                    status: "error",
+                    error:
+                      err instanceof Error
+                        ? `Couldn't stitch sequence: ${err.message}`
+                        : "Couldn't stitch sequence.",
+                  }
+                : u,
+            ),
+          );
+          // Fall back: upload this group's frames as individual files so
+          // nothing is lost when stitching fails (e.g. CDN blocked).
+          for (const fr of frames) standalone.push(fr.file);
+        } finally {
+          setUploads((prev) => prev.filter((u) => u.id !== stitchId));
+        }
+      }
+
+      const filesToUpload = [...standalone, ...stitchedClips];
+
+      for (const file of filesToUpload) {
         const uploadId = createUploadId();
         const title = file.name.replace(/\.[^/.]+$/, "");
         const abortController = new AbortController();
@@ -218,11 +283,6 @@ export function useVideoUploadManager() {
 
           await markUploadComplete({ videoId: createdVideoId });
 
-          // Stash the frame's videoId for the post-loop coalesce pass.
-          if (createdVideoId) {
-            sequenceVideoIdsByFile.set(file, createdVideoId);
-          }
-
           setUploads((prev) =>
             prev.map((upload) =>
               upload.id === uploadId
@@ -251,36 +311,12 @@ export function useVideoUploadManager() {
           }
         }
       }
-
-      // Coalesce detected sequences. Each group's frames are uploaded
-      // independently above; here we collapse them into one
-      // image_sequence row and schedule the optional stitch action.
-      // Best-effort — a coalesce failure leaves the per-frame videos in
-      // place so nothing is lost.
-      for (const [, frames] of sequenceGroups) {
-        const frameVideoIds = frames
-          .map((f) => sequenceVideoIdsByFile.get(f.file))
-          .filter((id): id is Id<"videos"> => !!id);
-        if (frameVideoIds.length < 3) continue;
-        const { stem, ext } = frames[0];
-        try {
-          await coalesceIntoSequence({
-            frameVideoIds,
-            stem,
-            ext,
-            fps: 24,
-          });
-        } catch (err) {
-          console.error("coalesceIntoSequence failed", err);
-        }
-      }
     },
     [
       createVideo,
       getUploadUrl,
       markUploadComplete,
       markUploadFailed,
-      coalesceIntoSequence,
     ],
   );
 
