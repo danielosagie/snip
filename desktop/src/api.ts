@@ -113,6 +113,14 @@ interface DesktopApi {
     openExternal: (url: string) => Promise<void>;
     openFolder: (path: string) => Promise<void>;
   };
+  files: {
+    download: (args: {
+      url: string;
+      filename: string;
+      /** When set, save directly into this dir (no save dialog). */
+      intoDir?: string;
+    }) => Promise<{ ok: boolean; cancelled?: boolean; path?: string }>;
+  };
   sync: {
     pull: (args: { s3Prefix: string; localPath: string }) => Promise<{ fileCount: number }>;
     push: (args: { s3Prefix: string; localPath: string }) => Promise<{

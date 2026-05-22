@@ -1,21 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
-import { api, DesktopSettings, SyncProgress } from "./api";
-import { useConvexClient, useConvexQuery, callMutation } from "./useConvex";
+import { api, DesktopSettings, MountState } from "./api";
+import { useConvexClient, useConvexQuery } from "./useConvex";
 import { SettingsView } from "./SettingsView";
-import { ProjectsView } from "./ProjectsView";
-import { ProjectDetail } from "./ProjectDetail";
-import { MountView } from "./MountView";
 import { Onboarding } from "./Onboarding";
-import { C, mono, Wordmark } from "./ui";
-import { CONVEX_URL } from "./config";
-
-type Tab = "projects" | "mount" | "settings";
+import { Sidebar, View } from "./Sidebar";
+import { FileBrowser } from "./FileBrowser";
+import { C, mono, Wordmark, Eyebrow } from "./ui";
+import { CONVEX_URL, WEB_ORIGIN } from "./config";
 
 export function App() {
   const [settings, setSettings] = useState<DesktopSettings | null>(null);
-  const [tab, setTab] = useState<Tab>("projects");
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [view, setView] = useState<View>({ kind: "home" });
+  const [mount, setMount] = useState<MountState | null>(null);
 
   const { isLoaded: clerkLoaded, isSignedIn, getToken } = useAuth();
 
@@ -23,27 +20,28 @@ export function App() {
     void api.settings.get().then(setSettings);
   }, []);
 
+  // Live mount status for the sidebar drive chip.
+  useEffect(() => {
+    void api.mount.status().then(setMount);
+    return api.mount.onStatus(setMount);
+  }, []);
+
   // Convex auth flows from the desktop's own Clerk session.
   const tokenGetter = useMemo(
     () => (isSignedIn ? () => getToken({ template: "convex" }) : null),
     [isSignedIn, getToken],
   );
-  const client = useConvexClient(
-    tokenGetter,
-    settings?.convexAuthToken || undefined,
-  );
+  const client = useConvexClient(tokenGetter, settings?.convexAuthToken || undefined);
 
-  // Bridge the live token to the main process once, so background loops
-  // (presence/prefetch) keep working. They're best-effort and tolerate a
-  // stale token; full background re-auth is a tracked follow-up.
+  // Bridge the live token to the main process once, so background loops keep
+  // working (best-effort; tolerant of a stale token).
   useEffect(() => {
     if (!isSignedIn || !settings) return;
     let done = false;
     void (async () => {
       const t = await getToken({ template: "convex" }).catch(() => null);
       if (done || !t) return;
-      if (settings.convexAuthToken === t && settings.convexUrl === CONVEX_URL)
-        return;
+      if (settings.convexAuthToken === t && settings.convexUrl === CONVEX_URL) return;
       const next = { ...settings, convexUrl: CONVEX_URL, convexAuthToken: t };
       const saved = await api.settings.set(next);
       setSettings(saved);
@@ -58,11 +56,14 @@ export function App() {
     setSettings(saved);
   }, []);
 
-  // Storage creds arrive from pairing. Configured = an auth path
-  // (Clerk session, or a manually pasted token via Advanced) + storage.
-  const storageReady = Boolean(
-    settings?.storage.bucket && settings?.storage.accessKeyId,
-  );
+  const enableDrive = useCallback(() => {
+    if (!settings) return;
+    void api.mount.start({ mountPath: settings.rootDir }).catch(() => {
+      // Surfaced via the mount status chip / Settings → Drive.
+    });
+  }, [settings]);
+
+  const storageReady = Boolean(settings?.storage.bucket && settings?.storage.accessKeyId);
   const hasManualToken = Boolean(settings?.convexAuthToken);
   const isConfigured = Boolean((isSignedIn || hasManualToken) && storageReady);
 
@@ -99,98 +100,140 @@ export function App() {
         settings={settings}
         onChange={persist}
         isSignedIn={Boolean(isSignedIn)}
-        onDone={() => setTab("mount")}
+        onDone={() => setView({ kind: "home" })}
       />
     );
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      <header
-        style={{
-          padding: "12px 20px",
-          borderBottom: `2px solid ${C.border}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          WebkitAppRegion: "drag",
-        } as React.CSSProperties}
-      >
-        <div style={{ paddingLeft: 56 }}>
-          <Wordmark size={17} sub="desktop" />
-        </div>
-        <div style={{ flex: 1 }} />
-        <nav
-          style={{
-            display: "flex",
-            gap: 8,
-            WebkitAppRegion: "no-drag",
-          } as React.CSSProperties}
-        >
-          <TabButton active={tab === "projects"} onClick={() => setTab("projects")}>
-            Projects
-          </TabButton>
-          <TabButton active={tab === "mount"} onClick={() => setTab("mount")}>
-            Mount
-          </TabButton>
-          <TabButton active={tab === "settings"} onClick={() => setTab("settings")}>
-            Settings
-          </TabButton>
-        </nav>
-      </header>
-
-      <main style={{ flex: 1, overflow: "auto", padding: 24 }}>
-        {tab === "settings" ? (
+    <div style={{ height: "100vh", display: "flex" }}>
+      <Sidebar
+        client={client}
+        view={view}
+        onNavigate={setView}
+        mount={mount}
+        onEnableDrive={enableDrive}
+      />
+      <main style={{ flex: 1, height: "100vh", overflow: "auto" }}>
+        {view.kind === "settings" ? (
           <SettingsView settings={settings} onChange={persist} />
-        ) : tab === "mount" ? (
-          <MountView settings={settings} client={client} />
-        ) : selectedProjectId ? (
-          <ProjectDetail
-            client={client}
-            projectId={selectedProjectId}
-            rootDir={settings.rootDir}
-            onBack={() => setSelectedProjectId(null)}
-          />
+        ) : view.kind === "billing" ? (
+          <BillingView />
+        ) : view.kind === "project" ? (
+          <FileBrowser client={client} projectId={view.projectId} />
         ) : (
-          <ProjectsView
-            client={client}
-            onOpen={(projectId) => setSelectedProjectId(projectId)}
-          />
+          <HomeOverview client={client} onOpen={(projectId) => setView({ kind: "project", projectId })} />
         )}
       </main>
     </div>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
+interface HomeTeam {
+  _id: string;
+  name: string;
+  slug: string;
+  projects: Array<{ _id: string; name: string; description?: string; videoCount: number }>;
+}
+
+function HomeOverview({
+  client,
+  onOpen,
 }: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
+  client: ReturnType<typeof useConvexClient>;
+  onOpen: (projectId: string) => void;
 }) {
+  const teams = useConvexQuery<HomeTeam[]>(client, "teams:listWithProjects", {});
   return (
-    <button
-      onClick={onClick}
-      style={{
-        background: active ? C.fg : "transparent",
-        color: active ? C.bg : C.fg,
-        boxShadow: active ? `4px 4px 0 0 ${C.accent}` : undefined,
-        padding: "6px 14px",
-        fontSize: 12,
-        fontFamily: mono,
-        fontWeight: 700,
-        letterSpacing: "0.08em",
-        textTransform: "uppercase",
-      }}
-    >
-      {children}
-    </button>
+    <div style={{ padding: 24, maxWidth: 980, margin: "0 auto" }}>
+      <Eyebrow>Workspace</Eyebrow>
+      <h1 style={{ fontSize: 30, marginTop: 6, marginBottom: 18 }}>
+        Projects<span style={{ color: C.accent }}>.</span>
+      </h1>
+      {teams === undefined ? (
+        <div style={{ color: C.muted }}>Loading…</div>
+      ) : teams.length === 0 ? (
+        <div style={{ color: C.muted }}>
+          No workspaces yet. Create one in the web app, then it'll appear here.
+        </div>
+      ) : (
+        teams.map((team) => (
+          <section key={team._id} style={{ marginBottom: 22 }}>
+            <div
+              style={{
+                fontFamily: mono,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: C.muted,
+                marginBottom: 8,
+              }}
+            >
+              {team.name}
+            </div>
+            {team.projects.length === 0 ? (
+              <div style={{ color: C.muted, fontSize: 13 }}>No projects in this workspace yet.</div>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                {team.projects.map((p) => (
+                  <button
+                    key={p._id}
+                    onClick={() => onOpen(p._id)}
+                    style={{
+                      textAlign: "left",
+                      border: `2px solid ${C.border}`,
+                      background: C.bg,
+                      padding: 14,
+                      cursor: "pointer",
+                      boxShadow: `4px 4px 0 0 ${C.border}`,
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, fontSize: 16 }}>{p.name}</div>
+                    {p.description ? (
+                      <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
+                        {p.description}
+                      </div>
+                    ) : null}
+                    <div style={{ fontSize: 11, color: C.muted, fontFamily: mono, marginTop: 8 }}>
+                      {p.videoCount} item{p.videoCount === 1 ? "" : "s"}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        ))
+      )}
+    </div>
   );
 }
 
-// Re-export so the renderer modules can use the same types.
-export type { DesktopSettings, SyncProgress };
-export { useConvexQuery, callMutation };
+function BillingView() {
+  return (
+    <div style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
+      <Eyebrow>Account</Eyebrow>
+      <h1 style={{ fontSize: 30, marginTop: 6, marginBottom: 12 }}>
+        Billing &amp; usage<span style={{ color: C.accent }}>.</span>
+      </h1>
+      <p style={{ color: "#555", fontSize: 14, lineHeight: 1.55, maxWidth: "52ch" }}>
+        Plans, invoices, and usage are managed in the web app. Open it to review
+        or change your plan.
+      </p>
+      <div style={{ marginTop: 18 }}>
+        <button
+          className="primary"
+          onClick={() => void api.shell.openExternal(`${WEB_ORIGIN.replace(/\/$/, "")}/dashboard/billing`)}
+        >
+          Manage billing on the web
+        </button>
+      </div>
+    </div>
+  );
+}

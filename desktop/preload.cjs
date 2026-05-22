@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("api", {
     openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
     openFolder: (path) => ipcRenderer.invoke("local:open-folder", path),
   },
+  files: {
+    download: (args) => ipcRenderer.invoke("files:download", args),
+  },
   sync: {
     pull: (args) => ipcRenderer.invoke("sync:pull", args),
     push: (args) => ipcRenderer.invoke("sync:push", args),

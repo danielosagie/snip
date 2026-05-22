@@ -1026,6 +1026,39 @@ ipcMain.handle("local:open-folder", async (_event, folderPath) => {
   await shell.openPath(folderPath);
 });
 
+// Stream a presigned URL to a user-chosen path. The renderer gets the
+// presigned GET URL from Convex (videoActions:getDownloadUrl) and hands it
+// here so the bytes never round-trip through the renderer heap — we pipe the
+// HTTP body straight to disk. Defaults to ~/Downloads/<filename>.
+ipcMain.handle("files:download", async (_event, { url, filename, intoDir }) => {
+  const { Readable } = require("node:stream");
+  let filePath;
+  if (intoDir) {
+    await fs.mkdir(intoDir, { recursive: true });
+    filePath = path.join(intoDir, filename || "download");
+  } else {
+    const defaultPath = path.join(
+      app.getPath("downloads"),
+      filename || "download",
+    );
+    const res = await dialog.showSaveDialog(mainWindow, { defaultPath });
+    if (res.canceled || !res.filePath) return { ok: false, cancelled: true };
+    filePath = res.filePath;
+  }
+  const resp = await fetch(url);
+  if (!resp.ok || !resp.body) {
+    throw new Error(`Download failed — HTTP ${resp.status}`);
+  }
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const out = fssync.createWriteStream(filePath);
+  await new Promise((resolve, reject) => {
+    Readable.fromWeb(resp.body).pipe(out);
+    out.on("finish", resolve);
+    out.on("error", reject);
+  });
+  return { ok: true, path: filePath };
+});
+
 // ─── Mount as drive (rclone wrapper, LucidLink-style UX) ─────────────────────
 //
 // Single-tenant mount inside this Electron process. We spawn rclone as a
