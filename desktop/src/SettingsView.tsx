@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { api, DesktopSettings } from "./api";
+import { useEffect, useState } from "react";
+import { api, DesktopSettings, UpdateState } from "./api";
 
 interface Props {
   settings: DesktopSettings;
@@ -57,6 +57,8 @@ export function SettingsView({ settings, onChange }: Props) {
 
   return (
     <div style={{ maxWidth: 720 }}>
+      <UpdatesSection />
+
       <Section title="Convex">
         <Field label="Deployment URL">
           <input
@@ -309,6 +311,101 @@ function MountCommandPreview({ settings }: { settings: DesktopSettings }) {
         Copy
       </button>
     </div>
+  );
+}
+
+function UpdatesSection() {
+  const [version, setVersion] = useState<string | null>(null);
+  const [update, setUpdate] = useState<UpdateState>({
+    status: "idle",
+    version: null,
+    percent: 0,
+    error: null,
+  });
+  const [checking, setChecking] = useState(false);
+  const [checkNote, setCheckNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api.app.version().then(setVersion).catch(() => setVersion(null));
+    return api.update.onStatus(setUpdate);
+  }, []);
+
+  const check = async () => {
+    setChecking(true);
+    setCheckNote(null);
+    try {
+      const res = await api.update.check();
+      if (!res.ok) {
+        setCheckNote(
+          res.reason === "dev"
+            ? "Updates only run in the installed app, not in dev."
+            : `Couldn't check: ${res.reason ?? "unknown error"}`,
+        );
+      }
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const install = () => void api.update.install();
+
+  const statusLabel = (() => {
+    switch (update.status) {
+      case "checking":
+        return "Checking for updates…";
+      case "available":
+        return `Update ${update.version ?? ""} found — downloading…`;
+      case "downloading":
+        return `Downloading update… ${update.percent}%`;
+      case "downloaded":
+        return `Update ${update.version ?? ""} ready to install.`;
+      case "none":
+        return "You're on the latest version.";
+      case "error":
+        return `Update error: ${update.error ?? "unknown"}`;
+      default:
+        return "Up to date.";
+    }
+  })();
+
+  const downloaded = update.status === "downloaded";
+
+  return (
+    <Section title="Updates">
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a1a" }}>
+            snip Desktop{" "}
+            <span style={{ fontFamily: "monospace", color: "#888" }}>
+              v{version ?? "—"}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+            {statusLabel}
+          </div>
+          {checkNote ? (
+            <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{checkNote}</div>
+          ) : null}
+        </div>
+        {downloaded ? (
+          <button className="primary" onClick={install}>
+            Restart &amp; install
+          </button>
+        ) : (
+          <button
+            className="ghost"
+            onClick={() => void check()}
+            disabled={checking || update.status === "checking" || update.status === "downloading"}
+          >
+            {checking || update.status === "checking" ? "Checking…" : "Check for updates"}
+          </button>
+        )}
+      </div>
+      <p style={{ fontSize: 11, color: "#888", margin: "4px 0 0" }}>
+        New versions download in the background and install when you quit, or
+        immediately via Restart &amp; install.
+      </p>
+    </Section>
   );
 }
 

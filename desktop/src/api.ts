@@ -63,6 +63,22 @@ export interface MountPrereqs {
   installHint: string;
 }
 
+export type UpdateStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "none"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+export interface UpdateState {
+  status: UpdateStatus;
+  version: string | null;
+  percent: number;
+  error: string | null;
+}
+
 export interface ResolveStatus {
   ok: boolean;
   error?: string;
@@ -77,6 +93,14 @@ export interface ResolveStatus {
 }
 
 interface DesktopApi {
+  app: {
+    version: () => Promise<string>;
+  };
+  update: {
+    check: () => Promise<{ ok: boolean; reason?: string }>;
+    install: () => Promise<{ ok: boolean; reason?: string }>;
+    onStatus: (handler: (state: UpdateState) => void) => () => void;
+  };
   settings: {
     get: () => Promise<DesktopSettings>;
     set: (next: DesktopSettings) => Promise<DesktopSettings>;
