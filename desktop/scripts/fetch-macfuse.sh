@@ -18,8 +18,22 @@ if [[ -f "$DEST" ]]; then
   exit 0
 fi
 
-URL="$(curl -fsSL https://api.github.com/repos/macfuse/macfuse/releases/latest \
-  | python3 -c "import sys,json; assets=json.load(sys.stdin)['assets']; print(next(a['browser_download_url'] for a in assets if a['name'].endswith('.dmg')))")"
+# Authenticate the API call when a token is available — unauthenticated GitHub
+# API requests from CI runners get 403'd by rate limiting. GITHUB_TOKEN can read
+# public repos' release metadata fine.
+auth=()
+TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+[[ -n "$TOKEN" ]] && auth=(-H "Authorization: Bearer $TOKEN")
+
+URL="$(curl -fsSL "${auth[@]}" https://api.github.com/repos/macfuse/macfuse/releases/latest \
+  | python3 -c "import sys,json; a=json.load(sys.stdin).get('assets',[]); print(next((x['browser_download_url'] for x in a if x['name'].endswith('.dmg')), ''))" \
+  2>/dev/null || true)"
+
+# Fallback to a pinned release if the API is unavailable.
+if [[ -z "$URL" ]]; then
+  echo "fetch-macfuse: API lookup failed — using pinned macFUSE 4.8.0"
+  URL="https://github.com/macfuse/macfuse/releases/download/macfuse-4.8.0/macfuse-4.8.0.dmg"
+fi
 echo "fetch-macfuse: downloading $URL"
 
 TMP="$(mktemp -d)"
