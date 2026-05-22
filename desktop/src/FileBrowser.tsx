@@ -25,7 +25,7 @@ interface FolderRow {
   createdByName?: string;
   itemCount: number;
 }
-interface ItemRow {
+interface ItemDoc {
   _id: string;
   title: string;
   status: "uploading" | "processing" | "ready" | "failed" | string;
@@ -64,7 +64,7 @@ export function FileBrowser({
     projectId,
     parentFolderId: currentFolderId ?? undefined,
   });
-  const items = useConvexQuery<ItemRow[]>(client, "videos:list", {
+  const items = useConvexQuery<ItemDoc[]>(client, "videos:list", {
     projectId,
     folderId: currentFolderId,
   });
@@ -135,7 +135,7 @@ export function FileBrowser({
     }
   };
 
-  const handleDownload = async (item: ItemRow) => {
+  const handleDownload = async (item: ItemDoc) => {
     if (!client) return;
     setError(null);
     try {
@@ -318,34 +318,7 @@ export function FileBrowser({
         ) : (
           <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
             {items.map((it) => (
-              <li
-                key={it._id}
-                style={{
-                  padding: "10px 12px",
-                  borderBottom: `1px solid ${C.borderSubtle}`,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {it.title}
-                  </div>
-                  <div style={{ fontSize: 11, color: C.muted, fontFamily: mono, marginTop: 2 }}>
-                    {it.contentType ?? "file"}
-                    {typeof it.fileSize === "number" ? ` · ${humanSize(it.fileSize)}` : ""}
-                  </div>
-                </div>
-                <StatusPill status={it.status} />
-                <button
-                  onClick={() => void handleDownload(it)}
-                  disabled={it.status !== "ready"}
-                  title={it.status === "ready" ? "Download to disk" : "Available once ready"}
-                >
-                  Download
-                </button>
-              </li>
+              <ItemRow key={it._id} client={client} item={it} onDownload={() => void handleDownload(it)} />
             ))}
           </ul>
         )}
@@ -395,6 +368,125 @@ function putWithProgress(
     xhr.setRequestHeader("Content-Type", contentType);
     xhr.send(file);
   });
+}
+
+function ItemRow({
+  client,
+  item,
+  onDownload,
+}: {
+  client: ConvexClient | null;
+  item: ItemDoc;
+  onDownload: () => void;
+}) {
+  const isImage = (item.contentType ?? "").startsWith("image/");
+  const isReady = item.status === "ready";
+  const [thumb, setThumb] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+
+  // Fetch a signed URL for image/gif items so we can preview them. Best-effort.
+  useEffect(() => {
+    if (!client || !isImage || !isReady) return;
+    let cancelled = false;
+    callAction<{ url: string; contentType: string }>(client, "videoActions:getOriginalPlaybackUrl", {
+      videoId: item._id,
+    })
+      .then(({ url }) => {
+        if (!cancelled) setThumb(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, isImage, isReady, item._id]);
+
+  return (
+    <li
+      style={{
+        padding: "10px 12px",
+        borderBottom: `1px solid ${C.borderSubtle}`,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <div
+        onMouseEnter={(e) => thumb && setHover({ x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => thumb && hover && setHover({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setHover(null)}
+        style={{
+          width: 40,
+          height: 40,
+          flexShrink: 0,
+          border: `2px solid ${C.border}`,
+          background: C.cell,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          cursor: thumb ? "zoom-in" : "default",
+        }}
+      >
+        {thumb ? (
+          <img src={thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 700, color: C.muted }}>
+            {extLabel(item.contentType, item.title)}
+          </span>
+        )}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {item.title}
+        </div>
+        <div style={{ fontSize: 11, color: C.muted, fontFamily: mono, marginTop: 2 }}>
+          {item.contentType ?? "file"}
+          {typeof item.fileSize === "number" ? ` · ${humanSize(item.fileSize)}` : ""}
+        </div>
+      </div>
+      <StatusPill status={item.status} />
+      <button
+        onClick={onDownload}
+        disabled={!isReady}
+        title={isReady ? "Download to disk" : "Available once ready"}
+      >
+        Download
+      </button>
+
+      {/* Hover-enlarge preview (image / gif). Fixed so it escapes the row. */}
+      {hover && thumb ? (
+        <div
+          style={{
+            position: "fixed",
+            left: Math.min(hover.x + 18, window.innerWidth - 340),
+            top: Math.min(hover.y + 18, window.innerHeight - 340),
+            zIndex: 70,
+            pointerEvents: "none",
+            border: `2px solid ${C.border}`,
+            background: C.bg,
+            boxShadow: `6px 6px 0 0 ${C.border}`,
+            padding: 4,
+          }}
+        >
+          <img
+            src={thumb}
+            alt={item.title}
+            style={{ display: "block", maxWidth: 320, maxHeight: 320, objectFit: "contain" }}
+          />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function extLabel(contentType?: string, title?: string): string {
+  if (contentType && contentType.includes("/")) {
+    const sub = contentType.split("/")[1];
+    if (sub) return sub.slice(0, 4).toUpperCase();
+  }
+  const m = (title ?? "").match(/\.([a-z0-9]{1,5})$/i);
+  return m ? m[1].toUpperCase() : "FILE";
 }
 
 function StatusPill({ status }: { status: string }) {

@@ -6,6 +6,7 @@ import { SettingsView } from "./SettingsView";
 import { Onboarding } from "./Onboarding";
 import { Sidebar, View } from "./Sidebar";
 import { FileBrowser } from "./FileBrowser";
+import { CommandPalette } from "./CommandPalette";
 import { C, mono, Wordmark, Eyebrow } from "./ui";
 import { CONVEX_URL, WEB_ORIGIN } from "./config";
 
@@ -13,6 +14,7 @@ export function App() {
   const [settings, setSettings] = useState<DesktopSettings | null>(null);
   const [view, setView] = useState<View>({ kind: "home" });
   const [mount, setMount] = useState<MountState | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const { isLoaded: clerkLoaded, isSignedIn, getToken } = useAuth();
 
@@ -24,6 +26,18 @@ export function App() {
   useEffect(() => {
     void api.mount.status().then(setMount);
     return api.mount.onStatus(setMount);
+  }, []);
+
+  // Global ⌘K / Ctrl-K opens the command palette.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
 
   // Convex auth flows from the desktop's own Clerk session.
@@ -126,6 +140,13 @@ export function App() {
         onNavigate={setView}
         mount={mount}
         onEnableDrive={enableDrive}
+        onOpenSearch={() => setSearchOpen(true)}
+      />
+      <CommandPalette
+        client={client}
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onNavigate={setView}
       />
       <main style={{ flex: 1, height: "100vh", overflow: "auto" }}>
         {view.kind === "settings" ? (

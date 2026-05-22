@@ -37,9 +37,10 @@ interface Props {
   onNavigate: (v: View) => void;
   mount: MountState | null;
   onEnableDrive: () => void;
+  onOpenSearch: () => void;
 }
 
-export function Sidebar({ client, view, onNavigate, mount, onEnableDrive }: Props) {
+export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpenSearch }: Props) {
   const teams = useConvexQuery<SidebarTeam[]>(client, "teams:listWithProjects", {});
   const { user } = useUser();
 
@@ -214,6 +215,43 @@ export function Sidebar({ client, view, onNavigate, mount, onEnableDrive }: Prop
             </>
           ) : null}
         </div>
+      </div>
+
+      {/* Search trigger (opens the ⌘K palette) */}
+      <div style={{ padding: "0 12px 10px" }}>
+        <button
+          onClick={onOpenSearch}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            border: `2px solid ${C.border}`,
+            background: C.bg,
+            padding: "6px 8px",
+            cursor: "pointer",
+            fontFamily: mono,
+            fontSize: 12,
+            color: C.muted,
+            textAlign: "left",
+          }}
+          title="Search (⌘K)"
+        >
+          <span>⌕</span>
+          <span style={{ flex: 1 }}>Search…</span>
+          <kbd
+            style={{
+              fontFamily: mono,
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "1px 5px",
+              border: `1px solid ${C.border}`,
+              background: C.cell,
+            }}
+          >
+            ⌘K
+          </kbd>
+        </button>
       </div>
 
       {/* Projects list */}

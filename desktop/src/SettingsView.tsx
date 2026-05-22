@@ -40,7 +40,7 @@ interface TeamLite {
   role: string;
 }
 
-export function SettingsView({ client, settings, onChange, mount }: Props) {
+export function SettingsView({ client, settings, mount }: Props) {
   const [tab, setTab] = useState<Tab>("profile");
   const teams = useConvexQuery<TeamLite[]>(client, "teams:listWithProjects", {});
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -97,7 +97,7 @@ export function SettingsView({ client, settings, onChange, mount }: Props) {
       ) : tab === "folders" ? (
         <FoldersTab client={client} teams={teams ?? []} activeTeamId={activeTeamId} onSelectTeam={setTeamId} />
       ) : (
-        <DriveTab settings={settings} onChange={onChange} mount={mount} />
+        <DriveTab settings={settings} mount={mount} />
       )}
     </div>
   );
@@ -532,19 +532,13 @@ function FoldersTab({
 
 function DriveTab({
   settings,
-  onChange,
   mount,
 }: {
   settings: DesktopSettings;
-  onChange: (next: DesktopSettings) => Promise<void>;
   mount: MountState | null;
 }) {
   const status = mount?.status ?? "unmounted";
   const [busy, setBusy] = useState(false);
-  const [advanced, setAdvanced] = useState(false);
-  const [draft, setDraft] = useState(settings);
-
-  useEffect(() => setDraft(settings), [settings]);
 
   const toggleMount = async () => {
     setBusy(true);
@@ -557,9 +551,6 @@ function DriveTab({
       setBusy(false);
     }
   };
-
-  const setS = <K extends keyof DesktopSettings["storage"]>(k: K, v: DesktopSettings["storage"][K]) =>
-    setDraft((d) => ({ ...d, storage: { ...d.storage, [k]: v } }));
 
   return (
     <>
@@ -614,44 +605,6 @@ function DriveTab({
       </Panel>
 
       <UpdatesPanel />
-
-      <Panel title="Advanced">
-        <button className="ghost" onClick={() => setAdvanced((v) => !v)} style={{ fontSize: 12, alignSelf: "flex-start" }}>
-          {advanced ? "Hide self-host credentials" : "Show self-host credentials"}
-        </button>
-        {advanced ? (
-          <>
-            <p style={{ fontSize: 11, color: C.muted, margin: 0, lineHeight: 1.5 }}>
-              Normally configured automatically when you connect your account.
-              Override only for self-hosted deployments.
-            </p>
-            <Field label="Bucket">
-              <input value={draft.storage.bucket} onChange={(e) => setS("bucket", e.target.value.trim())} style={{ width: "100%" }} />
-            </Field>
-            <Field label="Endpoint">
-              <input value={draft.storage.endpoint} onChange={(e) => setS("endpoint", e.target.value.trim())} style={{ width: "100%" }} />
-            </Field>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Access key ID">
-                <input value={draft.storage.accessKeyId} onChange={(e) => setS("accessKeyId", e.target.value.trim())} style={{ width: "100%" }} />
-              </Field>
-              <Field label="Secret access key">
-                <input
-                  type="password"
-                  value={draft.storage.secretAccessKey}
-                  onChange={(e) => setS("secretAccessKey", e.target.value.trim())}
-                  style={{ width: "100%" }}
-                />
-              </Field>
-            </div>
-            <div>
-              <button className="primary" onClick={() => void onChange(draft)}>
-                Save credentials
-              </button>
-            </div>
-          </>
-        ) : null}
-      </Panel>
     </>
   );
 }
