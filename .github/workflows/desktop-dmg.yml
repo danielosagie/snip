@@ -213,6 +213,8 @@ jobs:
 
       - name: Bundle macFUSE (downloaded into the .pkg)
         working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/fetch-macfuse.sh
 
       - name: Build + publish (signed app + dmg + zip + pkg + latest-mac.yml)
