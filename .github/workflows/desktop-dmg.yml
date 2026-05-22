@@ -101,7 +101,11 @@ jobs:
 
       - name: Build DMG (${{ matrix.arch }})
         working-directory: desktop
-        run: bunx electron-builder --mac dmg --${{ matrix.arch }}
+        # --publish never: this is a smoke build with no GH_TOKEN. Without the
+        # flag, electron-builder auto-publishes in CI (the package.json publish
+        # config is set) and fails on the missing token. Releases go through the
+        # `release` job below.
+        run: bunx electron-builder --mac dmg --${{ matrix.arch }} --publish never
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
