@@ -116,7 +116,7 @@ export function App() {
       />
       <main style={{ flex: 1, height: "100vh", overflow: "auto" }}>
         {view.kind === "settings" ? (
-          <SettingsView settings={settings} onChange={persist} />
+          <SettingsView client={client} settings={settings} onChange={persist} mount={mount} />
         ) : view.kind === "billing" ? (
           <BillingView />
         ) : view.kind === "project" ? (
