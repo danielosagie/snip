@@ -24,6 +24,20 @@ export function useConvexClient(
     }
   }, []);
 
+  // Close the client ONLY on unmount. The previous version closed it in the
+  // auth effect's cleanup, so every time Clerk handed back a new `getToken`
+  // identity (or the saved token populated) the client was torn down
+  // mid-flight — leaving authed queries stuck on "Loading…" forever.
+  useEffect(() => {
+    return () => {
+      client?.close();
+    };
+  }, [client]);
+
+  // (Re)install the auth fetcher whenever the token source changes. `setAuth`
+  // does NOT tear down the connection or active subscriptions — it just
+  // (re)fetches the token — so calling it again when sign-in completes safely
+  // upgrades the connection from anonymous to authenticated.
   useEffect(() => {
     if (!client) return;
     if (getToken) {
@@ -39,9 +53,6 @@ export function useConvexClient(
     } else {
       client.setAuth(async () => null);
     }
-    return () => {
-      client.close();
-    };
   }, [client, getToken, fallbackToken]);
 
   return client;

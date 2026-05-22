@@ -2290,6 +2290,17 @@ function createWindow() {
   } else {
     mainWindow.loadFile(PROD_INDEX);
   }
+
+  // Allow opening DevTools in the packaged build for diagnosis (⌘⌥I / Ctrl+Shift+I).
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    if (input.type !== "keyDown") return;
+    const key = (input.key || "").toLowerCase();
+    const macToggle = input.meta && input.alt && key === "i";
+    const winToggle = input.control && input.shift && key === "i";
+    if (macToggle || winToggle) {
+      mainWindow.webContents.toggleDevTools();
+    }
+  });
 }
 
 app.whenReady().then(() => {

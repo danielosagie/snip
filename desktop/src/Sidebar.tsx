@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import { useUser } from "@clerk/clerk-react";
 import type { ConvexClient } from "convex/browser";
 import { useConvexQuery, callMutation } from "./useConvex";
-import { api, MountState } from "./api";
+import { MountState } from "./api";
 import { C, mono, Wordmark } from "./ui";
 
 export interface SidebarProject {
@@ -38,9 +38,10 @@ interface Props {
   mount: MountState | null;
   onEnableDrive: () => void;
   onOpenSearch: () => void;
+  onSignOut: () => void;
 }
 
-export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpenSearch }: Props) {
+export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpenSearch, onSignOut }: Props) {
   const teams = useConvexQuery<SidebarTeam[]>(client, "teams:listWithProjects", {});
   const { user } = useUser();
 
@@ -220,6 +221,7 @@ export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpen
       {/* Search trigger (opens the ⌘K palette) */}
       <div style={{ padding: "0 12px 10px" }}>
         <button
+          className="flat"
           onClick={onOpenSearch}
           style={{
             width: "100%",
@@ -274,7 +276,27 @@ export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpen
         )}
       </nav>
 
-      {/* New project */}
+      {/* Drive — a real button (like New project), in the New-project slot.
+          Disappears entirely once the drive is connected; mount/unmount and
+          status live in Settings → Drive. */}
+      {mount?.status !== "mounted" ? (
+        <div style={{ padding: "8px 12px 0" }}>
+          <button
+            className="primary"
+            onClick={onEnableDrive}
+            disabled={mount?.status === "mounting"}
+            style={{ width: "100%", padding: "8px", letterSpacing: "0.04em" }}
+          >
+            {mount?.status === "mounting"
+              ? "Connecting drive…"
+              : mount?.status === "error"
+                ? "Retry drive"
+                : "Enable drive"}
+          </button>
+        </div>
+      ) : null}
+
+      {/* New project — sits below the drive button (swapped). */}
       <div style={{ padding: "8px 12px" }}>
         {creating ? (
           <NameForm
@@ -291,6 +313,7 @@ export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpen
               padding: "8px",
               border: `2px dashed ${C.border}`,
               background: "transparent",
+              boxShadow: "none",
               fontFamily: mono,
               fontSize: 11,
               fontWeight: 700,
@@ -304,9 +327,6 @@ export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpen
           </button>
         )}
       </div>
-
-      {/* Drive status — in place of the web "Download DMG" button. */}
-      <DriveChip mount={mount} onEnableDrive={onEnableDrive} />
 
       {/* Account links */}
       <div style={{ padding: "8px 8px", borderTop: `2px solid ${C.border}` }}>
@@ -358,59 +378,16 @@ export function Sidebar({ client, view, onNavigate, mount, onEnableDrive, onOpen
             {user?.fullName ?? user?.firstName ?? user?.username ?? "Account"}
           </div>
         </div>
+        <button
+          className="flat"
+          onClick={onSignOut}
+          title="Sign out"
+          style={{ fontSize: 10, padding: "3px 7px", border: `2px solid ${C.border}`, background: C.bg }}
+        >
+          Sign out
+        </button>
       </div>
     </aside>
-  );
-}
-
-function DriveChip({
-  mount,
-  onEnableDrive,
-}: {
-  mount: MountState | null;
-  onEnableDrive: () => void;
-}) {
-  const status = mount?.status ?? "unmounted";
-  const color =
-    status === "mounted"
-      ? C.ok
-      : status === "mounting"
-        ? "#b45309"
-        : status === "error"
-          ? C.danger
-          : C.muted;
-  const label =
-    status === "mounted"
-      ? "Drive connected"
-      : status === "mounting"
-        ? "Connecting drive…"
-        : status === "error"
-          ? "Drive error"
-          : "Drive off";
-  return (
-    <div style={{ padding: "8px 12px", borderTop: `2px solid ${C.border}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 12, height: 12, background: color, border: `2px solid ${C.border}`, flexShrink: 0 }} />
-        <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>{label}</span>
-        {status === "mounted" && mount?.mountPath ? (
-          <button
-            onClick={() => void api.shell.openFolder(mount.mountPath as string)}
-            style={{ fontSize: 10, padding: "2px 6px", border: `2px solid ${C.border}`, background: C.bg, cursor: "pointer" }}
-            title="Open the drive in Finder"
-          >
-            Open
-          </button>
-        ) : status !== "mounting" ? (
-          <button
-            onClick={onEnableDrive}
-            style={{ fontSize: 10, padding: "2px 6px", border: `2px solid ${C.border}`, background: C.accent, color: C.bg, cursor: "pointer" }}
-            title="Mount your cloud bucket as a local drive"
-          >
-            Enable
-          </button>
-        ) : null}
-      </div>
-    </div>
   );
 }
 
@@ -482,23 +459,7 @@ function NavRow({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        width: "100%",
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "7px 8px",
-        fontSize: 13,
-        fontWeight: 700,
-        textAlign: "left",
-        border: `2px solid ${active ? C.border : "transparent"}`,
-        background: active ? C.fg : "transparent",
-        color: active ? C.bg : C.fg,
-        cursor: "pointer",
-      }}
-    >
+    <button onClick={onClick} className={active ? "nav active" : "nav"}>
       <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {children}
       </span>
