@@ -1,7 +1,7 @@
 {
   "name": "snip-desktop",
   "productName": "snip",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Desktop sync + cloud-mount companion for snip.",
   "main": "electron-main.cjs",
@@ -16,7 +16,7 @@
     "build:dmg:arm64": "bun run build:renderer && electron-builder --mac dmg --arm64",
     "build:dmg:x64": "bun run build:renderer && electron-builder --mac dmg --x64",
     "build": "bun run build:renderer && electron-builder",
-    "release": "bun run build:renderer && electron-builder --mac dmg zip --arm64 --x64 --publish always",
+    "release": "bun run build:renderer && electron-builder --mac dmg zip pkg --arm64 --x64 --publish always",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -58,6 +58,7 @@
       "preload.cjs",
       "dist/**/*",
       "resources/**/*",
+      "!resources/macfuse.pkg",
       "package.json"
     ],
     "extraResources": [
@@ -78,6 +79,10 @@
         {
           "target": "zip",
           "arch": ["arm64", "x64"]
+        },
+        {
+          "target": "pkg",
+          "arch": ["arm64", "x64"]
         }
       ],
       "icon": "resources/icon.icns",
@@ -90,6 +95,15 @@
         "NSSystemAdministrationUsageDescription": "snip mounts your cloud bucket as a local drive via FUSE."
       },
       "notarize": true
+    },
+    "pkg": {
+      "installLocation": "/Applications",
+      "scripts": "pkg-scripts",
+      "isRelocatable": false,
+      "isVersionChecked": false,
+      "overwriteAction": "upgrade",
+      "allowAnywhere": false,
+      "allowCurrentUserHome": false
     },
     "dmg": {
       "title": "snip ${version}",

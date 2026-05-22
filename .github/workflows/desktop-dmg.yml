@@ -178,39 +178,50 @@ jobs:
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_INSTALLER_CERTIFICATE: ${{ secrets.MACOS_INSTALLER_CERTIFICATE }}
           APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # Auto-update needs a fully signed + notarized build, so require ALL
           # signing secrets up front rather than failing deep in the build with
-          # an opaque error.
+          # an opaque error. The .pkg installer additionally needs the
+          # Developer ID *Installer* cert (distinct from the Application cert).
           missing=""
           [[ -z "$MACOS_CERTIFICATE" ]] && missing+=" MACOS_CERTIFICATE"
           [[ -z "$MACOS_CERTIFICATE_PASSWORD" ]] && missing+=" MACOS_CERTIFICATE_PASSWORD"
+          [[ -z "$MACOS_INSTALLER_CERTIFICATE" ]] && missing+=" MACOS_INSTALLER_CERTIFICATE"
           [[ -z "$APPLE_ID_SECRET" ]] && missing+=" APPLE_ID"
           [[ -z "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" ]] && missing+=" APPLE_APP_SPECIFIC_PASSWORD"
           [[ -z "$APPLE_TEAM_ID_SECRET" ]] && missing+=" APPLE_TEAM_ID"
           if [[ -n "$missing" ]]; then
-            echo "::error::Auto-update needs a signed build, but these secrets are missing:$missing"
+            echo "::error::Signed build needs these secrets, which are missing:$missing"
             exit 1
           fi
           delim="EOF_$(openssl rand -hex 8)"
           {
             printf '%s<<%s\n%s\n%s\n' CSC_LINK "$delim" "$MACOS_CERTIFICATE" "$delim"
             printf '%s<<%s\n%s\n%s\n' CSC_KEY_PASSWORD "$delim" "$MACOS_CERTIFICATE_PASSWORD" "$delim"
+            # The installer (.pkg) cert. It was exported with the same password
+            # as the application cert, so reuse CSC_KEY_PASSWORD's value.
+            printf '%s<<%s\n%s\n%s\n' CSC_INSTALLER_LINK "$delim" "$MACOS_INSTALLER_CERTIFICATE" "$delim"
+            printf '%s<<%s\n%s\n%s\n' CSC_INSTALLER_KEY_PASSWORD "$delim" "$MACOS_CERTIFICATE_PASSWORD" "$delim"
             printf '%s<<%s\n%s\n%s\n' APPLE_ID "$delim" "$APPLE_ID_SECRET" "$delim"
             printf '%s<<%s\n%s\n%s\n' APPLE_APP_SPECIFIC_PASSWORD "$delim" "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" "$delim"
             printf '%s<<%s\n%s\n%s\n' APPLE_TEAM_ID "$delim" "$APPLE_TEAM_ID_SECRET" "$delim"
           } >> "$GITHUB_ENV"
 
-      - name: Build + publish (signed, both arches, with latest-mac.yml)
+      - name: Bundle macFUSE (downloaded into the .pkg)
+        working-directory: desktop
+        run: bash scripts/fetch-macfuse.sh
+
+      - name: Build + publish (signed app + dmg + zip + pkg + latest-mac.yml)
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run release
 
-      - name: Add stable-named DMGs + mark release latest
+      - name: Add stable-named installers + mark release latest
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -220,6 +231,8 @@ jobs:
           tag="v${version}"
           arm="release/snip-${version}-arm64.dmg"
           x64="release/snip-${version}-x64.dmg"
+          arm_pkg="release/snip-${version}-arm64.pkg"
+          x64_pkg="release/snip-${version}-x64.pkg"
           if [[ ! -f "$arm" || ! -f "$x64" ]]; then
             echo "Expected DMGs not found:" >&2
             ls -la release/ >&2
@@ -227,9 +240,18 @@ jobs:
           fi
           cp "$arm" release/snip-desktop.dmg
           cp "$x64" release/snip-desktop-x64.dmg
-          gh release upload "$tag" \
-            release/snip-desktop.dmg release/snip-desktop-x64.dmg \
-            --clobber --repo "$GITHUB_REPOSITORY"
+          stable=(release/snip-desktop.dmg release/snip-desktop-x64.dmg)
+          # The .pkg is the recommended installer (bundles macFUSE, Shade-style
+          # wizard). Publish stable-named copies too.
+          if [[ -f "$arm_pkg" && -f "$x64_pkg" ]]; then
+            cp "$arm_pkg" release/snip-desktop.pkg
+            cp "$x64_pkg" release/snip-desktop-x64.pkg
+            stable+=(release/snip-desktop.pkg release/snip-desktop-x64.pkg)
+          else
+            echo "::warning::Expected .pkg installers not found — publishing DMGs only."
+            ls -la release/ || true
+          fi
+          gh release upload "$tag" "${stable[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           # electron-builder publishes the release as a draft; promote it and
           # mark it latest so downloads + the updater feed both resolve here.
           gh release edit "$tag" --draft=false --latest --repo "$GITHUB_REPOSITORY"

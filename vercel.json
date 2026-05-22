@@ -5,6 +5,13 @@
   "routes": [
     { "handle": "filesystem" },
     {
+      "src": "/downloads/snip-desktop\\.pkg",
+      "status": 302,
+      "headers": {
+        "Location": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop.pkg"
+      }
+    },
+    {
       "src": "/downloads/snip-desktop\\.dmg",
       "status": 302,
       "headers": {
