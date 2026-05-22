@@ -1,17 +1,17 @@
 name: Build snip Desktop DMG
 
-# Builds the macOS DMG for the desktop sync + mount companion. Runs on
-# pushes that touch the desktop/ tree (or this workflow), publishes
-# artifacts on every run, and attaches the DMGs to a GitHub Release when
-# a `desktop-v*` tag lands.
-#
-# Code signing + notarization are gated behind repository secrets — if
-# they're absent the workflow still produces an unsigned DMG so we can
-# smoke-test the build pipeline without an Apple Developer account.
+# Two paths:
+#   • branch / PR pushes → unsigned per-arch smoke build (artifacts only), so
+#     we know the desktop tree still compiles + packages.
+#   • a `desktop-v<version>` tag → the signed `release` job: builds both arches
+#     in one shot, publishes the DMG + zip + latest-mac.yml auto-update feed to
+#     a GitHub Release, and marks it latest for downloads + the updater.
 
 on:
   push:
     branches: [main]
+    tags:
+      - "desktop-v*"
     paths:
       - "desktop/**"
       - ".github/workflows/desktop-dmg.yml"
@@ -20,15 +20,19 @@ on:
       - "desktop/**"
       - ".github/workflows/desktop-dmg.yml"
   workflow_dispatch:
-  release:
-    types: [created]
 
+# Least privilege by default — the smoke-build job only needs read. The
+# `release` job re-grants `contents: write` at job level to publish releases.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build (${{ matrix.arch }})
+    # Smoke-build only on branches/PRs. Tag pushes go straight to the signed
+    # `release` job below (a single both-arch invocation needed for a coherent
+    # latest-mac.yml), so skip the per-arch matrix on tags.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: macos-14
     strategy:
       fail-fast: false
@@ -108,62 +112,120 @@ jobs:
             desktop/release/*.dmg.blockmap
           if-no-files-found: error
 
-      - name: Attach to GitHub Release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            desktop/release/*.dmg
-            desktop/release/*.dmg.blockmap
-
-  # Publish the latest main-branch DMGs as a rolling GitHub Release so the
-  # web app's "Download" buttons resolve to a real file. Avoids committing
-  # 100+ MB binaries into the repo (which hits GitHub's hard push limit).
-  # Runs only on push-to-main and overwrites the `desktop-latest` release's
-  # assets each time.
-  publish-release:
-    name: Publish to desktop-latest release
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+  # Signed, versioned release with the auto-update feed. Triggered by pushing a
+  # `desktop-v<version>` tag (the version must match desktop/package.json).
+  #
+  # Both arches build in ONE electron-builder invocation so it emits a single
+  # `latest-mac.yml` that lists both — electron-updater on the client picks the
+  # matching arch from it. The job then copies the per-arch DMGs to the stable
+  # names the web "Download" buttons expect (snip-desktop.dmg / -x64) and marks
+  # the release "latest", so `releases/latest/download/...` serves downloads AND
+  # `releases/latest` is the feed electron-updater reads.
+  release:
+    name: Release (signed + auto-update feed)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: macos-14
     permissions:
       contents: write
     steps:
-      - name: Download arm64 DMG
-        uses: actions/download-artifact@v4
-        with:
-          name: snip-desktop-arm64
-          path: artifacts/arm64
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Download x64 DMG
-        uses: actions/download-artifact@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          name: snip-desktop-x64
-          path: artifacts/x64
+          bun-version: latest
 
-      - name: Rename DMGs to stable asset names
+      - name: Cache Electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron
+          key: ${{ runner.os }}-electron-${{ hashFiles('desktop/package.json') }}
+
+      - name: Cache Electron Builder
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('desktop/package.json') }}
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: bun install --frozen-lockfile
+
+      - name: Verify tag matches package.json version
+        working-directory: desktop
         run: |
-          mkdir -p release-assets
-          arm_src="$(ls artifacts/arm64/*.dmg | head -n1)"
-          x64_src="$(ls artifacts/x64/*.dmg | head -n1)"
-          if [[ -z "$arm_src" || -z "$x64_src" ]]; then
-            echo "Missing DMG artifact — arm64='$arm_src' x64='$x64_src'" >&2
+          pkg_version="$(node -p "require('./package.json').version")"
+          tag_version="${GITHUB_REF_NAME#desktop-v}"
+          if [[ "$pkg_version" != "$tag_version" ]]; then
+            echo "Tag ($tag_version) does not match package.json version ($pkg_version)." >&2
+            echo "Bump desktop/package.json and re-tag as desktop-v$pkg_version." >&2
             exit 1
           fi
-          cp "$arm_src" release-assets/snip-desktop.dmg
-          cp "$x64_src" release-assets/snip-desktop-x64.dmg
-          ls -la release-assets/
 
-      - name: Upload to desktop-latest release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: desktop-latest
-          name: snip Desktop (latest)
-          body: |
-            Rolling latest build of snip Desktop from the `main` branch
-            (commit ${{ github.sha }}).
+      - name: Install icon-generation tools
+        run: brew install librsvg
 
-            - `snip-desktop.dmg` — Apple Silicon (arm64)
-            - `snip-desktop-x64.dmg` — Intel (x64)
-          files: release-assets/*.dmg
-          make_latest: "true"
+      - name: Generate DMG assets (icon.icns + background)
+        working-directory: desktop
+        run: bun run generate:dmg-assets
+
+      - name: Configure code signing
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Auto-update needs a fully signed + notarized build, so require ALL
+          # signing secrets up front rather than failing deep in the build with
+          # an opaque error.
+          missing=""
+          [[ -z "$MACOS_CERTIFICATE" ]] && missing+=" MACOS_CERTIFICATE"
+          [[ -z "$MACOS_CERTIFICATE_PASSWORD" ]] && missing+=" MACOS_CERTIFICATE_PASSWORD"
+          [[ -z "$APPLE_ID_SECRET" ]] && missing+=" APPLE_ID"
+          [[ -z "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" ]] && missing+=" APPLE_APP_SPECIFIC_PASSWORD"
+          [[ -z "$APPLE_TEAM_ID_SECRET" ]] && missing+=" APPLE_TEAM_ID"
+          if [[ -n "$missing" ]]; then
+            echo "::error::Auto-update needs a signed build, but these secrets are missing:$missing"
+            exit 1
+          fi
+          delim="EOF_$(openssl rand -hex 8)"
+          {
+            printf '%s<<%s\n%s\n%s\n' CSC_LINK "$delim" "$MACOS_CERTIFICATE" "$delim"
+            printf '%s<<%s\n%s\n%s\n' CSC_KEY_PASSWORD "$delim" "$MACOS_CERTIFICATE_PASSWORD" "$delim"
+            printf '%s<<%s\n%s\n%s\n' APPLE_ID "$delim" "$APPLE_ID_SECRET" "$delim"
+            printf '%s<<%s\n%s\n%s\n' APPLE_APP_SPECIFIC_PASSWORD "$delim" "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" "$delim"
+            printf '%s<<%s\n%s\n%s\n' APPLE_TEAM_ID "$delim" "$APPLE_TEAM_ID_SECRET" "$delim"
+          } >> "$GITHUB_ENV"
+
+      - name: Build + publish (signed, both arches, with latest-mac.yml)
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run release
+
+      - name: Add stable-named DMGs + mark release latest
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          arm="release/snip-${version}-arm64.dmg"
+          x64="release/snip-${version}-x64.dmg"
+          if [[ ! -f "$arm" || ! -f "$x64" ]]; then
+            echo "Expected DMGs not found:" >&2
+            ls -la release/ >&2
+            exit 1
+          fi
+          cp "$arm" release/snip-desktop.dmg
+          cp "$x64" release/snip-desktop-x64.dmg
+          gh release upload "$tag" \
+            release/snip-desktop.dmg release/snip-desktop-x64.dmg \
+            --clobber --repo "$GITHUB_REPOSITORY"
+          # electron-builder publishes the release as a draft; promote it and
+          # mark it latest so downloads + the updater feed both resolve here.
+          gh release edit "$tag" --draft=false --latest --repo "$GITHUB_REPOSITORY"

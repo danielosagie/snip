@@ -5,6 +5,19 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
+  app: {
+    version: () => ipcRenderer.invoke("app:version"),
+  },
+  update: {
+    state: () => ipcRenderer.invoke("update:state"),
+    check: () => ipcRenderer.invoke("update:check"),
+    install: () => ipcRenderer.invoke("update:install"),
+    onStatus: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("update:status", listener);
+      return () => ipcRenderer.off("update:status", listener);
+    },
+  },
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),
     set: (next) => ipcRenderer.invoke("settings:set", next),
