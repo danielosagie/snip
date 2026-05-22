@@ -4,7 +4,7 @@ import { getUser, identityName, requireProjectAccess, requireVideoAccess } from 
 import { Doc, Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
-import { resolveBundleVideos } from "./shareBundles";
+import { resolveBundleVideos, resolveBundleFolders } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
 import { indexSearchable, removeSearchableForVideo } from "./search";
@@ -1620,6 +1620,22 @@ export const getShareSummaryByGrant = query({
       const bundle = await ctx.db.get(resolved.shareLink.bundleId);
       if (!bundle) return null;
       const videos = await resolveBundleVideos(ctx, bundle);
+      const folderDocs = await resolveBundleFolders(ctx, bundle);
+
+      // The share's "root" is the shared folder for folder bundles, or the
+      // project root (represented as null) for project/selection bundles.
+      // Normalizing the root folder id to null lets the client treat the root
+      // level uniformly across bundle kinds.
+      const rootFolderId =
+        bundle.kind === "folder" ? bundle.folderId ?? null : null;
+      const normalizeFolderId = (
+        fid: Id<"folders"> | undefined | null,
+      ): Id<"folders"> | null => {
+        if (!fid) return null;
+        if (rootFolderId && fid === rootFolderId) return null;
+        return fid;
+      };
+
       return {
         kind: "bundle" as const,
         single: null,
@@ -1627,6 +1643,16 @@ export const getShareSummaryByGrant = query({
           _id: bundle._id,
           name: bundle.name,
           kind: bundle.kind,
+          // null = the share root. Folders below carry their own ids.
+          rootFolderId,
+          // The root folder itself is represented as null, so exclude it here.
+          folders: folderDocs
+            .filter((f) => f._id !== rootFolderId)
+            .map((f) => ({
+              _id: f._id,
+              name: f.name,
+              parentFolderId: normalizeFolderId(f.parentFolderId),
+            })),
           items: videos
             .filter((v) => v.status === "ready")
             .map((v) => ({
@@ -1640,6 +1666,14 @@ export const getShareSummaryByGrant = query({
               // a Mux playable.
               imagePreviewStatus: v.imagePreviewStatus ?? null,
               hasMuxPlayback: Boolean(v.muxPlaybackId),
+              // Folder-aware fields (Phase 1): which folder the item lives in
+              // (normalized to null at the root), plus metadata for the share
+              // page's filters / sort / list view.
+              folderId: normalizeFolderId(v.folderId),
+              fileSize: v.fileSize ?? null,
+              workflowStatus: v.workflowStatus,
+              uploaderName: v.uploaderName,
+              createdAt: v._creationTime,
             })),
         },
         paywall: resolved.shareLink.paywall ?? null,

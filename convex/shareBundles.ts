@@ -108,6 +108,38 @@ export async function resolveBundleVideos(
   return fetched.filter((v): v is Doc<"videos"> => Boolean(v && !v.deletedAt));
 }
 
+/**
+ * Resolves the folder docs that make up a bundle's navigable tree. Folder
+ * bundles return the shared folder plus all descendants; project bundles return
+ * every folder in the project; selection bundles have no folder structure.
+ * The share page uses this to render Drive-style folder navigation.
+ */
+export async function resolveBundleFolders(
+  ctx: ReadCtx,
+  bundle: Doc<"shareBundles">,
+): Promise<Doc<"folders">[]> {
+  if (bundle.kind === "folder") {
+    if (!bundle.folderId) return [];
+    const ids = await collectFolderSubtree(
+      ctx,
+      bundle.projectId,
+      bundle.folderId,
+    );
+    const docs = await Promise.all(ids.map((id) => ctx.db.get(id)));
+    return docs.filter((f): f is Doc<"folders"> => Boolean(f));
+  }
+
+  if (bundle.kind === "project") {
+    return await ctx.db
+      .query("folders")
+      .withIndex("by_project", (q) => q.eq("projectId", bundle.projectId))
+      .collect();
+  }
+
+  // selection bundles are a flat, ad-hoc list — no folder tree.
+  return [];
+}
+
 export const createForFolder = mutation({
   args: {
     folderId: v.id("folders"),

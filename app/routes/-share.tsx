@@ -19,6 +19,7 @@ import {
   ShareWatermarkOverlay,
   useAntiPiracyDefenses,
 } from "@/components/share/ShareWatermarkOverlay";
+import { ShareFolderBrowser } from "@/components/share/ShareFolderBrowser";
 
 function formatPrice(cents: number, currency: string): string {
   try {
@@ -99,6 +100,7 @@ export default function SharePage() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
+  const playerSectionRef = useRef<HTMLDivElement | null>(null);
 
   // Live unlock-state subscription. Convex reactivity flips this from
   // paid:false to paid:true the instant the Stripe webhook fires, with no
@@ -141,6 +143,10 @@ export default function SharePage() {
   // stutter.
   const bundleItems = useMemo(
     () => summary?.bundle?.items ?? [],
+    [summary],
+  );
+  const bundleFolders = useMemo(
+    () => summary?.bundle?.folders ?? [],
     [summary],
   );
 
@@ -604,6 +610,20 @@ export default function SharePage() {
     [grantToken, replyText, isSubmittingReply, createComment, activeItemId],
   );
 
+  // Focus a file from the folder browser: load it into the player below and
+  // scroll the player into view (the browser can be tall).
+  const handleSelectBundleItem = useCallback((id: string) => {
+    setActiveItemId(id as Id<"videos">);
+    if (typeof document !== "undefined") {
+      requestAnimationFrame(() => {
+        playerSectionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    }
+  }, []);
+
   const handleDownload = useCallback(async () => {
     if (!grantToken || isDownloading) return;
 
@@ -838,60 +858,14 @@ export default function SharePage() {
           </div>
         </div>
 
-        {isBundle && bundleItems.length > 0 ? (
-          <section
-            className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-3"
-            aria-label="Bundle items"
-          >
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {bundleItems.map((item) => {
-                const isActive = item._id === activeItemId;
-                return (
-                  <button
-                    key={item._id}
-                    type="button"
-                    onClick={() => setActiveItemId(item._id as Id<"videos">)}
-                    className={`text-left border-2 ${
-                      isActive
-                        ? "border-[#FF6600] bg-[#FFEDD5]"
-                        : "border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e0e0d6]"
-                    } transition-colors`}
-                  >
-                    <div className="aspect-video bg-[#1a1a1a] overflow-hidden">
-                      {item.thumbnailUrl ? (
-                        <img
-                          src={item.thumbnailUrl}
-                          alt={item.title}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-[#666]">
-                          <Video className="h-6 w-6" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-2">
-                      <div className="text-xs font-bold text-[#1a1a1a] truncate">
-                        {item.title}
-                      </div>
-                      {item.duration ? (
-                        <div className="text-[10px] font-mono text-[#888]">
-                          {formatDuration(item.duration)}
-                        </div>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
-
-        {isBundle && bundleItems.length === 0 ? (
-          <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-6 text-center text-sm text-[#888]">
-            This bundle has no ready items yet. Uploads will appear here as soon as
-            processing finishes.
-          </section>
+        {isBundle ? (
+          <ShareFolderBrowser
+            bundleName={summary?.bundle?.name ?? "Shared files"}
+            folders={bundleFolders}
+            items={bundleItems}
+            activeItemId={activeItemId}
+            onSelectItem={handleSelectBundleItem}
+          />
         ) : null}
 
         {paywall && isOwner && isVideoPlayback ? (
@@ -1015,7 +989,10 @@ export default function SharePage() {
           </section>
         ) : null}
 
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 lg:items-start">
+        <div
+          ref={playerSectionRef}
+          className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 lg:items-start"
+        >
         <div className="relative border-2 border-[#1a1a1a] overflow-hidden">
           {playbackSession?.url && playbackSession.kind === "video" ? (
             <>
