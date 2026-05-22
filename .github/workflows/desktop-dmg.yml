@@ -223,6 +223,34 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run release
 
+      - name: Notarize + staple the .pkg installers
+        working-directory: desktop
+        run: |
+          # electron-builder notarizes the .app (so the dmg/zip are accepted)
+          # but NOT the .pkg installer itself — without its own stapled ticket
+          # Gatekeeper says "could not verify it is free of malware". Submit
+          # each pkg to Apple's notary service and staple the ticket. APPLE_ID /
+          # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID were exported to the env
+          # by the "Configure code signing" step.
+          shopt -s nullglob
+          pkgs=(release/snip-*-arm64.pkg release/snip-*-x64.pkg)
+          if [[ ${#pkgs[@]} -eq 0 ]]; then
+            echo "::error::No .pkg files found to notarize."
+            ls -la release/ || true
+            exit 1
+          fi
+          for p in "${pkgs[@]}"; do
+            echo "::group::notarize $p"
+            xcrun notarytool submit "$p" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+            xcrun stapler staple "$p"
+            xcrun stapler validate "$p"
+            echo "::endgroup::"
+          done
+
       - name: Add stable-named installers + mark release latest
         working-directory: desktop
         env:
@@ -248,7 +276,10 @@ jobs:
           if [[ -f "$arm_pkg" && -f "$x64_pkg" ]]; then
             cp "$arm_pkg" release/snip-desktop.pkg
             cp "$x64_pkg" release/snip-desktop-x64.pkg
-            stable+=(release/snip-desktop.pkg release/snip-desktop-x64.pkg)
+            # Re-upload the versioned pkgs too: electron-builder published the
+            # pre-notarization copies during the build, so clobber them with the
+            # now-stapled versions.
+            stable+=(release/snip-desktop.pkg release/snip-desktop-x64.pkg "$arm_pkg" "$x64_pkg")
           else
             echo "::warning::Expected .pkg installers not found — publishing DMGs only."
             ls -la release/ || true
