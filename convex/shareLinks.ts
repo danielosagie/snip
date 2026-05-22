@@ -2,17 +2,84 @@ import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
 import { v } from "convex/values";
 import { api, components, internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
-import { internalQuery, mutation, query, MutationCtx } from "./_generated/server";
+import {
+  internalQuery,
+  mutation,
+  query,
+  MutationCtx,
+  QueryCtx,
+} from "./_generated/server";
 import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { generateUniqueToken, hashPassword, verifyPassword } from "./security";
-import { findShareLinkByToken, issueShareAccessGrant } from "./shareAccess";
+import {
+  findShareLinkByToken,
+  issueShareAccessGrant,
+  type ShareRole,
+} from "./shareAccess";
 
 const shareLinkStatusValidator = v.union(
   v.literal("missing"),
   v.literal("expired"),
   v.literal("requiresPassword"),
+  v.literal("requiresAccess"),
   v.literal("ok"),
 );
+
+const shareRoleValidator = v.union(
+  v.literal("viewer"),
+  v.literal("commenter"),
+  v.literal("editor"),
+);
+
+/**
+ * Resolves whether the current viewer may open a link and at what role.
+ * Owner (link creator) is always allowed as editor. For "anyone" links every
+ * viewer is allowed at the link's default role. For "invite" links only the
+ * owner or a signed-in user whose email is in shareInvites is allowed.
+ */
+async function resolveViewerAccess(
+  ctx: QueryCtx | MutationCtx,
+  link: Doc<"shareLinks">,
+): Promise<{ allowed: boolean; role: ShareRole; isOwner: boolean }> {
+  const identity = await ctx.auth.getUserIdentity();
+  const isOwner =
+    identity?.subject != null && identity.subject === link.createdByClerkId;
+  if (isOwner) return { allowed: true, role: "editor", isOwner: true };
+
+  const generalAccess = link.generalAccess ?? "anyone";
+  if (generalAccess === "anyone") {
+    return { allowed: true, role: link.defaultRole ?? "commenter", isOwner: false };
+  }
+
+  const email =
+    typeof identity?.email === "string" ? identity.email.toLowerCase() : null;
+  if (!email) return { allowed: false, role: "viewer", isOwner: false };
+
+  const invite = await ctx.db
+    .query("shareInvites")
+    .withIndex("by_link_and_email", (q) =>
+      q.eq("shareLinkId", link._id).eq("email", email),
+    )
+    .unique();
+  if (!invite) return { allowed: false, role: "viewer", isOwner: false };
+  return { allowed: true, role: invite.role, isOwner: false };
+}
+
+/** Throws unless the caller can manage (member role) the link's target. */
+async function requireShareLinkManageAccess(
+  ctx: MutationCtx | QueryCtx,
+  link: Doc<"shareLinks">,
+) {
+  if (link.videoId) {
+    await requireVideoAccess(ctx, link.videoId, "member");
+  } else if (link.bundleId) {
+    const bundle = await ctx.db.get(link.bundleId);
+    if (!bundle) throw new Error("Bundle not found");
+    await requireProjectAccess(ctx, bundle.projectId, "member");
+  } else {
+    throw new Error("Share link has no target");
+  }
+}
 
 const MAX_SHARE_PASSWORD_LENGTH = 256;
 const PASSWORD_MAX_FAILED_ATTEMPTS = 5;
@@ -145,6 +212,10 @@ export const create = mutation({
     ),
     clientLabel: v.optional(v.string()),
     clientEmail: v.optional(v.string()),
+    generalAccess: v.optional(v.union(v.literal("anyone"), v.literal("invite"))),
+    defaultRole: v.optional(shareRoleValidator),
+    commentsEnabled: v.optional(v.boolean()),
+    showAllVersions: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     try {
@@ -197,6 +268,10 @@ export const create = mutation({
         paywall,
         clientLabel: args.clientLabel?.trim() || undefined,
         clientEmail: args.clientEmail?.trim() || undefined,
+        generalAccess: args.generalAccess ?? "anyone",
+        defaultRole: args.defaultRole ?? "commenter",
+        commentsEnabled: args.commentsEnabled ?? true,
+        showAllVersions: args.showAllVersions ?? false,
       });
 
       // Paywalled links need their watermarked preview pre-baked so the first
@@ -278,6 +353,7 @@ export const list = query({
       paywall: link.paywall ?? null,
       clientLabel: link.clientLabel ?? null,
       clientEmail: link.clientEmail ?? null,
+      generalAccess: link.generalAccess ?? "anyone",
     }));
 
     return linksWithCreator;
@@ -332,6 +408,7 @@ export const listForFolder = query({
         paywall: link.paywall ?? null,
         clientLabel: link.clientLabel ?? null,
         clientEmail: link.clientEmail ?? null,
+        generalAccess: link.generalAccess ?? "anyone",
       }))
       .sort((a, b) => b._creationTime - a._creationTime);
   },
@@ -354,6 +431,13 @@ export const remove = mutation({
     }
 
     await deleteShareAccessGrantsForLink(ctx, args.linkId);
+    const invites = await ctx.db
+      .query("shareInvites")
+      .withIndex("by_share_link", (q) => q.eq("shareLinkId", args.linkId))
+      .collect();
+    for (const invite of invites) {
+      await ctx.db.delete(invite._id);
+    }
     await ctx.db.delete(args.linkId);
   },
 });
@@ -459,6 +543,17 @@ export const getByToken = query({
       return { status: "missing" as const };
     }
 
+    // Invite-only links gate before the password screen: a viewer who isn't
+    // the owner and isn't on the invite list can't proceed at all. Note the
+    // result is reactive on the viewer's Clerk identity, so signing in with an
+    // invited email flips this to "ok" without a manual reload.
+    if ((link.generalAccess ?? "anyone") === "invite") {
+      const access = await resolveViewerAccess(ctx, link);
+      if (!access.allowed) {
+        return { status: "requiresAccess" as const };
+      }
+    }
+
     if (hasPasswordProtection(link)) {
       return { status: "requiresPassword" as const };
     }
@@ -483,11 +578,14 @@ export const issueAccessGrant = mutation({
   returns: v.object({
     ok: v.boolean(),
     grantToken: v.union(v.string(), v.null()),
+    reason: v.optional(
+      v.union(v.literal("notInvited"), v.literal("rateLimited")),
+    ),
   }),
   handler: async (ctx, args) => {
     const globalAccessLimit = await shareLinkRateLimiter.limit(ctx, "grantGlobal");
     if (!globalAccessLimit.ok) {
-      return { ok: false, grantToken: null };
+      return { ok: false, grantToken: null, reason: "rateLimited" as const };
     }
 
     const accessLimit = await shareLinkRateLimiter.limit(ctx, "grantByToken", {
@@ -571,6 +669,13 @@ export const issueAccessGrant = mutation({
       }
     }
 
+    // Enforce invite-only access and resolve the viewer's role. This is the
+    // real security boundary (getByToken's requiresAccess is only a UI hint).
+    const access = await resolveViewerAccess(ctx, link);
+    if (!access.allowed) {
+      return { ok: false, grantToken: null, reason: "notInvited" as const };
+    }
+
     // Capture viewer identity for leak forensics. Clerk identity (if any)
     // comes from the Convex auth context — that's the most reliable signal
     // when a recipient is signed in. The IP hash + UA + referrer are caller-
@@ -580,13 +685,19 @@ export const issueAccessGrant = mutation({
       typeof identity?.email === "string" && identity.email.length > 0
         ? identity.email
         : undefined;
-    const grantToken = await issueShareAccessGrant(ctx, link._id, undefined, {
-      viewerClerkId: identity?.subject,
-      viewerEmail,
-      viewerIpHash: args.viewerIpHash?.trim() || undefined,
-      viewerUserAgent: args.viewerUserAgent?.slice(0, 512) || undefined,
-      viewerReferrer: args.viewerReferrer?.slice(0, 512) || undefined,
-    });
+    const grantToken = await issueShareAccessGrant(
+      ctx,
+      link._id,
+      undefined,
+      {
+        viewerClerkId: identity?.subject,
+        viewerEmail,
+        viewerIpHash: args.viewerIpHash?.trim() || undefined,
+        viewerUserAgent: args.viewerUserAgent?.slice(0, 512) || undefined,
+        viewerReferrer: args.viewerReferrer?.slice(0, 512) || undefined,
+      },
+      access.role,
+    );
 
     await ctx.db.patch(link._id, {
       viewCount: link.viewCount + 1,
@@ -595,6 +706,137 @@ export const issueAccessGrant = mutation({
     return {
       ok: true,
       grantToken,
+    };
+  },
+});
+
+/**
+ * Updates a link's general access, default role, and permission toggles.
+ * Owner/member only.
+ */
+export const setAccess = mutation({
+  args: {
+    linkId: v.id("shareLinks"),
+    generalAccess: v.optional(v.union(v.literal("anyone"), v.literal("invite"))),
+    defaultRole: v.optional(shareRoleValidator),
+    commentsEnabled: v.optional(v.boolean()),
+    showAllVersions: v.optional(v.boolean()),
+    allowDownload: v.optional(v.boolean()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const link = await ctx.db.get(args.linkId);
+    if (!link) throw new Error("Share link not found");
+    await requireShareLinkManageAccess(ctx, link);
+
+    const updates: Partial<Doc<"shareLinks">> = {};
+    if (args.generalAccess !== undefined) updates.generalAccess = args.generalAccess;
+    if (args.defaultRole !== undefined) updates.defaultRole = args.defaultRole;
+    if (args.commentsEnabled !== undefined) updates.commentsEnabled = args.commentsEnabled;
+    if (args.showAllVersions !== undefined) updates.showAllVersions = args.showAllVersions;
+    if (args.allowDownload !== undefined) updates.allowDownload = args.allowDownload;
+    await ctx.db.patch(args.linkId, updates);
+    return null;
+  },
+});
+
+/** Adds (or updates the role of) a per-email invite on an invite-capable link. */
+export const addInvite = mutation({
+  args: {
+    linkId: v.id("shareLinks"),
+    email: v.string(),
+    role: shareRoleValidator,
+  },
+  returns: v.id("shareInvites"),
+  handler: async (ctx, args): Promise<Id<"shareInvites">> => {
+    const link = await ctx.db.get(args.linkId);
+    if (!link) throw new Error("Share link not found");
+    await requireShareLinkManageAccess(ctx, link);
+    const identity = (await ctx.auth.getUserIdentity())!;
+
+    const email = args.email.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      throw new Error("Enter a valid email address.");
+    }
+
+    const existing = await ctx.db
+      .query("shareInvites")
+      .withIndex("by_link_and_email", (q) =>
+        q.eq("shareLinkId", args.linkId).eq("email", email),
+      )
+      .unique();
+    if (existing) {
+      await ctx.db.patch(existing._id, { role: args.role });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("shareInvites", {
+      shareLinkId: args.linkId,
+      email,
+      role: args.role,
+      invitedByClerkId: identity.subject,
+      invitedByName: identityName(identity),
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const updateInviteRole = mutation({
+  args: { inviteId: v.id("shareInvites"), role: shareRoleValidator },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const invite = await ctx.db.get(args.inviteId);
+    if (!invite) throw new Error("Invite not found");
+    const link = await ctx.db.get(invite.shareLinkId);
+    if (!link) throw new Error("Share link not found");
+    await requireShareLinkManageAccess(ctx, link);
+    await ctx.db.patch(args.inviteId, { role: args.role });
+    return null;
+  },
+});
+
+export const removeInvite = mutation({
+  args: { inviteId: v.id("shareInvites") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const invite = await ctx.db.get(args.inviteId);
+    if (!invite) return null;
+    const link = await ctx.db.get(invite.shareLinkId);
+    if (!link) throw new Error("Share link not found");
+    await requireShareLinkManageAccess(ctx, link);
+    await ctx.db.delete(args.inviteId);
+    return null;
+  },
+});
+
+/** The people invited to a link + its access config. Owner/member only. */
+export const getAccessConfig = query({
+  args: { linkId: v.id("shareLinks") },
+  handler: async (ctx, args) => {
+    const link = await ctx.db.get(args.linkId);
+    if (!link) return null;
+    await requireShareLinkManageAccess(ctx, link);
+
+    const invites = await ctx.db
+      .query("shareInvites")
+      .withIndex("by_share_link", (q) => q.eq("shareLinkId", args.linkId))
+      .collect();
+
+    return {
+      generalAccess: link.generalAccess ?? "anyone",
+      defaultRole: link.defaultRole ?? "commenter",
+      commentsEnabled: link.commentsEnabled !== false,
+      showAllVersions: link.showAllVersions === true,
+      allowDownload: link.allowDownload,
+      invites: invites
+        .map((i) => ({
+          _id: i._id,
+          email: i.email,
+          role: i.role,
+          invitedByName: i.invitedByName,
+          createdAt: i.createdAt,
+        }))
+        .sort((a, b) => a.email.localeCompare(b.email)),
     };
   },
 });

@@ -7,7 +7,7 @@ import {
   requireVideoAccess,
   requireUser,
 } from "./auth";
-import { resolveActiveShareGrant } from "./shareAccess";
+import { resolveActiveShareGrant, shareCapabilities } from "./shareAccess";
 import { resolveBundleVideos } from "./shareBundles";
 import { indexSearchable, removeSearchable } from "./search";
 import { internal } from "./_generated/api";
@@ -231,6 +231,15 @@ export const createForShareGrant = mutation({
 
     if (!resolved) {
       throw new Error("Invalid share grant");
+    }
+
+    // Role gate: viewers (or links with comments turned off) can't comment.
+    const { canComment } = shareCapabilities(
+      resolved.grant.role,
+      resolved.shareLink,
+    );
+    if (!canComment) {
+      throw new Error("Commenting isn't enabled for your access level.");
     }
 
     const video = await resolveShareGrantVideo(ctx, resolved.shareLink, args.itemVideoId);

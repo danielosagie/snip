@@ -24,6 +24,7 @@ import {
   ExternalLink,
   Globe,
   DollarSign,
+  Users,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -32,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeTime } from "@/lib/utils";
+import { ShareAccessPanel } from "@/components/share/ShareAccessPanel";
 
 interface ShareDialogProps {
   videoId: Id<"videos">;
@@ -66,6 +68,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdatingVisibility, setIsUpdatingVisibility] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [accessOpenId, setAccessOpenId] = useState<string | null>(null);
   const [paywallEnabled, setPaywallEnabled] = useState(false);
   const [allowDownload, setAllowDownload] = useState(true);
   const [newLinkOptions, setNewLinkOptions] = useState({
@@ -513,72 +516,90 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
           ) : (
             <div className="space-y-2">
               {shareLinks.map((link) => (
-                <div
-                  key={link._id}
-                  className="flex items-center justify-between p-3 border-2 border-[#1a1a1a]"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <code className="text-sm bg-[#e8e8e0] px-2 py-0.5 font-mono truncate max-w-[200px]">
-                        /share/{link.token}
-                      </code>
-                      {link.isExpired ? (
-                        <Badge variant="destructive">Expired</Badge>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-[#888]">
-                      <span className="flex items-center gap-1">
-                        <Eye className="h-3 w-3" />
-                        {link.viewCount} views
-                      </span>
-                      {link.hasPassword ? (
+                <div key={link._id} className="border-2 border-[#1a1a1a]">
+                  <div className="flex items-center justify-between p-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <code className="text-sm bg-[#e8e8e0] px-2 py-0.5 font-mono truncate max-w-[200px]">
+                          /share/{link.token}
+                        </code>
+                        {link.generalAccess === "invite" ? (
+                          <Badge variant="outline">Invite only</Badge>
+                        ) : null}
+                        {link.isExpired ? (
+                          <Badge variant="destructive">Expired</Badge>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-[#888]">
                         <span className="flex items-center gap-1">
-                          <Lock className="h-3 w-3" />
-                          Protected
+                          <Eye className="h-3 w-3" />
+                          {link.viewCount} views
                         </span>
-                      ) : null}
-                      {link.paywall ? (
-                        <span className="flex items-center gap-1 text-[#FF6600] font-bold">
-                          <DollarSign className="h-3 w-3" />
-                          {(link.paywall.priceCents / 100).toFixed(2)}{" "}
-                          {link.paywall.currency.toUpperCase()}
-                        </span>
-                      ) : null}
-                      {link.expiresAt ? (
-                        <span>
-                          Expires {formatRelativeTime(link.expiresAt)}
-                        </span>
-                      ) : null}
+                        {link.hasPassword ? (
+                          <span className="flex items-center gap-1">
+                            <Lock className="h-3 w-3" />
+                            Protected
+                          </span>
+                        ) : null}
+                        {link.paywall ? (
+                          <span className="flex items-center gap-1 text-[#FF6600] font-bold">
+                            <DollarSign className="h-3 w-3" />
+                            {(link.paywall.priceCents / 100).toFixed(2)}{" "}
+                            {link.paywall.currency.toUpperCase()}
+                          </span>
+                        ) : null}
+                        {link.expiresAt ? (
+                          <span>Expires {formatRelativeTime(link.expiresAt)}</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Manage access"
+                        className={
+                          accessOpenId === link._id ? "text-[#C2410C]" : undefined
+                        }
+                        onClick={() =>
+                          setAccessOpenId((id) =>
+                            id === link._id ? null : link._id,
+                          )
+                        }
+                      >
+                        <Users className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleCopyLink(link.token)}
+                      >
+                        {copiedId === link.token ? (
+                          <Check className="h-4 w-4 text-[#FF6600]" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => window.open(`/share/${link.token}`, "_blank")}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-[#dc2626] hover:text-[#dc2626]"
+                        onClick={() => handleDeleteLink(link._id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleCopyLink(link.token)}
-                    >
-                      {copiedId === link.token ? (
-                        <Check className="h-4 w-4 text-[#FF6600]" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => window.open(`/share/${link.token}`, "_blank")}
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-[#dc2626] hover:text-[#dc2626]"
-                      onClick={() => handleDeleteLink(link._id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {accessOpenId === link._id ? (
+                    <ShareAccessPanel linkId={link._id} />
+                  ) : null}
                 </div>
               ))}
             </div>

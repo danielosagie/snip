@@ -122,6 +122,10 @@ export default function SharePage() {
   const isPaid = Boolean(unlockState?.paid);
   const isPaywalled = Boolean(paywall);
   const isOwner = Boolean(unlockState?.isOwner);
+  // Drive-style role capabilities (Phase 3). Default canComment to true until
+  // the unlock state resolves so the composer doesn't flicker for the common
+  // commenter case.
+  const canComment = unlockState ? unlockState.canComment : true;
   const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
 
   // For bundle shares, the active item is the one currently being viewed /
@@ -762,6 +766,39 @@ export default function SharePage() {
     );
   }
 
+  // Invite-only link the current viewer isn't on. They must sign in with an
+  // invited email (or ask the owner for access). getByToken re-resolves
+  // reactively once they sign in, so a match flips this away automatically.
+  if (shareInfo.status === "requiresAccess" && !grantToken) {
+    return (
+      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
+              <Lock className="h-6 w-6 text-[#888]" />
+            </div>
+            <CardTitle>Access required</CardTitle>
+            <CardDescription>
+              {isUserLoaded && user
+                ? `This link is invite-only and ${user.primaryEmailAddress?.emailAddress ?? "your account"} isn't on the list. Ask the owner to invite you.`
+                : "This link is invite-only. Sign in with the email you were invited with to view it."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isUserLoaded && user ? null : (
+              <a
+                href={`/sign-in?redirect_url=${encodeURIComponent(`/share/${token}`)}`}
+                className="block"
+              >
+                <Button className="w-full">Sign in</Button>
+              </a>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Single-video shares fail closed when the video can't be loaded. Bundle
   // shares are valid as long as the bundle row exists — they show an empty-
   // state if there are no ready items.
@@ -1199,7 +1236,17 @@ export default function SharePage() {
             <span className="text-xs text-[#888] font-mono">{formatTimestamp(currentTime)}</span>
           </div>
 
-          {isUserLoaded && user ? (
+          {!(isUserLoaded && user) ? (
+            <a
+              href={`/sign-in?redirect_url=${encodeURIComponent(`/share/${token}`)}`}
+              className="inline-flex"
+            >
+              <Button>
+                <MessageSquare className="mr-1.5 h-4 w-4" />
+                Sign in to comment
+              </Button>
+            </a>
+          ) : canComment ? (
             <form onSubmit={handleSubmitComment} className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-[#666]">
                 <Clock className="h-3.5 w-3.5" />
@@ -1218,15 +1265,9 @@ export default function SharePage() {
               </Button>
             </form>
           ) : (
-            <a
-              href={`/sign-in?redirect_url=${encodeURIComponent(`/share/${token}`)}`}
-              className="inline-flex"
-            >
-              <Button>
-                <MessageSquare className="mr-1.5 h-4 w-4" />
-                Sign in to comment
-              </Button>
-            </a>
+            <p className="text-xs text-[#888] border-2 border-dashed border-[#ccc] px-3 py-2">
+              You have view-only access — commenting is disabled for this link.
+            </p>
           )}
 
           {comments === undefined ? (
@@ -1320,7 +1361,7 @@ export default function SharePage() {
                     ) : null}
 
                     {/* Per-thread reply composer */}
-                    {isUserLoaded && user ? (
+                    {isUserLoaded && user && canComment ? (
                       replyingToId === comment._id ? (
                         <form
                           onSubmit={(e) => {

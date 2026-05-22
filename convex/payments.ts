@@ -5,6 +5,7 @@ import {
   query,
 } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { shareCapabilities } from "./shareAccess";
 
 /**
  * Per-delivery payments — V8 isolate side (queries, internal mutations).
@@ -293,6 +294,15 @@ export const getGrantUnlockState = query({
     // The share page uses this to render the owner-verification banner
     // (toggle between client-view watermarked preview and full-res).
     isOwner: v.boolean(),
+    // Drive-style access info (Phase 3): the viewer's resolved role, whether
+    // they can comment, and whether downloads are permitted on the link.
+    role: v.union(
+      v.literal("viewer"),
+      v.literal("commenter"),
+      v.literal("editor"),
+    ),
+    canComment: v.boolean(),
+    canDownload: v.boolean(),
   }),
   handler: async (ctx, args) => {
     const grant = await ctx.db
@@ -306,6 +316,9 @@ export const getGrantUnlockState = query({
         expiresAt: null,
         paywall: null,
         isOwner: false,
+        role: "viewer" as const,
+        canComment: false,
+        canDownload: false,
       };
     }
     const shareLink = await ctx.db.get(grant.shareLinkId);
@@ -316,18 +329,29 @@ export const getGrantUnlockState = query({
         expiresAt: null,
         paywall: null,
         isOwner: false,
+        role: "viewer" as const,
+        canComment: false,
+        canDownload: false,
       };
     }
     const identity = await ctx.auth.getUserIdentity();
     const isOwner =
       identity?.subject != null &&
       identity.subject === shareLink.createdByClerkId;
+    const { role, canComment } = shareCapabilities(grant.role, shareLink);
+    const paid = Boolean(grant.paidAt);
+    const paywalled = Boolean(shareLink.paywall);
     return {
       valid: true,
-      paid: Boolean(grant.paidAt),
+      paid,
       expiresAt: grant.expiresAt,
       paywall: shareLink.paywall ?? null,
       isOwner,
+      role: isOwner ? "editor" : role,
+      canComment: isOwner ? true : canComment,
+      // Downloads require the link to allow them and, when paywalled, payment.
+      canDownload:
+        isOwner || (shareLink.allowDownload && (!paywalled || paid)),
     };
   },
 });

@@ -443,10 +443,49 @@ export default defineSchema({
     // preview asset and prefilled in Stripe Checkout. NOT a security boundary.
     clientLabel: v.optional(v.string()),
     clientEmail: v.optional(v.string()),
+    // Drive-style access control (Phase 3). Missing fields fall back to the
+    // legacy behavior: anyone-with-the-link, commenter role, comments on.
+    //  • generalAccess "anyone"  → anyone with the link gets `defaultRole`.
+    //  • generalAccess "invite"  → only signed-in users whose email is in
+    //    shareInvites (or the owner) may open the link; they get the invite's
+    //    role. This is a real security boundary, enforced in issueAccessGrant.
+    generalAccess: v.optional(
+      v.union(v.literal("anyone"), v.literal("invite")),
+    ),
+    defaultRole: v.optional(
+      v.union(
+        v.literal("viewer"),
+        v.literal("commenter"),
+        v.literal("editor"),
+      ),
+    ),
+    // Per-link permission toggles (Frame.io-style). commentsEnabled gates the
+    // comment composer regardless of role; showAllVersions is stored for the
+    // share page's version UI. Downloads continue to use `allowDownload`.
+    commentsEnabled: v.optional(v.boolean()),
+    showAllVersions: v.optional(v.boolean()),
   })
     .index("by_token", ["token"])
     .index("by_video", ["videoId"])
     .index("by_bundle", ["bundleId"]),
+
+  // Per-email access grants for invite-only share links. The email is stored
+  // lowercased; a viewer is matched by their signed-in Clerk email. Each row
+  // carries the role that email receives on the link.
+  shareInvites: defineTable({
+    shareLinkId: v.id("shareLinks"),
+    email: v.string(),
+    role: v.union(
+      v.literal("viewer"),
+      v.literal("commenter"),
+      v.literal("editor"),
+    ),
+    invitedByClerkId: v.string(),
+    invitedByName: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_share_link", ["shareLinkId"])
+    .index("by_link_and_email", ["shareLinkId", "email"]),
 
   shareAccessGrants: defineTable({
     shareLinkId: v.id("shareLinks"),
@@ -471,6 +510,15 @@ export default defineSchema({
     viewerIpHash: v.optional(v.string()),
     viewerUserAgent: v.optional(v.string()),
     viewerReferrer: v.optional(v.string()),
+    // Access role resolved at issuance (Phase 3). Missing = legacy grant;
+    // readers treat it as "commenter" for backward compatibility.
+    role: v.optional(
+      v.union(
+        v.literal("viewer"),
+        v.literal("commenter"),
+        v.literal("editor"),
+      ),
+    ),
   })
     .index("by_token", ["token"])
     .index("by_share_link", ["shareLinkId"])

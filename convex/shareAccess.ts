@@ -30,6 +30,8 @@ export async function cleanupExpiredShareAccessGrantsForLink(
   }
 }
 
+export type ShareRole = "viewer" | "commenter" | "editor";
+
 export async function issueShareAccessGrant(
   ctx: MutationCtx,
   shareLinkId: Id<"shareLinks">,
@@ -41,6 +43,7 @@ export async function issueShareAccessGrant(
     viewerUserAgent?: string;
     viewerReferrer?: string;
   },
+  role?: ShareRole,
 ) {
   await cleanupExpiredShareAccessGrantsForLink(ctx, shareLinkId);
 
@@ -65,9 +68,27 @@ export async function issueShareAccessGrant(
     viewerIpHash: forensics?.viewerIpHash,
     viewerUserAgent: forensics?.viewerUserAgent,
     viewerReferrer: forensics?.viewerReferrer,
+    role,
   });
 
   return token;
+}
+
+/**
+ * Shared capability helper. Given a grant's role and the link's permission
+ * flags, derives what the viewer may do. A missing role is treated as
+ * "commenter" so legacy grants keep working.
+ */
+export function shareCapabilities(
+  role: ShareRole | undefined,
+  link: { commentsEnabled?: boolean },
+): { canComment: boolean; role: ShareRole } {
+  const resolved: ShareRole = role ?? "commenter";
+  const commentsOn = link.commentsEnabled !== false;
+  return {
+    role: resolved,
+    canComment: commentsOn && (resolved === "commenter" || resolved === "editor"),
+  };
 }
 
 export async function resolveActiveShareGrant(

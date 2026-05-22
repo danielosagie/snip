@@ -21,6 +21,7 @@ import {
   Trash2,
   Lock,
   Clock,
+  Users,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeTime } from "@/lib/utils";
+import { ShareAccessPanel } from "@/components/share/ShareAccessPanel";
 
 /**
  * Folder-level share. A live "folder" bundle (new uploads to the folder
@@ -69,6 +71,7 @@ export function ShareFolderDialog({
   const [isCreating, setIsCreating] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [accessOpenId, setAccessOpenId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [paywallEnabled, setPaywallEnabled] = useState(false);
   const [allowDownload, setAllowDownload] = useState(true);
@@ -413,15 +416,20 @@ export function ShareFolderDialog({
               {existingLinks.map((link) => {
                 const url = `${typeof window !== "undefined" ? window.location.origin : ""}/share/${link.token}`;
                 return (
+                  <div key={link._id} className="bg-[#f0f0e8]">
                   <div
-                    key={link._id}
-                    className="flex items-center gap-2 px-3 py-2.5 bg-[#f0f0e8]"
+                    className="flex items-center gap-2 px-3 py-2.5"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <code className="text-xs font-mono truncate max-w-[180px]">
                           /share/{link.token}
                         </code>
+                        {link.generalAccess === "invite" ? (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-mono font-bold uppercase text-[#1a1a1a]">
+                            <Lock className="h-3 w-3" /> invite
+                          </span>
+                        ) : null}
                         {link.hasPassword ? (
                           <Lock className="h-3 w-3 text-[#888]" />
                         ) : null}
@@ -450,6 +458,18 @@ export function ShareFolderDialog({
                     </div>
                     <button
                       type="button"
+                      onClick={() =>
+                        setAccessOpenId((id) => (id === link._id ? null : link._id))
+                      }
+                      title="Manage access"
+                      className={`inline-flex h-7 w-7 items-center justify-center border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] flex-shrink-0 ${
+                        accessOpenId === link._id ? "text-[#C2410C]" : "text-[#1a1a1a]"
+                      }`}
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => void copy(url, link.token)}
                       title="Copy link"
                       className="inline-flex h-7 w-7 items-center justify-center border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0] flex-shrink-0"
@@ -468,6 +488,10 @@ export function ShareFolderDialog({
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
+                  </div>
+                  {accessOpenId === link._id ? (
+                    <ShareAccessPanel linkId={link._id} />
+                  ) : null}
                   </div>
                 );
               })}
