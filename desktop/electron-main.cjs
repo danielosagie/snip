@@ -1192,6 +1192,48 @@ async function ensureRclone() {
   return dest;
 }
 
+// Make sure the FUSE driver is present. This is the one thing snip can't fully
+// automate — macFUSE ships a kernel extension that needs the user's approval —
+// but we bundle the installer in the .pkg, so when it's missing (e.g. the user
+// reached this build via auto-update, which skips the pkg's macFUSE step) we run
+// it on demand with an admin prompt. After install the kext still needs a
+// one-time "Allow" in System Settings, so we surface a clear next step.
+async function ensureMacFuse() {
+  if (process.platform !== "darwin") return;
+  if (fssync.existsSync("/Library/Filesystems/macfuse.fs")) return;
+
+  const bundled = process.resourcesPath
+    ? path.join(process.resourcesPath, "macfuse.pkg")
+    : null;
+  if (!bundled || !fssync.existsSync(bundled)) {
+    throw new Error(
+      "macFUSE isn't installed. Reinstall snip from the .pkg installer (it sets up macFUSE), or install macFUSE from macfuse.io, then try again.",
+    );
+  }
+
+  pushLog("Setting up macFUSE — approve the password prompt…");
+  try {
+    const esc = bundled.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    execSync(
+      `osascript -e 'do shell script "installer -pkg \\"${esc}\\" -target /" with administrator privileges'`,
+      { stdio: "pipe" },
+    );
+  } catch (e) {
+    throw new Error(
+      "Couldn't install macFUSE (" +
+        (e instanceof Error ? e.message : String(e)) +
+        "). Open the snip .pkg installer to set it up.",
+    );
+  }
+
+  if (!fssync.existsSync("/Library/Filesystems/macfuse.fs")) {
+    throw new Error(
+      "macFUSE was installed but needs approval. Open System Settings → Privacy & Security, click Allow next to macFUSE (you may need to restart), then click Enable drive again.",
+    );
+  }
+  pushLog("macFUSE ready.");
+}
+
 function checkMountPrereqs() {
   const isMac = process.platform === "darwin";
   const isWin = process.platform === "win32";
@@ -1241,13 +1283,9 @@ async function startMount({ mountPath } = {}) {
       "Storage credentials incomplete — fill in bucket, endpoint, access key, secret in Settings.",
     );
   }
-  // rclone is auto-provisioned (below); only the FUSE driver is a hard,
-  // user-installed prerequisite.
-  if (!checkMountPrereqs().fuse) {
-    throw new Error(
-      `Missing the FUSE driver. ${checkMountPrereqs().installHint}`,
-    );
-  }
+  // rclone is auto-provisioned (below); macFUSE is bundled and installed on
+  // demand. Both throw a clear, surfaced error if they can't be set up.
+  await ensureMacFuse();
 
   const targetPath = mountPath || settings.rootDir;
   await fs.mkdir(targetPath, { recursive: true });
@@ -2280,7 +2318,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    titleBarStyle: "hiddenInset",
+    // Standard macOS title bar so the traffic lights live in their own bar and
+    // never overlap the web app's header (the web UI isn't ours to re-pad).
+    titleBarStyle: "default",
     backgroundColor: "#f0f0e8",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -2290,7 +2330,9 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(WEB_APP_URL);
+  // Go straight into the app, not the marketing landing page. /dashboard
+  // redirects to sign-in when signed out, and to the workspace when signed in.
+  mainWindow.loadURL(`${WEB_APP_URL}/dashboard`);
   if (!app.isPackaged && process.env.NODE_ENV !== "production") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }

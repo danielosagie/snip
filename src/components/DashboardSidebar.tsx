@@ -463,6 +463,7 @@ function DesktopAppOrDrive() {
     lastError: string | null;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.snipDesktop?.isDesktop || !window.api) return;
@@ -472,17 +473,23 @@ function DesktopAppOrDrive() {
   }, []);
 
   const enable = useCallback(async () => {
-    if (!window.api) return;
+    if (!window.api) {
+      setError("Desktop bridge unavailable — restart the app.");
+      return;
+    }
     setBusy(true);
+    setError(null);
     try {
       const boot = await getStorageBootstrap({});
-      if (boot) {
-        const cur = await window.api.settings.get();
-        await window.api.settings.set({ ...cur, storage: { ...cur.storage, ...boot } });
+      if (!boot) {
+        setError("Storage isn't configured on the server (no bucket creds).");
+        return;
       }
+      const cur = await window.api.settings.get();
+      await window.api.settings.set({ ...cur, storage: { ...cur.storage, ...boot } });
       await window.api.mount.start({});
-    } catch {
-      // Surfaced via the mount status (lastError).
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't enable the drive.");
     } finally {
       setBusy(false);
     }
@@ -502,29 +509,38 @@ function DesktopAppOrDrive() {
   }
 
   const status = mount?.status ?? "unmounted";
-  if (status === "mounted") {
-    return (
-      <button
-        type="button"
-        onClick={() => void window.api?.shell.openFolder(mount?.mountPath ?? "")}
-        className={DESKTOP_BTN}
-        title="Open the cloud drive in Finder"
-      >
-        <HardDrive className="h-3.5 w-3.5" />
-        Drive connected · Open
-      </button>
-    );
-  }
+  const shownError = error ?? (status === "error" ? mount?.lastError : null);
   return (
-    <button
-      type="button"
-      onClick={() => void enable()}
-      disabled={busy || status === "mounting"}
-      className={DESKTOP_BTN}
-      title="Mount your cloud bucket as a local drive"
-    >
-      <HardDrive className="h-3.5 w-3.5" />
-      {status === "mounting" ? "Connecting drive…" : status === "error" ? "Retry drive" : "Enable drive"}
-    </button>
+    <div className="flex flex-col gap-1.5">
+      {status === "mounted" ? (
+        <button
+          type="button"
+          onClick={() => void window.api?.shell.openFolder(mount?.mountPath ?? "")}
+          className={DESKTOP_BTN}
+          title="Open the cloud drive in Finder"
+        >
+          <HardDrive className="h-3.5 w-3.5" />
+          Drive connected · Open
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void enable()}
+          disabled={busy || status === "mounting"}
+          className={DESKTOP_BTN}
+          title="Mount your cloud bucket as a local drive"
+        >
+          <HardDrive className="h-3.5 w-3.5" />
+          {busy || status === "mounting"
+            ? "Connecting drive…"
+            : status === "error"
+              ? "Retry drive"
+              : "Enable drive"}
+        </button>
+      )}
+      {shownError ? (
+        <p className="text-[10px] leading-snug text-[#b91c1c]">{shownError}</p>
+      ) : null}
+    </div>
   );
 }
