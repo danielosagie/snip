@@ -21,6 +21,7 @@ import {
 } from "@/components/share/ShareWatermarkOverlay";
 import { ShareFolderBrowser } from "@/components/share/ShareFolderBrowser";
 import { ShareHeader } from "@/components/share/ShareHeader";
+import { ShareDownloadSheet } from "@/components/share/ShareDownloadSheet";
 
 function formatPrice(cents: number, currency: string): string {
   try {
@@ -104,6 +105,7 @@ export default function SharePage() {
   // Per-share header cover (signed S3 URL, fetched via action when hasCover).
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverReload, setCoverReload] = useState(0);
+  const [downloadSheetOpen, setDownloadSheetOpen] = useState(false);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const playerSectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -126,6 +128,7 @@ export default function SharePage() {
   // the unlock state resolves so the composer doesn't flicker for the common
   // commenter case.
   const canComment = unlockState ? unlockState.canComment : true;
+  const canDownloadGrant = Boolean(unlockState?.canDownload);
   const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
 
   // For bundle shares, the active item is the one currently being viewed /
@@ -873,23 +876,21 @@ export default function SharePage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void handleDownload()}
+            onClick={() =>
+              isBundle ? setDownloadSheetOpen(true) : void handleDownload()
+            }
             disabled={
               !grantToken ||
-              isDownloading ||
-              !downloadAllowed ||
-              (isBundle && !activeItemId)
+              (isBundle
+                ? bundleItems.length === 0
+                : isDownloading || !downloadAllowed)
             }
             title={
-              !downloadAllowed
-                ? "Pay to unlock download"
-                : isBundle && !activeItemId
-                  ? "Open an item to download it"
-                  : undefined
+              !isBundle && !downloadAllowed ? "Pay to unlock download" : undefined
             }
           >
             <Download className="h-4 w-4" />
-            {isDownloading ? "Preparing..." : "Download"}
+            {isBundle ? "Download" : isDownloading ? "Preparing..." : "Download"}
           </Button>
         </div>
       </header>
@@ -1433,6 +1434,27 @@ export default function SharePage() {
           </Link>
         </div>
       </footer>
+
+      {isBundle ? (
+        <ShareDownloadSheet
+          open={downloadSheetOpen}
+          onOpenChange={setDownloadSheetOpen}
+          items={bundleItems.map((i) => ({
+            _id: i._id,
+            title: i.title,
+            fileSize: i.fileSize ?? null,
+          }))}
+          grantToken={grantToken}
+          canDownload={canDownloadGrant}
+          isPaywalled={isPaywalled}
+          isPaid={isPaid}
+          paywallPriceLabel={
+            paywall ? formatPrice(paywall.priceCents, paywall.currency) : null
+          }
+          onPay={() => void handlePay()}
+          isPaying={isCreatingCheckout}
+        />
+      ) : null}
     </div>
   );
 }
