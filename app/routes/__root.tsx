@@ -66,8 +66,16 @@ function RootComponent() {
 function AppShell({ children }: { children: ReactNode }) {
   const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
+  // Same lazy pattern as ConvexClientProvider: prerender workers build
+  // marketing pages without the publishable key in env. Marketing routes
+  // don't gate on auth, so rendering the document shell unwrapped is
+  // fine. In the browser a missing key still indicates a misconfigured
+  // deploy and should crash loudly.
   if (!publishableKey) {
-    throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
+    if (typeof window !== "undefined") {
+      throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
+    }
+    return <RootDocument>{children}</RootDocument>;
   }
 
   return (

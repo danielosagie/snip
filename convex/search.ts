@@ -279,6 +279,22 @@ export const globalSearch = query({
 
     return hits
       .filter((h) => allowed.has(h.teamId))
+      .filter((h) => {
+        // Defensive: a small number of rows in `searchableContent` were
+        // written by an earlier indexer that stored a contractVersion
+        // (or other non-project) ID in the `projectId` column. When the
+        // client clicks one, `workspace.resolveContext({ projectId })`
+        // rejects on `v.id("projects")` and crashes the whole search.
+        // Skip those rows so the rest of the results still render. The
+        // proper cleanup is a `reindexProject` sweep — this is the
+        // run-time backstop.
+        if (h.projectId == null) return true;
+        return ctx.db.normalizeId("projects", h.projectId) !== null;
+      })
+      .filter((h) => {
+        if (h.videoId == null) return true;
+        return ctx.db.normalizeId("videos", h.videoId) !== null;
+      })
       .slice(0, 14)
       .map((h) => {
         // frame refId = `${videoId}:${sec}`, transcript = `${videoId}:t:${sec}`

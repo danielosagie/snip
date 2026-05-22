@@ -2100,6 +2100,11 @@ function setupAutoUpdater() {
 
 ipcMain.handle("app:version", async () => app.getVersion());
 
+// Snapshot read so the renderer can render the current state on mount — the
+// first background check may finish before Settings is ever opened, and
+// "update:status" only carries future transitions.
+ipcMain.handle("update:state", async () => ({ ...updateState }));
+
 ipcMain.handle("update:check", async () => {
   if (!app.isPackaged) return { ok: false, reason: "dev" };
   try {

@@ -97,6 +97,7 @@ interface DesktopApi {
     version: () => Promise<string>;
   };
   update: {
+    state: () => Promise<UpdateState>;
     check: () => Promise<{ ok: boolean; reason?: string }>;
     install: () => Promise<{ ok: boolean; reason?: string }>;
     onStatus: (handler: (state: UpdateState) => void) => () => void;

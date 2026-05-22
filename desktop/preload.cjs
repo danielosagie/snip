@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("api", {
     version: () => ipcRenderer.invoke("app:version"),
   },
   update: {
+    state: () => ipcRenderer.invoke("update:state"),
     check: () => ipcRenderer.invoke("update:check"),
     install: () => ipcRenderer.invoke("update:install"),
     onStatus: (handler) => {
