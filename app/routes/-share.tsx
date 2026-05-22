@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { triggerDownload } from "@/lib/download";
-import { formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
+import { cn, formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
 import { useVideoPresence } from "@/lib/useVideoPresence";
 import { VideoWatchers } from "@/components/presence/VideoWatchers";
 import { Lock, Video, AlertCircle, MessageSquare, Clock, Download, ShieldCheck } from "lucide-react";
@@ -88,6 +88,14 @@ export default function SharePage() {
   const [commentText, setCommentText] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  // Bidirectional link between the comment list and the timeline markers:
+  // clicking either highlights the matching comment (top-level or reply).
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  // Per-thread reply composer state.
+  const [replyingToId, setReplyingToId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [isSubmittingReply, setIsSubmittingReply] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
@@ -125,7 +133,36 @@ export default function SharePage() {
   });
 
   const isBundle = summary?.kind === "bundle";
-  const bundleItems = summary?.bundle?.items ?? [];
+  // Memoized so the `?? []` fallback doesn't mint a fresh array reference on
+  // every render. SharePage re-renders ~4×/sec while the video plays (via
+  // onTimeUpdate → setCurrentTime); an unstable bundleItems made the
+  // playback-loader effect below re-fire on each of those renders, re-minting
+  // the signed Mux URL and rebuilding HLS — the cause of the ~300ms stop/play
+  // stutter.
+  const bundleItems = useMemo(
+    () => summary?.bundle?.items ?? [],
+    [summary],
+  );
+
+  // Value-typed (string | boolean) inputs for the playback-loader effect.
+  // Depending on these instead of the whole `summary` / `bundleItems` objects
+  // means a Convex subscription tick that re-emits `summary` with unchanged
+  // media details won't reload playback (and tear down the player).
+  const activeContentType = useMemo<string | null>(() => {
+    if (isBundle) {
+      return (
+        bundleItems.find((item) => item._id === activeItemId)?.contentType ?? null
+      );
+    }
+    return summary?.kind === "single" ? summary.single?.contentType ?? null : null;
+  }, [isBundle, bundleItems, activeItemId, summary]);
+
+  const activeHasMuxPlayback = useMemo(() => {
+    if (!isBundle) return false;
+    return (
+      bundleItems.find((item) => item._id === activeItemId)?.hasMuxPlayback ?? false
+    );
+  }, [isBundle, bundleItems, activeItemId]);
 
   // Auto-pick the first bundle item once we have the summary, and reset
   // whenever the share token changes.
@@ -227,18 +264,10 @@ export default function SharePage() {
     //  • video/* or anything with a Mux playback id → signed Mux stream
     //  • image/* → sharp-rendered watermarked preview + signed S3
     //  • pdf / audio / text / etc → signed S3 with the file kind for UI
-    const activeContentType =
-      (isBundle
-        ? bundleItems.find((item) => item._id === activeItemId)?.contentType
-        : summary?.kind === "single"
-          ? summary.single?.contentType
-          : null) ?? null;
     const isImage = Boolean(activeContentType?.startsWith("image/"));
     const isVideo =
       Boolean(activeContentType?.startsWith("video/")) ||
-      (isBundle
-        ? bundleItems.find((item) => item._id === activeItemId)?.hasMuxPlayback ?? false
-        : true);
+      (isBundle ? activeHasMuxPlayback : true);
 
     const loader: Promise<{
       kind: "video" | "image" | "file";
@@ -331,8 +360,8 @@ export default function SharePage() {
     reloadTrigger,
     isBundle,
     activeItemId,
-    bundleItems,
-    summary,
+    activeContentType,
+    activeHasMuxPlayback,
     getFileAccess,
     viewAs,
   ]);
@@ -472,20 +501,31 @@ export default function SharePage() {
   ]);
 
   const flattenedComments = useMemo(() => {
-    if (!comments) return [] as Array<{ _id: string; timestampSeconds: number; resolved: boolean }>;
+    type Marker = {
+      _id: string;
+      timestampSeconds: number;
+      resolved: boolean;
+      text?: string;
+      userName?: string;
+    };
+    if (!comments) return [] as Array<Marker>;
 
-    const markers: Array<{ _id: string; timestampSeconds: number; resolved: boolean }> = [];
+    const markers: Array<Marker> = [];
     for (const comment of comments) {
       markers.push({
         _id: comment._id,
         timestampSeconds: comment.timestampSeconds,
         resolved: comment.resolved,
+        text: comment.text,
+        userName: comment.userName,
       });
       for (const reply of comment.replies) {
         markers.push({
           _id: reply._id,
           timestampSeconds: reply.timestampSeconds,
           resolved: reply.resolved,
+          text: reply.text,
+          userName: reply.userName,
         });
       }
     }
@@ -512,6 +552,57 @@ export default function SharePage() {
       setIsSubmittingComment(false);
     }
   };
+
+  // Jump the playhead to a comment, highlight it in the list, and scroll it
+  // into view. Shared by clicking a comment and by clicking its timeline dot
+  // (via onMarkerClick) so the two stay in sync. Pass `seek: false` when the
+  // player has already moved the playhead (marker clicks do this internally).
+  const focusComment = useCallback(
+    (
+      commentId: string,
+      timestampSeconds: number,
+      options?: { play?: boolean; seek?: boolean },
+    ) => {
+      setActiveCommentId(commentId);
+      if (options?.seek !== false) {
+        playerRef.current?.seekTo(timestampSeconds, { play: options?.play ?? false });
+      }
+      if (typeof document !== "undefined") {
+        requestAnimationFrame(() => {
+          document
+            .getElementById(`share-comment-${commentId}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
+    },
+    [],
+  );
+
+  const handleSubmitReply = useCallback(
+    async (parentId: string, parentTimestamp: number) => {
+      if (!grantToken || !replyText.trim() || isSubmittingReply) return;
+      setIsSubmittingReply(true);
+      setReplyError(null);
+      try {
+        await createComment({
+          grantToken,
+          text: replyText.trim(),
+          // Replies inherit the parent's timecode so the whole thread stays
+          // anchored to the same point on the timeline.
+          timestampSeconds: parentTimestamp,
+          parentId: parentId as Id<"comments">,
+          itemVideoId: activeItemId ?? undefined,
+        });
+        setReplyText("");
+        setReplyingToId(null);
+      } catch {
+        setReplyError("Failed to post reply.");
+      } finally {
+        setIsSubmittingReply(false);
+      }
+    },
+    [grantToken, replyText, isSubmittingReply, createComment, activeItemId],
+  );
 
   const handleDownload = useCallback(async () => {
     if (!grantToken || isDownloading) return;
@@ -914,6 +1005,9 @@ export default function SharePage() {
                 poster={playbackSession.posterUrl}
                 comments={flattenedComments}
                 onTimeUpdate={setCurrentTime}
+                onMarkerClick={(c) =>
+                  focusComment(c._id, c.timestampSeconds, { seek: false })
+                }
                 allowDownload={false}
               />
               {isPaywalled ? (
@@ -1100,42 +1194,149 @@ export default function SharePage() {
             <p className="text-sm text-[#888]">No comments yet.</p>
           ) : (
             <div className="space-y-3">
-              {comments.map((comment) => (
-                <article key={comment._id} className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
-                    <button
-                      type="button"
-                      className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
-                      onClick={() => playerRef.current?.seekTo(comment.timestampSeconds, { play: true })}
+              {comments.map((comment) => {
+                const threadActive =
+                  activeCommentId === comment._id ||
+                  comment.replies.some((r) => r._id === activeCommentId);
+                return (
+                  <article
+                    key={comment._id}
+                    id={`share-comment-${comment._id}`}
+                    className={cn(
+                      "border-2 bg-[#f0f0e8] p-3 transition-colors",
+                      threadActive ? "border-[#C2410C] bg-[#FFEDD5]" : "border-[#1a1a1a]",
+                    )}
+                  >
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      className="cursor-pointer"
+                      onClick={() => focusComment(comment._id, comment.timestampSeconds)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          focusComment(comment._id, comment.timestampSeconds);
+                        }
+                      }}
                     >
-                      {formatTimestamp(comment.timestampSeconds)}
-                    </button>
-                  </div>
-                  <p className="text-sm text-[#1a1a1a] mt-1 whitespace-pre-wrap">{comment.text}</p>
-                  <p className="text-[11px] text-[#888] mt-1">{formatRelativeTime(comment._creationTime)}</p>
-
-                  {comment.replies.length > 0 ? (
-                    <div className="mt-3 ml-4 border-l-2 border-[#1a1a1a] pl-3 space-y-2">
-                      {comment.replies.map((reply) => (
-                        <div key={reply._id} className="text-sm">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
-                            <button
-                              type="button"
-                              className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
-                              onClick={() => playerRef.current?.seekTo(reply.timestampSeconds, { play: true })}
-                            >
-                              {formatTimestamp(reply.timestampSeconds)}
-                            </button>
-                          </div>
-                          <p className="text-[#1a1a1a] whitespace-pre-wrap">{reply.text}</p>
-                        </div>
-                      ))}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
+                        <button
+                          type="button"
+                          className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            focusComment(comment._id, comment.timestampSeconds, { play: true });
+                          }}
+                        >
+                          {formatTimestamp(comment.timestampSeconds)}
+                        </button>
+                      </div>
+                      <p className="text-sm text-[#1a1a1a] mt-1 whitespace-pre-wrap">{comment.text}</p>
+                      <p className="text-[11px] text-[#888] mt-1">{formatRelativeTime(comment._creationTime)}</p>
                     </div>
-                  ) : null}
-                </article>
-              ))}
+
+                    {comment.replies.length > 0 ? (
+                      <div className="mt-3 ml-4 border-l-2 border-[#1a1a1a] pl-3 space-y-2">
+                        {comment.replies.map((reply) => {
+                          const replyActive = activeCommentId === reply._id;
+                          return (
+                            <div
+                              key={reply._id}
+                              id={`share-comment-${reply._id}`}
+                              role="button"
+                              tabIndex={0}
+                              className={cn(
+                                "text-sm cursor-pointer -ml-1 pl-1 transition-colors",
+                                replyActive && "bg-[#FFEDD5]",
+                              )}
+                              onClick={() => focusComment(reply._id, reply.timestampSeconds)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  focusComment(reply._id, reply.timestampSeconds);
+                                }
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
+                                <button
+                                  type="button"
+                                  className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    focusComment(reply._id, reply.timestampSeconds, { play: true });
+                                  }}
+                                >
+                                  {formatTimestamp(reply.timestampSeconds)}
+                                </button>
+                              </div>
+                              <p className="text-[#1a1a1a] whitespace-pre-wrap">{reply.text}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    {/* Per-thread reply composer */}
+                    {isUserLoaded && user ? (
+                      replyingToId === comment._id ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void handleSubmitReply(comment._id, comment.timestampSeconds);
+                          }}
+                          className="mt-3 ml-4 space-y-2"
+                        >
+                          <Textarea
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            placeholder={`Reply to ${comment.userName}…`}
+                            className="min-h-[64px]"
+                            autoFocus
+                          />
+                          {replyError ? (
+                            <p className="text-xs text-[#dc2626]">{replyError}</p>
+                          ) : null}
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="submit"
+                              size="sm"
+                              disabled={!replyText.trim() || isSubmittingReply}
+                            >
+                              {isSubmittingReply ? "Posting…" : "Post reply"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setReplyingToId(null);
+                                setReplyText("");
+                                setReplyError(null);
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </form>
+                      ) : (
+                        <button
+                          type="button"
+                          className="mt-2 text-xs font-bold text-[#888] hover:text-[#C2410C]"
+                          onClick={() => {
+                            setReplyingToId(comment._id);
+                            setReplyText("");
+                            setReplyError(null);
+                          }}
+                        >
+                          Reply
+                        </button>
+                      )
+                    ) : null}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
