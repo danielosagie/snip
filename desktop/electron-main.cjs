@@ -1991,9 +1991,146 @@ app.on("before-quit", async (event) => {
     } catch {
       // ignore
     }
-    // Give it 2s, then quit hard.
-    setTimeout(() => app.exit(0), 2000);
+    mountChild = null;
+    // Resume the quit now the volume is detached. mountChild is null so this
+    // handler won't defer again, letting electron-updater's
+    // autoInstallOnAppQuit hook apply a downloaded update. Hard-exit is only a
+    // fallback for a stalled quit — and we skip it while an update is pending
+    // so Squirrel's post-quit install isn't interrupted.
+    setTimeout(() => app.quit(), 500);
+    setTimeout(() => {
+      if (!isQuittingForUpdate && updateState.status !== "downloaded") {
+        app.exit(0);
+      }
+    }, 8000);
   }
+});
+
+// ---- Auto-update (electron-updater + GitHub Releases) ------------------------
+//
+// Installed builds check GitHub Releases (build.publish in package.json points
+// at danielosagie/snip) for a newer **signed** version, download it in the
+// background, and install on quit — or immediately when the user clicks
+// "Restart & install". Disabled in dev: electron-updater needs a packaged,
+// code-signed app and a real release feed, and would otherwise throw on the
+// missing dev-app-update.yml.
+
+const { autoUpdater } = require("electron-updater");
+
+let updateState = {
+  status: "idle", // idle | checking | available | none | downloading | downloaded | error
+  version: null,
+  percent: 0,
+  error: null,
+};
+// Set when the user explicitly triggers an install so the quit path knows to
+// hand off to Squirrel rather than hard-exit.
+let isQuittingForUpdate = false;
+
+function emitUpdateStatus() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update:status", updateState);
+  }
+}
+
+function setupAutoUpdater() {
+  // Download in the background, but don't swap the bundle mid-session — an
+  // editor with the mounted drive open shouldn't get yanked. Install lands on
+  // the next quit (autoInstallOnAppQuit) or on explicit "Restart & install".
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = {
+    info: (m) => console.log("[updater]", m),
+    warn: (m) => console.warn("[updater]", m),
+    error: (m) => console.error("[updater]", m),
+    debug: () => {},
+  };
+
+  autoUpdater.on("checking-for-update", () => {
+    updateState = { ...updateState, status: "checking", error: null };
+    emitUpdateStatus();
+  });
+  autoUpdater.on("update-available", (info) => {
+    updateState = { ...updateState, status: "available", version: info?.version ?? null };
+    emitUpdateStatus();
+  });
+  autoUpdater.on("update-not-available", () => {
+    updateState = { ...updateState, status: "none" };
+    emitUpdateStatus();
+  });
+  autoUpdater.on("download-progress", (p) => {
+    updateState = {
+      ...updateState,
+      status: "downloading",
+      percent: Math.round(p?.percent ?? 0),
+    };
+    emitUpdateStatus();
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    updateState = {
+      ...updateState,
+      status: "downloaded",
+      version: info?.version ?? updateState.version,
+      percent: 100,
+    };
+    emitUpdateStatus();
+  });
+  autoUpdater.on("error", (err) => {
+    updateState = {
+      ...updateState,
+      status: "error",
+      error: err?.message ?? String(err),
+    };
+    emitUpdateStatus();
+  });
+
+  const check = () =>
+    autoUpdater.checkForUpdates().catch((e) => {
+      updateState = {
+        ...updateState,
+        status: "error",
+        error: e?.message ?? String(e),
+      };
+      emitUpdateStatus();
+    });
+  // First check once the window is up; re-check every 6h for long-running apps.
+  setTimeout(check, 8_000);
+  setInterval(check, 6 * 60 * 60 * 1000);
+}
+
+ipcMain.handle("app:version", async () => app.getVersion());
+
+ipcMain.handle("update:check", async () => {
+  if (!app.isPackaged) return { ok: false, reason: "dev" };
+  try {
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+});
+
+ipcMain.handle("update:install", async () => {
+  if (updateState.status !== "downloaded") return { ok: false, reason: "no-update" };
+  isQuittingForUpdate = true;
+  // Detach the FUSE mount before Squirrel swaps the app bundle — otherwise the
+  // relaunched app inherits a stale/half-attached volume.
+  if (mountChild) {
+    pushLog("Installing update — unmounting first.");
+    await umountPath(mountState.mountPath);
+    try {
+      mountChild.kill("SIGTERM");
+    } catch {
+      // ignore
+    }
+    mountChild = null;
+  }
+  stopPresenceLoop();
+  stopPrefetchWatcher();
+  stopLanCacheServer();
+  // Brief settle so the unmount completes before the installer relaunches.
+  setTimeout(() => autoUpdater.quitAndInstall(), 800);
+  return { ok: true };
 });
 
 // ---- Window management -------------------------------------------------------
@@ -2022,6 +2159,8 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  // Only run the updater in packaged (signed) builds — dev has no release feed.
+  if (app.isPackaged) setupAutoUpdater();
   void tryAutoMount();
   // Kick off any feature loops the user has enabled. Errors get logged
   // but don't block the window from opening.

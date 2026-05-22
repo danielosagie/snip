@@ -27,6 +27,32 @@ The first build downloads the matching Electron framework binary (~120 MB) into
 Result: `desktop/release/snip-0.1.0-arm64.dmg` (and the x64 variant if you
 asked for both).
 
+## Cutting a release (versioning + auto-update)
+
+Installed apps self-update via `electron-updater` against GitHub Releases
+(`build.publish` → `danielosagie/snip`). To ship a new version:
+
+1. Bump `desktop/package.json` `version` (e.g. `0.1.1` → `0.1.2`).
+2. Commit, then tag and push: `git tag desktop-v0.1.2 && git push origin desktop-v0.1.2`.
+3. The `release` job in `.github/workflows/desktop-dmg.yml` builds **both arches
+   in one signed invocation** (`bun run release`) and publishes the DMG + zip +
+   `latest-mac.yml` to a GitHub Release tagged `v0.1.2`, copies the per-arch
+   DMGs to the stable names the web download buttons use (`snip-desktop.dmg` /
+   `snip-desktop-x64.dmg`), then marks the release **latest**.
+
+`releases/latest` is therefore both the download source (`vercel.json` redirects
+`/downloads/snip-desktop.dmg` here) and the feed `electron-updater` reads.
+
+**The tag version must match `package.json`** — CI fails fast otherwise.
+
+**Auto-update requires signing** (next section). Squirrel.Mac will not apply an
+unsigned update, and the `release` job errors out if no signing cert is present.
+The in-app **Settings → Updates** panel shows the current version, lets you
+"Check for updates", and surfaces "Restart & install" once a build is staged.
+
+To cut a release locally instead of via CI (signing env must be set, plus a
+`GH_TOKEN` with `repo` scope): `cd desktop && bun run release`.
+
 ## Code signing & notarization
 
 Unsigned DMGs work on the dev machine but Gatekeeper will reject them on other
