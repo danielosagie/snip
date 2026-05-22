@@ -1,7 +1,7 @@
 {
   "name": "snip-desktop",
   "productName": "snip",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "description": "Desktop sync + cloud-mount companion for snip.",
   "main": "electron-main.cjs",
@@ -46,6 +46,7 @@
     "appId": "com.snip.desktop",
     "productName": "snip",
     "asar": true,
+    "afterPack": "./afterPack.cjs",
     "publish": [
       {
         "provider": "github",
