@@ -1,0 +1,22 @@
+#!/bin/bash
+# Runs after the snip app payload is installed by the .pkg. Installs the
+# bundled macFUSE so the cloud drive works out of the box — the one piece the
+# app can't provision itself. The macFUSE kernel extension still needs the
+# user's one-time approval in System Settings → Privacy & Security on first
+# mount; no installer can bypass that.
+set -e
+
+FUSE_PKG="/Applications/snip.app/Contents/Resources/macfuse.pkg"
+
+# Already installed? Nothing to do.
+if [ -e "/Library/Filesystems/macfuse.fs" ]; then
+  exit 0
+fi
+
+if [ -f "$FUSE_PKG" ]; then
+  # Best-effort — don't fail the whole snip install if macFUSE setup hiccups;
+  # the app falls back to guiding the user, and the drive is opt-in anyway.
+  /usr/sbin/installer -pkg "$FUSE_PKG" -target / || true
+fi
+
+exit 0

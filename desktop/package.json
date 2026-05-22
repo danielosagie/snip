@@ -98,7 +98,7 @@
     },
     "pkg": {
       "installLocation": "/Applications",
-      "scripts": "build/pkg-scripts",
+      "scripts": "pkg-scripts",
       "isRelocatable": false,
       "isVersionChecked": false,
       "overwriteAction": "upgrade",
