@@ -327,6 +327,10 @@ function UpdatesSection() {
 
   useEffect(() => {
     void api.app.version().then(setVersion).catch(() => setVersion(null));
+    // Seed from the current state — the first background check may have already
+    // resolved before this panel mounted, and onStatus only carries future
+    // transitions.
+    void api.update.state().then(setUpdate).catch(() => {});
     return api.update.onStatus(setUpdate);
   }, []);
 
@@ -342,12 +346,31 @@ function UpdatesSection() {
             : `Couldn't check: ${res.reason ?? "unknown error"}`,
         );
       }
+    } catch (e) {
+      setCheckNote(
+        `Couldn't check: ${e instanceof Error ? e.message : "unexpected error"}`,
+      );
     } finally {
       setChecking(false);
     }
   };
 
-  const install = () => void api.update.install();
+  const install = async () => {
+    try {
+      const res = await api.update.install();
+      if (!res.ok) {
+        setCheckNote(
+          res.reason === "no-update"
+            ? "No downloaded update to install yet."
+            : `Couldn't install: ${res.reason ?? "unknown error"}`,
+        );
+      }
+    } catch (e) {
+      setCheckNote(
+        `Couldn't install: ${e instanceof Error ? e.message : "unexpected error"}`,
+      );
+    }
+  };
 
   const statusLabel = (() => {
     switch (update.status) {
@@ -380,7 +403,7 @@ function UpdatesSection() {
               v{version ?? "—"}
             </span>
           </div>
-          <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
             {statusLabel}
           </div>
           {checkNote ? (
@@ -388,14 +411,19 @@ function UpdatesSection() {
           ) : null}
         </div>
         {downloaded ? (
-          <button className="primary" onClick={install}>
+          <button className="primary" onClick={() => void install()}>
             Restart &amp; install
           </button>
         ) : (
           <button
             className="ghost"
             onClick={() => void check()}
-            disabled={checking || update.status === "checking" || update.status === "downloading"}
+            disabled={
+              checking ||
+              update.status === "checking" ||
+              update.status === "available" ||
+              update.status === "downloading"
+            }
           >
             {checking || update.status === "checking" ? "Checking…" : "Check for updates"}
           </button>

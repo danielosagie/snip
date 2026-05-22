@@ -21,8 +21,10 @@ on:
       - ".github/workflows/desktop-dmg.yml"
   workflow_dispatch:
 
+# Least privilege by default — the smoke-build job only needs read. The
+# `release` job re-grants `contents: write` at job level to publish releases.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -176,19 +178,27 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [[ -n "$MACOS_CERTIFICATE" ]]; then
-            delim="EOF_$(openssl rand -hex 8)"
-            {
-              printf '%s<<%s\n%s\n%s\n' CSC_LINK "$delim" "$MACOS_CERTIFICATE" "$delim"
-              printf '%s<<%s\n%s\n%s\n' CSC_KEY_PASSWORD "$delim" "$MACOS_CERTIFICATE_PASSWORD" "$delim"
-              printf '%s<<%s\n%s\n%s\n' APPLE_ID "$delim" "$APPLE_ID_SECRET" "$delim"
-              printf '%s<<%s\n%s\n%s\n' APPLE_APP_SPECIFIC_PASSWORD "$delim" "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" "$delim"
-              printf '%s<<%s\n%s\n%s\n' APPLE_TEAM_ID "$delim" "$APPLE_TEAM_ID_SECRET" "$delim"
-            } >> "$GITHUB_ENV"
-          else
-            echo "::error::Auto-update needs a signed build, but no MACOS_CERTIFICATE secret is set."
+          # Auto-update needs a fully signed + notarized build, so require ALL
+          # signing secrets up front rather than failing deep in the build with
+          # an opaque error.
+          missing=""
+          [[ -z "$MACOS_CERTIFICATE" ]] && missing+=" MACOS_CERTIFICATE"
+          [[ -z "$MACOS_CERTIFICATE_PASSWORD" ]] && missing+=" MACOS_CERTIFICATE_PASSWORD"
+          [[ -z "$APPLE_ID_SECRET" ]] && missing+=" APPLE_ID"
+          [[ -z "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" ]] && missing+=" APPLE_APP_SPECIFIC_PASSWORD"
+          [[ -z "$APPLE_TEAM_ID_SECRET" ]] && missing+=" APPLE_TEAM_ID"
+          if [[ -n "$missing" ]]; then
+            echo "::error::Auto-update needs a signed build, but these secrets are missing:$missing"
             exit 1
           fi
+          delim="EOF_$(openssl rand -hex 8)"
+          {
+            printf '%s<<%s\n%s\n%s\n' CSC_LINK "$delim" "$MACOS_CERTIFICATE" "$delim"
+            printf '%s<<%s\n%s\n%s\n' CSC_KEY_PASSWORD "$delim" "$MACOS_CERTIFICATE_PASSWORD" "$delim"
+            printf '%s<<%s\n%s\n%s\n' APPLE_ID "$delim" "$APPLE_ID_SECRET" "$delim"
+            printf '%s<<%s\n%s\n%s\n' APPLE_APP_SPECIFIC_PASSWORD "$delim" "$APPLE_APP_SPECIFIC_PASSWORD_SECRET" "$delim"
+            printf '%s<<%s\n%s\n%s\n' APPLE_TEAM_ID "$delim" "$APPLE_TEAM_ID_SECRET" "$delim"
+          } >> "$GITHUB_ENV"
 
       - name: Build + publish (signed, both arches, with latest-mac.yml)
         working-directory: desktop
