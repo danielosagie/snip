@@ -69,6 +69,23 @@ function readStorageBootstrap(): StorageBootstrap | null {
   return null;
 }
 
+// ─── Desktop shell: storage bootstrap for an already-signed-in user ──────────
+//
+// The desktop app loads the web app directly (real https origin), so the user
+// is signed in via Clerk normally — no pairing dance needed. To mount the cloud
+// drive, the desktop's main process still needs the bucket creds; the web app
+// (running inside the shell) fetches them here and hands them to window.api.
+// Same shared-global-bucket model as pairing (any team-authenticated user gets
+// the deployment's bucket creds; scoped per-user tokens are a tracked follow-up).
+
+export const getStorageBootstrap = action({
+  args: {},
+  handler: async (ctx): Promise<StorageBootstrap | null> => {
+    await getIdentity(ctx); // require a signed-in user
+    return readStorageBootstrap();
+  },
+});
+
 // ─── Step 1: desktop starts a pairing ────────────────────────────────────────
 
 export const createPairing = mutation({

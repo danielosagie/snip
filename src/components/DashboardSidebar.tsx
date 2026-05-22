@@ -2,7 +2,7 @@
 
 import { Link, useLocation, useParams } from "@tanstack/react-router";
 import { UserButton, useUser } from "@clerk/tanstack-react-start";
-import { useQuery } from "convex/react";
+import { useQuery, useAction } from "convex/react";
 import {
   ChevronsUpDown,
   CreditCard,
@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { useTheme } from "@/components/theme/ThemeToggle";
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
   CommandSearch,
@@ -224,14 +224,7 @@ export function DashboardSidebar() {
             recommended installer — a guided wizard that also sets up macFUSE
             so the cloud drive works out of the box. */}
         <div className="px-3 pt-3 pb-1 border-t-2 border-[#1a1a1a]">
-          <a
-            href="/downloads/snip-desktop.pkg"
-            className="w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors"
-            title="Download snip Desktop for macOS — guided installer that sets up the cloud drive"
-          >
-            <HardDrive className="h-3.5 w-3.5" />
-            Desktop app · Installer
-          </a>
+          <DesktopAppOrDrive />
         </div>
 
         {/* "+ New project" sits directly above the account section,
@@ -449,5 +442,89 @@ function SidebarFooter({ name }: { name: string }) {
         )}
       </button>
     </div>
+  );
+}
+
+/**
+ * In a browser: a "Download the desktop app" button. Inside the desktop shell
+ * (window.snipDesktop): the cloud-drive control — Enable mounts the bucket via
+ * the native bridge (fetching storage creds from Convex), then shows Connected
+ * with an Open-in-Finder action.
+ */
+const DESKTOP_BTN =
+  "w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+
+function DesktopAppOrDrive() {
+  const getStorageBootstrap = useAction(api.desktopAuth.getStorageBootstrap);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [mount, setMount] = useState<{
+    status: string;
+    mountPath: string | null;
+    lastError: string | null;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.snipDesktop?.isDesktop || !window.api) return;
+    setIsDesktop(true);
+    void window.api.mount.status().then(setMount).catch(() => {});
+    return window.api.mount.onStatus(setMount);
+  }, []);
+
+  const enable = useCallback(async () => {
+    if (!window.api) return;
+    setBusy(true);
+    try {
+      const boot = await getStorageBootstrap({});
+      if (boot) {
+        const cur = await window.api.settings.get();
+        await window.api.settings.set({ ...cur, storage: { ...cur.storage, ...boot } });
+      }
+      await window.api.mount.start({});
+    } catch {
+      // Surfaced via the mount status (lastError).
+    } finally {
+      setBusy(false);
+    }
+  }, [getStorageBootstrap]);
+
+  if (!isDesktop) {
+    return (
+      <a
+        href="/downloads/snip-desktop.pkg"
+        className={DESKTOP_BTN}
+        title="Download snip Desktop for macOS — guided installer that sets up the cloud drive"
+      >
+        <HardDrive className="h-3.5 w-3.5" />
+        Desktop app · Installer
+      </a>
+    );
+  }
+
+  const status = mount?.status ?? "unmounted";
+  if (status === "mounted") {
+    return (
+      <button
+        type="button"
+        onClick={() => void window.api?.shell.openFolder(mount?.mountPath ?? "")}
+        className={DESKTOP_BTN}
+        title="Open the cloud drive in Finder"
+      >
+        <HardDrive className="h-3.5 w-3.5" />
+        Drive connected · Open
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void enable()}
+      disabled={busy || status === "mounting"}
+      className={DESKTOP_BTN}
+      title="Mount your cloud bucket as a local drive"
+    >
+      <HardDrive className="h-3.5 w-3.5" />
+      {status === "mounting" ? "Connecting drive…" : status === "error" ? "Retry drive" : "Enable drive"}
+    </button>
   );
 }
