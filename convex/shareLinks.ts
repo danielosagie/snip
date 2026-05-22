@@ -1,6 +1,6 @@
 import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
 import { v } from "convex/values";
-import { api, components } from "./_generated/api";
+import { api, components, internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { internalQuery, mutation, query, MutationCtx } from "./_generated/server";
 import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
@@ -199,18 +199,37 @@ export const create = mutation({
         clientEmail: args.clientEmail?.trim() || undefined,
       });
 
-      // Paywalled links need a watermarked 360p preview asset. In the steady
-      // state the per-video preview is already pre-baked (scheduled the moment
-      // the full asset is ready in `videos.markAsReady`). We schedule it again
-      // as a safety net for legacy videos that uploaded before pre-warm
-      // shipped — `ensurePreviewAssetForVideo` is idempotent. Bundle links
-      // defer to first-view since bundles can have arbitrary contents.
+      // Paywalled links need their watermarked preview pre-baked so the first
+      // client view is instant instead of waiting on generation. Videos get a
+      // Mux 360p preview asset; still images get a sharp-rendered webp; GIFs
+      // are served live (original + CSS overlay) so we skip generation for
+      // them entirely. Bundle links defer to first-view (arbitrary contents).
       if (paywall && args.videoId) {
-        await ctx.scheduler.runAfter(
-          0,
-          api.videoActions.ensurePreviewAssetForVideo,
-          { videoId: args.videoId },
-        );
+        const item = await ctx.db.get(args.videoId);
+        const ct = (item?.contentType ?? "").toLowerCase();
+        if (ct.startsWith("image/")) {
+          if (ct !== "image/gif") {
+            await ctx.scheduler.runAfter(
+              0,
+              internal.imagePreview.generateForVideoItem,
+              {
+                videoId: args.videoId,
+                shareLinkId,
+                primaryLabel:
+                  args.clientEmail ??
+                  args.clientLabel ??
+                  `share/${shareLinkId.toString().slice(-8)}`,
+                secondaryLabel: "PREVIEW — DO NOT REDISTRIBUTE",
+              },
+            );
+          }
+        } else {
+          await ctx.scheduler.runAfter(
+            0,
+            api.videoActions.ensurePreviewAssetForVideo,
+            { videoId: args.videoId },
+          );
+        }
       }
 
       return { token };

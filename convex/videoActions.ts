@@ -1020,6 +1020,22 @@ export const getSharedImagePreview = action({
       };
     }
 
+    // GIFs: a burned-in static webp would kill the animation (the whole point
+    // of a gif), and generating it makes the first view wait. Serve the
+    // original animated file directly — the share page lays its CSS watermark
+    // overlay on top for paywalled views — so gifs play and load instantly.
+    if ((contentType ?? "").toLowerCase() === "image/gif") {
+      return {
+        mode: "preview" as const,
+        url: await buildSignedBucketObjectUrl(video.s3Key, {
+          expiresIn: TTL_SECONDS,
+        }),
+        contentType,
+        tokenExpiresAt: Date.now() + TTL_SECONDS * 1000,
+        paywall: shareLink.paywall,
+      };
+    }
+
     // Pre-payment: serve the sharp-rendered watermarked preview if ready.
     // Otherwise lazy-trigger gen and return a pending placeholder.
     if (!video.imagePreviewS3Key || video.imagePreviewStatus !== "ready") {
