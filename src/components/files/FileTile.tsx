@@ -67,6 +67,7 @@ export function FileTile({
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
 
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
@@ -122,6 +123,9 @@ export function FileTile({
       <div
         className="relative aspect-video overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all flex items-center justify-center"
         style={{ background: meta.tileBg }}
+        onMouseEnter={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setHoverPos(null)}
       >
         {thumbnailSrc ? (
           <img
@@ -133,6 +137,20 @@ export function FileTile({
         ) : (
           <Icon className="h-20 w-20" style={{ color: meta.iconColor }} strokeWidth={1.5} />
         )}
+
+        {/* Hover-enlarge preview for images/gifs — a floating, uncropped
+            (object-contain) view of the file that follows the cursor. */}
+        {hoverPos && thumbnailSrc ? (
+          <div
+            className="fixed z-[80] pointer-events-none border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[6px_6px_0px_0px_var(--shadow-color)] p-1"
+            style={{
+              left: Math.min(hoverPos.x + 18, window.innerWidth - 380),
+              top: Math.min(hoverPos.y + 18, window.innerHeight - 380),
+            }}
+          >
+            <img src={thumbnailSrc} alt={title} className="block max-w-[360px] max-h-[360px] object-contain" />
+          </div>
+        ) : null}
 
         {/* Top-left file-type chip — mirrors Drive's red "PDF" badge */}
         <div
@@ -240,11 +258,28 @@ export function FileListRow({
   onOpen,
 }: FileTileProps) {
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
+  const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const [downloading, setDownloading] = useState(false);
+  const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
 
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
   const isReady = status === "ready";
+  const isImage = contentType?.startsWith("image/") ?? false;
+
+  useEffect(() => {
+    if (!isImage || !isReady) return;
+    let cancelled = false;
+    getOriginalPlaybackUrl({ videoId })
+      .then(({ url }) => {
+        if (!cancelled) setThumbnailSrc(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isImage, isReady, videoId, getOriginalPlaybackUrl]);
 
   const handleDownload = async () => {
     if (!isReady || downloading) return;
@@ -271,11 +306,29 @@ export function FileListRow({
       className="group flex items-center gap-3 px-3 py-2 border-b border-[#ccc] hover:bg-[#e8e8e0] cursor-pointer"
     >
       <div
-        className="flex-shrink-0 w-9 h-9 flex items-center justify-center border-2 border-[#1a1a1a]"
-        style={{ background: meta.tileBg }}
+        className="flex-shrink-0 w-9 h-9 flex items-center justify-center border-2 border-[#1a1a1a] overflow-hidden"
+        style={{ background: meta.tileBg, cursor: thumbnailSrc ? "zoom-in" : undefined }}
+        onMouseEnter={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
+        onMouseMove={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setHoverPos(null)}
       >
-        <Icon className="h-5 w-5" style={{ color: meta.iconColor }} strokeWidth={1.5} />
+        {thumbnailSrc ? (
+          <img src={thumbnailSrc} alt={title} className="h-full w-full object-cover" />
+        ) : (
+          <Icon className="h-5 w-5" style={{ color: meta.iconColor }} strokeWidth={1.5} />
+        )}
       </div>
+      {hoverPos && thumbnailSrc ? (
+        <div
+          className="fixed z-[80] pointer-events-none border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[6px_6px_0px_0px_var(--shadow-color)] p-1"
+          style={{
+            left: Math.min(hoverPos.x + 18, window.innerWidth - 380),
+            top: Math.min(hoverPos.y + 18, window.innerHeight - 380),
+          }}
+        >
+          <img src={thumbnailSrc} alt={title} className="block max-w-[360px] max-h-[360px] object-contain" />
+        </div>
+      ) : null}
       <div className="flex-1 min-w-0">
         <div className="font-bold text-sm text-[#1a1a1a] truncate">{title}</div>
         <div className="text-[11px] text-[#888] font-mono">
