@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import { api, DesktopSettings, MountState } from "./api";
 import { useConvexClient, useConvexQuery } from "./useConvex";
@@ -64,6 +64,19 @@ export function App() {
   }, [settings]);
 
   const storageReady = Boolean(settings?.storage.bucket && settings?.storage.accessKeyId);
+
+  // Auto-mount once on first configure. On later launches the main process
+  // handles this (autoMount defaults on); the startMount guard makes a double
+  // trigger a harmless no-op, so this only matters for the post-pairing session.
+  const autoMountTried = useRef(false);
+  useEffect(() => {
+    if (autoMountTried.current) return;
+    if (!storageReady || !settings) return;
+    if (mount && mount.status !== "unmounted") return;
+    autoMountTried.current = true;
+    enableDrive();
+  }, [storageReady, settings, mount, enableDrive]);
+
   const hasManualToken = Boolean(settings?.convexAuthToken);
   const isConfigured = Boolean((isSignedIn || hasManualToken) && storageReady);
 

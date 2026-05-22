@@ -41,10 +41,10 @@ const DEFAULT_SETTINGS = {
     region: "auto",
   },
   rootDir: path.join(app.getPath("home"), "VideoInfra"),
-  // Mount on app launch if the previous session was mounted. Set to true
-  // whenever the user clicks "Mount" and false on explicit "Unmount" so the
-  // app respects intent on next launch.
-  autoMount: false,
+  // The drive is meant to "just be there", so we default to auto-mounting on
+  // launch once storage is configured. Set back to false on an explicit
+  // "Disconnect" so the app respects that intent on the next launch.
+  autoMount: true,
   features: DEFAULT_FEATURES,
 };
 
@@ -852,7 +852,7 @@ function startRcloneCacheServe(port) {
     "--vv",
   ];
   try {
-    lanCacheState.cacheServeChild = spawn("rclone", args, {
+    lanCacheState.cacheServeChild = spawn(resolveRclonePath() || "rclone", args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (err) {
@@ -1110,23 +1110,104 @@ function commandExists(cmd) {
   }
 }
 
+// ── rclone provisioning ──────────────────────────────────────────────────────
+//
+// snip manages rclone itself so the user never installs it manually. We do NOT
+// bundle it inside the .app — a notarized, hardened-runtime bundle would reject
+// an unsigned helper binary. Instead we resolve it in priority order and, if
+// absent, download the matching build into userData/bin on first mount. That
+// directory is outside the signed bundle, so notarization is unaffected.
+
+const RCLONE_BIN = process.platform === "win32" ? "rclone.exe" : "rclone";
+
+function resolveRclonePath() {
+  // 1. A bundled copy, if a future build ever ships one (signed).
+  if (process.resourcesPath) {
+    const bundled = path.join(process.resourcesPath, RCLONE_BIN);
+    if (fssync.existsSync(bundled)) return bundled;
+  }
+  // 2. Our own provisioned copy.
+  const managed = path.join(SETTINGS_DIR, "bin", RCLONE_BIN);
+  if (fssync.existsSync(managed)) return managed;
+  // 3. A system install on PATH.
+  if (commandExists("rclone")) return "rclone";
+  return null;
+}
+
+// Download + unzip the right rclone build into userData/bin. Returns the path.
+// Logs progress to the mount log so the UI shows "Setting up rclone…".
+async function ensureRclone() {
+  const existing = resolveRclonePath();
+  if (existing) return existing;
+
+  const binDir = path.join(SETTINGS_DIR, "bin");
+  await fs.mkdir(binDir, { recursive: true });
+  const dest = path.join(binDir, RCLONE_BIN);
+
+  const arch = process.arch === "arm64" ? "arm64" : "amd64";
+  const os =
+    process.platform === "darwin"
+      ? "osx"
+      : process.platform === "win32"
+        ? "windows"
+        : "linux";
+  const url = `https://downloads.rclone.org/rclone-current-${os}-${arch}.zip`;
+  const zipPath = path.join(binDir, "rclone-download.zip");
+  const tmp = path.join(binDir, "rclone-unzip");
+
+  pushLog(`Setting up rclone (${os}-${arch})…`);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`rclone download failed — HTTP ${resp.status}`);
+  await fs.writeFile(zipPath, Buffer.from(await resp.arrayBuffer()));
+
+  await fs.rm(tmp, { recursive: true, force: true });
+  await fs.mkdir(tmp, { recursive: true });
+  // macOS + Linux ship `unzip`; Windows has `tar` (bsdtar) which reads zips.
+  if (process.platform === "win32") {
+    execSync(`tar -xf "${zipPath}" -C "${tmp}"`, { stdio: "pipe" });
+  } else {
+    execSync(`unzip -o "${zipPath}" -d "${tmp}"`, { stdio: "pipe" });
+  }
+
+  // The archive is rclone-vX.Y.Z-<os>-<arch>/rclone.
+  let found = null;
+  for (const d of await fs.readdir(tmp)) {
+    const cand = path.join(tmp, d, RCLONE_BIN);
+    if (fssync.existsSync(cand)) {
+      found = cand;
+      break;
+    }
+  }
+  if (!found) throw new Error("rclone binary not found in downloaded archive");
+
+  await fs.copyFile(found, dest);
+  await fs.chmod(dest, 0o755);
+  await fs.rm(tmp, { recursive: true, force: true });
+  await fs.rm(zipPath, { force: true });
+  pushLog("rclone ready.");
+  return dest;
+}
+
 function checkMountPrereqs() {
   const isMac = process.platform === "darwin";
   const isWin = process.platform === "win32";
   return {
     platform: process.platform,
-    rclone: commandExists("rclone"),
-    // macFUSE on macOS, WinFsp on Windows, kernel FUSE elsewhere.
+    // snip provisions rclone automatically (resolveRclonePath / ensureRclone),
+    // so it's never a manual prerequisite — report it as handled.
+    rclone: true,
+    // macFUSE on macOS, WinFsp on Windows, kernel FUSE elsewhere. This is the
+    // one thing snip can't auto-install (kernel extension / driver).
     fuse: isMac
       ? fssync.existsSync("/Library/Filesystems/macfuse.fs")
       : isWin
         ? fssync.existsSync("C:\\Program Files (x86)\\WinFsp")
         : true,
     installHint: isMac
-      ? "brew install rclone macfuse  (then approve macFUSE in System Settings → Privacy & Security)"
+      ? "Install macFUSE (brew install macfuse), then approve it in System Settings → Privacy & Security. snip sets up rclone for you."
       : isWin
-        ? "winget install Rclone.Rclone  +  install WinFsp from winfsp.dev"
-        : "Install rclone via your package manager.",
+        ? "Install WinFsp from winfsp.dev. snip sets up rclone for you."
+        : "Install a FUSE driver via your package manager. snip sets up rclone for you.",
   };
 }
 
@@ -1156,10 +1237,11 @@ async function startMount({ mountPath } = {}) {
       "Storage credentials incomplete — fill in bucket, endpoint, access key, secret in Settings.",
     );
   }
-  const prereqs = checkMountPrereqs();
-  if (!prereqs.rclone || !prereqs.fuse) {
+  // rclone is auto-provisioned (below); only the FUSE driver is a hard,
+  // user-installed prerequisite.
+  if (!checkMountPrereqs().fuse) {
     throw new Error(
-      `Missing prerequisites — ${!prereqs.rclone ? "rclone " : ""}${!prereqs.fuse ? "FUSE driver " : ""}not found. Install: ${prereqs.installHint}`,
+      `Missing the FUSE driver. ${checkMountPrereqs().installHint}`,
     );
   }
 
@@ -1175,6 +1257,20 @@ async function startMount({ mountPath } = {}) {
   };
   emitMountStatus();
   pushLog(`Mounting ${s.provider}:${s.bucket}/projects → ${targetPath}`);
+
+  // Make sure rclone is available (downloads it on first run). Failures here
+  // surface as a mount error with a clear log line.
+  let rclonePath;
+  try {
+    rclonePath = await ensureRclone();
+  } catch (e) {
+    mountState.status = "error";
+    mountState.lastError =
+      "Couldn't set up rclone — " + (e instanceof Error ? e.message : String(e));
+    pushLog(mountState.lastError);
+    emitMountStatus();
+    throw e;
+  }
 
   // Env-based rclone config. No file is written; rclone reads
   // RCLONE_CONFIG_<NAME>_<FIELD> at runtime. We use the remote name
@@ -1329,7 +1425,7 @@ async function startMount({ mountPath } = {}) {
   ];
 
   try {
-    mountChild = spawn("rclone", args, { env });
+    mountChild = spawn(rclonePath, args, { env });
   } catch (e) {
     mountState.status = "error";
     mountState.lastError = e instanceof Error ? e.message : String(e);
@@ -1990,9 +2086,10 @@ async function tryAutoMount() {
       console.log("autoMount skipped: storage credentials incomplete");
       return;
     }
-    const prereqs = checkMountPrereqs();
-    if (!prereqs.rclone || !prereqs.fuse) {
-      console.log("autoMount skipped: missing rclone or FUSE");
+    // rclone is auto-provisioned by startMount; only the FUSE driver gates
+    // auto-mount (we can't silently install a kernel extension).
+    if (!checkMountPrereqs().fuse) {
+      console.log("autoMount skipped: FUSE driver not installed");
       return;
     }
     // Defer slightly so the window is up and the renderer is listening
