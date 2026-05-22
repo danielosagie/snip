@@ -4,6 +4,14 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Detection flag for the web app: when running inside the desktop shell it can
+// surface native-only affordances (the cloud drive) and route uploads/opens
+// through window.api instead of the browser.
+contextBridge.exposeInMainWorld("snipDesktop", {
+  isDesktop: true,
+  platform: process.platform,
+});
+
 contextBridge.exposeInMainWorld("api", {
   app: {
     version: () => ipcRenderer.invoke("app:version"),

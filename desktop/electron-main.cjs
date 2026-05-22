@@ -9,8 +9,12 @@ const { spawn, execSync, execFile } = require("node:child_process");
 const crypto = require("node:crypto");
 const zlib = require("node:zlib");
 
-const DEV_URL = "http://localhost:5300";
-const PROD_INDEX = path.join(__dirname, "dist/index.html");
+// The desktop is a thin native shell around the WEB app — it loads
+// snipfilm.vercel.app directly (real https origin, so Clerk + Convex behave
+// exactly like the browser) and exposes native capabilities (mount, file
+// open/reveal, auto-update) to it via the preload bridge. No separate desktop
+// UI to maintain. Override with SNIP_WEB_URL for staging / local web dev.
+const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://snipfilm.vercel.app").replace(/\/$/, "");
 
 const SETTINGS_DIR = path.join(app.getPath("userData"));
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
@@ -2286,12 +2290,32 @@ function createWindow() {
     },
   });
 
+  mainWindow.loadURL(WEB_APP_URL);
   if (!app.isPackaged && process.env.NODE_ENV !== "production") {
-    mainWindow.loadURL(DEV_URL);
     mainWindow.webContents.openDevTools({ mode: "detach" });
-  } else {
-    mainWindow.loadFile(PROD_INDEX);
   }
+
+  // Keep the window on our web app. External links (Stripe, docs, OAuth popups
+  // we don't host) open in the user's real browser instead of navigating the
+  // app shell away — which would also strip the native bridge.
+  const isOurApp = (url) => {
+    try {
+      return new URL(url).origin === new URL(WEB_APP_URL).origin;
+    } catch {
+      return false;
+    }
+  };
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!isOurApp(url)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isOurApp(url)) return { action: "allow" };
+    void shell.openExternal(url);
+    return { action: "deny" };
+  });
 
   // Allow opening DevTools in the packaged build for diagnosis (⌘⌥I / Ctrl+Shift+I).
   mainWindow.webContents.on("before-input-event", (_event, input) => {
