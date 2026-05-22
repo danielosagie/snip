@@ -607,6 +607,15 @@ export default function SharePage() {
   const handleDownload = useCallback(async () => {
     if (!grantToken || isDownloading) return;
 
+    // Bundles have no single downloadable target — the server resolves a video
+    // by `itemVideoId`. Calling without one throws "Video not found". Require an
+    // active item first. (Phase 4 replaces this with a multi-item download
+    // sheet.)
+    if (isBundle && !activeItemId) {
+      setDownloadError("Open an item first, then download it.");
+      return;
+    }
+
     setDownloadError(null);
     setIsDownloading(true);
     try {
@@ -625,7 +634,7 @@ export default function SharePage() {
     } finally {
       setIsDownloading(false);
     }
-  }, [getDownloadUrl, grantToken, isDownloading]);
+  }, [getDownloadUrl, grantToken, isDownloading, isBundle, activeItemId]);
 
   const isBootstrappingShare =
     shareInfo === undefined ||
@@ -782,8 +791,19 @@ export default function SharePage() {
             variant="outline"
             size="sm"
             onClick={() => void handleDownload()}
-            disabled={!grantToken || isDownloading || !downloadAllowed}
-            title={!downloadAllowed ? "Pay to unlock download" : undefined}
+            disabled={
+              !grantToken ||
+              isDownloading ||
+              !downloadAllowed ||
+              (isBundle && !activeItemId)
+            }
+            title={
+              !downloadAllowed
+                ? "Pay to unlock download"
+                : isBundle && !activeItemId
+                  ? "Open an item to download it"
+                  : undefined
+            }
           >
             <Download className="h-4 w-4" />
             {isDownloading ? "Preparing..." : "Download"}

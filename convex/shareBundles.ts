@@ -26,6 +26,39 @@ async function requireBundleAccess(
 }
 
 /**
+ * Returns the given folder id plus every descendant folder id (depth-first
+ * over `folders.by_project_and_parent`). Cycle-guarded with a visited set so a
+ * corrupt parent chain can't loop forever.
+ */
+async function collectFolderSubtree(
+  ctx: ReadCtx,
+  projectId: Id<"projects">,
+  rootFolderId: Id<"folders">,
+): Promise<Id<"folders">[]> {
+  const visited = new Set<string>([rootFolderId]);
+  const out: Id<"folders">[] = [rootFolderId];
+  const queue: Id<"folders">[] = [rootFolderId];
+
+  while (queue.length > 0) {
+    const parentId = queue.shift()!;
+    const children = await ctx.db
+      .query("folders")
+      .withIndex("by_project_and_parent", (q) =>
+        q.eq("projectId", projectId).eq("parentFolderId", parentId),
+      )
+      .collect();
+    for (const child of children) {
+      if (visited.has(child._id)) continue;
+      visited.add(child._id);
+      out.push(child._id);
+      queue.push(child._id);
+    }
+  }
+
+  return out;
+}
+
+/**
  * Resolves the videos currently in a bundle. For folder bundles this is a
  * live query — new uploads appear automatically. For selection bundles this
  * is the frozen list, filtering out soft-deleted rows.
@@ -36,11 +69,27 @@ export async function resolveBundleVideos(
 ): Promise<Doc<"videos">[]> {
   if (bundle.kind === "folder") {
     if (!bundle.folderId) return [];
-    const inFolder = await ctx.db
-      .query("videos")
-      .withIndex("by_folder", (q) => q.eq("folderId", bundle.folderId))
-      .collect();
-    return inFolder.filter((v) => !v.deletedAt && v.isCurrentVersion !== false);
+    // Resolve the folder AND every descendant subfolder (BFS), then collect
+    // videos across all of them. A shared folder is expected to behave like the
+    // real folder: nested subfolders and their files come along. Without this,
+    // a folder whose assets live in subfolders resolves to zero items — which
+    // also broke share-page downloads (no itemVideoId → "Video not found").
+    const folderIds = await collectFolderSubtree(
+      ctx,
+      bundle.projectId,
+      bundle.folderId,
+    );
+    const collected: Doc<"videos">[] = [];
+    for (const folderId of folderIds) {
+      const inFolder = await ctx.db
+        .query("videos")
+        .withIndex("by_folder", (q) => q.eq("folderId", folderId))
+        .collect();
+      collected.push(...inFolder);
+    }
+    return collected.filter(
+      (v) => !v.deletedAt && v.isCurrentVersion !== false,
+    );
   }
 
   if (bundle.kind === "project") {
