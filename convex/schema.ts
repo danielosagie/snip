@@ -400,6 +400,12 @@ export default defineSchema({
     ),
     folderId: v.optional(v.id("folders")),
     videoIds: v.optional(v.array(v.id("videos"))),
+    // Notion-style per-share header. Optional; set via shareBundles.setHeader.
+    // coverImageS3Key points at a private bucket object served through a signed
+    // URL on the share page.
+    coverImageS3Key: v.optional(v.string()),
+    headerTitle: v.optional(v.string()),
+    headerDescription: v.optional(v.string()),
     createdByClerkId: v.string(),
     createdByName: v.string(),
   })

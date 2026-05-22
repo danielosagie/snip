@@ -242,6 +242,38 @@ export const get = query({
   },
 });
 
+/**
+ * Sets the per-share Notion-style header (title, description, cover image).
+ * Owner/member only. Pass `coverImageS3Key: null` to clear the cover; the key
+ * itself is produced by `videoActions.getBundleCoverUploadUrl` after the client
+ * uploads the file via the returned presigned URL. Empty title/description
+ * strings clear those fields.
+ */
+export const setHeader = mutation({
+  args: {
+    bundleId: v.id("shareBundles"),
+    headerTitle: v.optional(v.string()),
+    headerDescription: v.optional(v.string()),
+    coverImageS3Key: v.optional(v.union(v.string(), v.null())),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireBundleAccess(ctx, args.bundleId, "member");
+    const patch: Partial<Doc<"shareBundles">> = {};
+    if (args.headerTitle !== undefined) {
+      patch.headerTitle = args.headerTitle.trim() || undefined;
+    }
+    if (args.headerDescription !== undefined) {
+      patch.headerDescription = args.headerDescription.trim() || undefined;
+    }
+    if (args.coverImageS3Key !== undefined) {
+      patch.coverImageS3Key = args.coverImageS3Key ?? undefined;
+    }
+    await ctx.db.patch(args.bundleId, patch);
+    return null;
+  },
+});
+
 /** Public-facing bundle resolver for the share page. Returns the bundle
  * metadata plus a thin per-item view (no playback URLs — those come from
  * `videoActions.getSharedPaywalledPlayback` keyed on grantToken + itemId).

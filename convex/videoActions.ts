@@ -391,6 +391,65 @@ export const getUploadUrl = action({
   },
 });
 
+/**
+ * Presigned PUT URL for a share bundle's cover image (Notion-style header).
+ * Owner/member only — verified via shareBundles.get, which throws for
+ * non-members. The client uploads the file to the returned URL, then calls
+ * shareBundles.setHeader with the returned `key`.
+ */
+export const getBundleCoverUploadUrl = action({
+  args: {
+    bundleId: v.id("shareBundles"),
+    filename: v.string(),
+    contentType: v.string(),
+    fileSize: v.number(),
+  },
+  returns: v.object({
+    url: v.string(),
+    key: v.string(),
+  }),
+  handler: async (ctx, args): Promise<{ url: string; key: string }> => {
+    // Throws "Bundle not found" / access error for non-members.
+    await ctx.runQuery(api.shareBundles.get, { bundleId: args.bundleId });
+
+    if (!args.contentType.startsWith("image/")) {
+      throw new Error("Cover image must be an image file.");
+    }
+    if (args.fileSize > 10 * 1024 * 1024) {
+      throw new Error("Cover image must be under 10 MB.");
+    }
+
+    const s3 = getS3Client();
+    const ext = getExtensionFromKey(args.filename, "jpg");
+    const key = `shareBundles/${args.bundleId}/cover-${Date.now()}.${ext}`;
+    const command = new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      ContentType: args.contentType,
+    });
+    const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+    return { url, key };
+  },
+});
+
+/**
+ * Grant-gated signed read URL for a bundle's cover image. Returns null when the
+ * share has no cover. The S3 key is resolved server-side from the grant so a
+ * viewer can never sign an arbitrary object.
+ */
+export const getSharedBundleCover = action({
+  args: { grantToken: v.string() },
+  returns: v.object({ url: v.union(v.string(), v.null()) }),
+  handler: async (ctx, args): Promise<{ url: string | null }> => {
+    const key = await ctx.runQuery(internal.videos.getBundleCoverKeyByGrant, {
+      grantToken: args.grantToken,
+    });
+    if (!key) return { url: null };
+    const url = await buildSignedBucketObjectUrl(key, { expiresIn: 3600 });
+    return { url };
+  },
+});
+
 export const markUploadComplete = action({
   args: {
     videoId: v.id("videos"),

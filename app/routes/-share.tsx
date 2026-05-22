@@ -20,6 +20,7 @@ import {
   useAntiPiracyDefenses,
 } from "@/components/share/ShareWatermarkOverlay";
 import { ShareFolderBrowser } from "@/components/share/ShareFolderBrowser";
+import { ShareHeader } from "@/components/share/ShareHeader";
 
 function formatPrice(cents: number, currency: string): string {
   try {
@@ -50,6 +51,7 @@ export default function SharePage() {
   );
   const simulatePayment = useMutation(api.demoSeed.simulatePaymentForGrant);
   const getDownloadUrl = useAction(api.videoActions.getSharedDownloadUrl);
+  const getBundleCover = useAction(api.videoActions.getSharedBundleCover);
   const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
 
   const [grantToken, setGrantToken] = useState<string | null>(null);
@@ -99,6 +101,9 @@ export default function SharePage() {
   const [replyError, setReplyError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // Per-share header cover (signed S3 URL, fetched via action when hasCover).
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverReload, setCoverReload] = useState(0);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const playerSectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -181,6 +186,27 @@ export default function SharePage() {
   useEffect(() => {
     setActiveItemId(null);
   }, [token]);
+
+  // Fetch the signed cover URL for the per-share header when the bundle has a
+  // cover. Re-runs on coverReload (bumped by the owner editor after a change).
+  const bundleHasCover = Boolean(summary?.bundle?.hasCover);
+  useEffect(() => {
+    if (!grantToken || !isBundle || !bundleHasCover) {
+      setCoverUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void getBundleCover({ grantToken })
+      .then((r) => {
+        if (!cancelled) setCoverUrl(r.url);
+      })
+      .catch(() => {
+        if (!cancelled) setCoverUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [grantToken, isBundle, bundleHasCover, coverReload, getBundleCover]);
 
   const canTrackPresence = Boolean(playbackSession?.url && videoData?.video?._id);
   const { watchers } = useVideoPresence({
@@ -841,22 +867,40 @@ export default function SharePage() {
           </div>
         ) : null}
 
-        <div>
-          <h1 className="text-2xl font-black text-[#1a1a1a]">{headerTitle}</h1>
-          {headerDescription ? (
-            <p className="text-[#888] mt-1">{headerDescription}</p>
-          ) : null}
-          <div className="flex items-center gap-4 mt-2 text-sm text-[#888]">
-            {isBundle && video?.title ? (
-              <span className="font-mono text-[#1a1a1a]">{video.title}</span>
-            ) : null}
-            {video?.duration ? (
-              <span className="font-mono">{formatDuration(video.duration)}</span>
-            ) : null}
-            {comments && <span>{comments.length} threads</span>}
-            <VideoWatchers watchers={watchers} className="ml-auto" />
+        {isBundle && summary?.bundle?._id ? (
+          <div className="space-y-3">
+            <ShareHeader
+              bundleId={summary.bundle._id}
+              bundleName={summary.bundle.name ?? "Shared files"}
+              headerTitle={summary.bundle.headerTitle ?? null}
+              headerDescription={summary.bundle.headerDescription ?? null}
+              coverUrl={coverUrl}
+              isOwner={isOwner}
+              onCoverChanged={() => setCoverReload((n) => n + 1)}
+            />
+            <div className="flex items-center gap-4 text-sm text-[#888]">
+              {video?.title ? (
+                <span className="font-mono text-[#1a1a1a]">{video.title}</span>
+              ) : null}
+              {comments && <span>{comments.length} threads</span>}
+              <VideoWatchers watchers={watchers} className="ml-auto" />
+            </div>
           </div>
-        </div>
+        ) : (
+          <div>
+            <h1 className="text-2xl font-black text-[#1a1a1a]">{headerTitle}</h1>
+            {headerDescription ? (
+              <p className="text-[#888] mt-1">{headerDescription}</p>
+            ) : null}
+            <div className="flex items-center gap-4 mt-2 text-sm text-[#888]">
+              {video?.duration ? (
+                <span className="font-mono">{formatDuration(video.duration)}</span>
+              ) : null}
+              {comments && <span>{comments.length} threads</span>}
+              <VideoWatchers watchers={watchers} className="ml-auto" />
+            </div>
+          </div>
+        )}
 
         {isBundle ? (
           <ShareFolderBrowser

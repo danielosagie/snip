@@ -1643,6 +1643,11 @@ export const getShareSummaryByGrant = query({
           _id: bundle._id,
           name: bundle.name,
           kind: bundle.kind,
+          // Notion-style per-share header. The cover URL is signed separately
+          // via videoActions.getSharedBundleCover (private bucket object).
+          headerTitle: bundle.headerTitle ?? null,
+          headerDescription: bundle.headerDescription ?? null,
+          hasCover: Boolean(bundle.coverImageS3Key),
           // null = the share root. Folders below carry their own ids.
           rootFolderId,
           // The root folder itself is represented as null, so exclude it here.
@@ -1684,6 +1689,22 @@ export const getShareSummaryByGrant = query({
     }
 
     return null;
+  },
+});
+
+/**
+ * Resolves a bundle's cover-image S3 key for a given share grant. Internal so
+ * the key is never exposed to clients directly — videoActions.getSharedBundleCover
+ * uses it to mint a short-TTL signed URL.
+ */
+export const getBundleCoverKeyByGrant = internalQuery({
+  args: { grantToken: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args): Promise<string | null> => {
+    const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
+    if (!resolved || !resolved.shareLink.bundleId) return null;
+    const bundle = await ctx.db.get(resolved.shareLink.bundleId);
+    return bundle?.coverImageS3Key ?? null;
   },
 });
 
