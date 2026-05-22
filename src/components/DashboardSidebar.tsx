@@ -219,17 +219,18 @@ export function DashboardSidebar() {
         {/* Desktop app download — separated section above the New project
             button. Sits in its own div so it reads as "tooling you can
             install" rather than another nav item or a peer of project
-            creation. `/downloads/snip-desktop.dmg` 302-redirects (via
-            vercel.json) to the rolling `desktop-latest` GitHub Release
-            asset — the DMG itself is too large to commit into the repo. */}
+            creation. `/downloads/snip-desktop.pkg` 302-redirects (via
+            vercel.json) to the latest GitHub Release asset. The .pkg is the
+            recommended installer — a guided wizard that also sets up macFUSE
+            so the cloud drive works out of the box. */}
         <div className="px-3 pt-3 pb-1 border-t-2 border-[#1a1a1a]">
           <a
-            href="/downloads/snip-desktop.dmg"
+            href="/downloads/snip-desktop.pkg"
             className="w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors"
-            title="Download snip Desktop for macOS — mount your bucket as a local drive"
+            title="Download snip Desktop for macOS — guided installer that sets up the cloud drive"
           >
             <HardDrive className="h-3.5 w-3.5" />
-            Desktop app · DMG
+            Desktop app · Installer
           </a>
         </div>
 

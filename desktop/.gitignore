@@ -1,0 +1,4 @@
+resources/macfuse.pkg
+release/
+node_modules/
+dist/
