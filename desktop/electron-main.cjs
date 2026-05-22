@@ -2206,11 +2206,13 @@ function setupAutoUpdater() {
     emitUpdateStatus();
   });
   autoUpdater.on("error", (err) => {
-    updateState = {
-      ...updateState,
-      status: "error",
-      error: err?.message ?? String(err),
-    };
+    const raw = err?.message ?? String(err);
+    // Translate Squirrel's read-only-volume wall of text into one actionable
+    // line. (The move-to-Applications prompt prevents this for fresh installs.)
+    const friendly = /read-only volume/i.test(raw)
+      ? "Move snip to your Applications folder to enable updates (it's running from the disk image or Downloads)."
+      : raw;
+    updateState = { ...updateState, status: "error", error: friendly };
     emitUpdateStatus();
   });
 
@@ -2303,7 +2305,40 @@ function createWindow() {
   });
 }
 
+// macOS auto-update (Squirrel) can't replace the app bundle when it runs from a
+// read-only volume — i.e. straight from the DMG, or App-Translocated because it
+// sits in ~/Downloads. Offer to relocate to /Applications (writable) on launch
+// so updates aren't dead on arrival. Returns true if we're relaunching (so the
+// caller skips the rest of startup; the relaunched instance takes over).
+function maybeMoveToApplications() {
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  try {
+    if (app.isInApplicationsFolder()) return false;
+    const choice = dialog.showMessageBoxSync({
+      type: "question",
+      buttons: ["Move to Applications", "Not now"],
+      defaultId: 0,
+      cancelId: 1,
+      message: "Move snip to your Applications folder?",
+      detail:
+        "snip is running from a read-only location (the disk image or your " +
+        "Downloads folder), which blocks automatic updates. Move it to " +
+        "Applications so it can keep itself up to date.",
+    });
+    if (choice === 0) {
+      // Relaunches from /Applications and quits this instance on success.
+      return app.moveToApplicationsFolder();
+    }
+  } catch (e) {
+    console.error("move-to-Applications check failed", e);
+  }
+  return false;
+}
+
 app.whenReady().then(() => {
+  // If we relocate + relaunch from /Applications, stop here; the new instance
+  // boots fresh.
+  if (maybeMoveToApplications()) return;
   createWindow();
   // Only run the updater in packaged (signed) builds — dev has no release feed.
   if (app.isPackaged) setupAutoUpdater();
