@@ -16,7 +16,7 @@ export function App() {
   const [mount, setMount] = useState<MountState | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
 
-  const { isLoaded: clerkLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded: clerkLoaded, isSignedIn, getToken, signOut } = useAuth();
 
   useEffect(() => {
     void api.settings.get().then(setSettings);
@@ -76,6 +76,25 @@ export function App() {
       // Surfaced via the mount status chip / Settings → Drive.
     });
   }, [settings]);
+
+  // Sign out: clear the saved token so the app drops back to pairing, then end
+  // the Clerk session. This is also the recovery path if auth gets into a bad
+  // state (returns to the Connect screen to re-pair).
+  const handleSignOut = useCallback(async () => {
+    try {
+      if (settings) {
+        const saved = await api.settings.set({ ...settings, convexAuthToken: "" });
+        setSettings(saved);
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      await signOut();
+    } catch {
+      // ignore
+    }
+  }, [settings, signOut]);
 
   const storageReady = Boolean(settings?.storage.bucket && settings?.storage.accessKeyId);
 
@@ -141,6 +160,7 @@ export function App() {
         mount={mount}
         onEnableDrive={enableDrive}
         onOpenSearch={() => setSearchOpen(true)}
+        onSignOut={() => void handleSignOut()}
       />
       <CommandPalette
         client={client}

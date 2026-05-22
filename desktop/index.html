@@ -113,6 +113,44 @@
       button.ghost:active:not(:disabled) {
         transform: none;
       }
+      /* Flat = a control that should NOT read as a brutalist button: no
+         shadow, no press-down. Keeps its own border (e.g. the search bar). */
+      button.flat {
+        box-shadow: none;
+      }
+      button.flat:hover:not(:disabled),
+      button.flat:active:not(:disabled) {
+        transform: none;
+        box-shadow: none;
+      }
+      /* Nav row = sidebar navigation item. Plain text row, subtle hover fill,
+         dark fill when active. Mirrors the web sidebar (not a button look). */
+      button.nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        text-align: left;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 7px 8px;
+        border: 2px solid transparent;
+        background: transparent;
+        color: var(--fg);
+        box-shadow: none;
+      }
+      button.nav:hover:not(:disabled) {
+        transform: none;
+        box-shadow: none;
+        background: var(--cell);
+      }
+      button.nav:active:not(:disabled) {
+        transform: none;
+      }
+      button.nav.active {
+        background: var(--fg);
+        color: var(--bg);
+      }
       code,
       pre,
       .mono {
