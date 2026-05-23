@@ -270,6 +270,8 @@ export default defineSchema({
     fileSize: v.optional(v.number()),
     contentType: v.optional(v.string()),
     uploadError: v.optional(v.string()),
+    // Free-form tags (bulk-editable). Optional; absent = no tags.
+    tags: v.optional(v.array(v.string())),
     status: v.union(
       v.literal("uploading"),
       v.literal("processing"),

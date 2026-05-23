@@ -19,12 +19,16 @@ import {
   Copy,
   FolderInput,
   CheckSquare,
+  Pencil,
+  Tags,
 } from "lucide-react";
 import { FileTile, FileListRow } from "@/components/files/FileTile";
 import {
   ContextMenu,
   type ContextMenuEntry,
 } from "@/components/ui/context-menu";
+import { BulkRenameDialog } from "@/components/videos/BulkRenameDialog";
+import { BulkEditMetadataDialog } from "@/components/videos/BulkEditMetadataDialog";
 import { VideoKanban } from "@/components/videos/VideoKanban";
 import { VersionDropdown } from "@/components/projects/VersionDropdown";
 import {
@@ -253,6 +257,8 @@ export default function ProjectPage({
   // header "Select" button so the multi-select shortcuts are discoverable.
   const [selectionMode, setSelectionMode] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
+  const [bulkMetaOpen, setBulkMetaOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState<null | string>(null);
 
   const clearSelection = useCallback(() => {
@@ -492,6 +498,16 @@ export default function ProjectPage({
           icon: <FolderInput className="h-4 w-4" />,
           onSelect: () => setMoveOpen(true),
         },
+        {
+          label: `Rename ${n}…`,
+          icon: <Pencil className="h-4 w-4" />,
+          onSelect: () => setBulkRenameOpen(true),
+        },
+        {
+          label: "Edit metadata…",
+          icon: <Tags className="h-4 w-4" />,
+          onSelect: () => setBulkMetaOpen(true),
+        },
         { type: "separator" },
         {
           label: `Move ${n} to trash`,
@@ -524,6 +540,22 @@ export default function ProjectPage({
         onSelect: () => {
           setSelectedVideoIds(new Set([video._id]));
           setMoveOpen(true);
+        },
+      },
+      {
+        label: "Rename…",
+        icon: <Pencil className="h-4 w-4" />,
+        onSelect: () => {
+          setSelectedVideoIds(new Set([video._id]));
+          setBulkRenameOpen(true);
+        },
+      },
+      {
+        label: "Edit metadata…",
+        icon: <Tags className="h-4 w-4" />,
+        onSelect: () => {
+          setSelectedVideoIds(new Set([video._id]));
+          setBulkMetaOpen(true);
         },
       },
       { type: "separator" },
@@ -712,6 +744,15 @@ export default function ProjectPage({
     [selectedVideoIds],
   );
 
+  // {_id, title} for the selected videos — needed by the bulk rename preview.
+  const selectedRenameItems = useMemo(
+    () =>
+      (filteredVideos ?? [])
+        .filter((v) => selectedVideoIds.has(v._id))
+        .map((v) => ({ _id: v._id, title: v.title })),
+    [filteredVideos, selectedVideoIds],
+  );
+
   const filteredFolders = useMemo(() => {
     if (!folders) return folders;
     const q = search.trim().toLowerCase();
@@ -813,6 +854,24 @@ export default function ProjectPage({
           <button
             type="button"
             disabled={Boolean(bulkBusy)}
+            onClick={() => setBulkRenameOpen(true)}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+          >
+            <Pencil className="inline h-3.5 w-3.5 mr-1" />
+            Rename
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkBusy)}
+            onClick={() => setBulkMetaOpen(true)}
+            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+          >
+            <Tags className="inline h-3.5 w-3.5 mr-1" />
+            Metadata
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkBusy)}
             onClick={() => void handleBulkDelete()}
             className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#dc2626] hover:border-[#dc2626] disabled:opacity-40"
           >
@@ -846,6 +905,20 @@ export default function ProjectPage({
         open={moveOpen}
         onOpenChange={setMoveOpen}
         onConfirm={handleBulkMove}
+      />
+
+      <BulkRenameDialog
+        open={bulkRenameOpen}
+        onOpenChange={setBulkRenameOpen}
+        items={selectedRenameItems}
+        onDone={clearSelection}
+      />
+
+      <BulkEditMetadataDialog
+        open={bulkMetaOpen}
+        onOpenChange={setBulkMetaOpen}
+        videoIds={selectedVideoIdsArray}
+        onDone={clearSelection}
       />
 
       {/* Header \u2014 breadcrumb skips the team-slug stage. Single-team users

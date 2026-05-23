@@ -586,6 +586,127 @@ export const update = mutation({
 });
 
 /**
+ * Bulk rename — set a new title on each of several videos in one call. The
+ * client computes the new titles (Add Text / Replace / Format) and previews
+ * them; we just persist + reindex. Per-item access check (member role).
+ */
+export const bulkSetTitles = mutation({
+  args: {
+    items: v.array(
+      v.object({ videoId: v.id("videos"), title: v.string() }),
+    ),
+  },
+  returns: v.object({ updated: v.number() }),
+  handler: async (ctx, args): Promise<{ updated: number }> => {
+    let updated = 0;
+    for (const item of args.items) {
+      const title = item.title.trim();
+      if (!title) continue;
+      const { video, project } = await requireVideoAccess(
+        ctx,
+        item.videoId,
+        "member",
+      );
+      await ctx.db.patch(item.videoId, { title });
+      try {
+        await indexSearchable(ctx, {
+          kind: "video",
+          refId: item.videoId,
+          teamId: project.teamId,
+          projectId: video.projectId,
+          videoId: item.videoId,
+          title,
+          contextLabel: `${project.name} · ${video.contentType ?? "file"}`,
+          text: `${title} ${video.description ?? ""}`,
+        });
+      } catch (e) {
+        console.error("search index (bulk rename) failed", e);
+      }
+      updated += 1;
+    }
+    return { updated };
+  },
+});
+
+/**
+ * Bulk metadata edit across a selection. Only the provided fields change:
+ *  • workflowStatus — set the review status
+ *  • description    — set the description (non-empty)
+ *  • tags           — replace, or merge (appendTags) with existing unique tags
+ * Per-item access check (member role); search index is refreshed.
+ */
+export const bulkEditMetadata = mutation({
+  args: {
+    videoIds: v.array(v.id("videos")),
+    workflowStatus: v.optional(
+      v.union(v.literal("review"), v.literal("rework"), v.literal("done")),
+    ),
+    description: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    appendTags: v.optional(v.boolean()),
+  },
+  returns: v.object({ updated: v.number() }),
+  handler: async (ctx, args): Promise<{ updated: number }> => {
+    const cleanTags = args.tags
+      ? Array.from(
+          new Set(
+            args.tags.map((t) => t.trim()).filter((t) => t.length > 0),
+          ),
+        )
+      : undefined;
+
+    let updated = 0;
+    for (const videoId of args.videoIds) {
+      const { video, project } = await requireVideoAccess(
+        ctx,
+        videoId,
+        "member",
+      );
+
+      const patch: Partial<Doc<"videos">> = {};
+      if (args.workflowStatus !== undefined) {
+        patch.workflowStatus = args.workflowStatus;
+      }
+      if (args.description !== undefined && args.description.trim().length > 0) {
+        patch.description = args.description.trim();
+      }
+      if (cleanTags !== undefined) {
+        if (args.appendTags) {
+          patch.tags = Array.from(
+            new Set([...(video.tags ?? []), ...cleanTags]),
+          );
+        } else {
+          patch.tags = cleanTags;
+        }
+      }
+
+      if (Object.keys(patch).length === 0) continue;
+      await ctx.db.patch(videoId, patch);
+
+      try {
+        const title = video.title;
+        const description = patch.description ?? video.description ?? "";
+        const tags = (patch.tags ?? video.tags ?? []).join(" ");
+        await indexSearchable(ctx, {
+          kind: "video",
+          refId: videoId,
+          teamId: project.teamId,
+          projectId: video.projectId,
+          videoId,
+          title,
+          contextLabel: `${project.name} · ${video.contentType ?? "file"}`,
+          text: `${title} ${description} ${tags}`.trim(),
+        });
+      } catch (e) {
+        console.error("search index (bulk metadata) failed", e);
+      }
+      updated += 1;
+    }
+    return { updated };
+  },
+});
+
+/**
  * Backfill helper — older video rows pre-date the lineage fields. When we
  * first touch a row's lineage, we patch it so it's self-rooted as v1 +
  * current. Idempotent and cheap.
