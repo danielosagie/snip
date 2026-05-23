@@ -4,7 +4,6 @@ import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { DropZone } from "@/components/upload/DropZone";
-import { UploadButton } from "@/components/upload/UploadButton";
 import { formatDuration, formatRelativeTime } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
 import {
@@ -47,7 +46,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Id } from "@convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
-import { teamHomePath, videoPath } from "@/lib/routes";
+import { videoPath } from "@/lib/routes";
 import { prefetchHlsRuntime, prefetchMuxPlaybackManifest } from "@/lib/muxPlayback";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import {
@@ -55,7 +54,6 @@ import {
   type VideoWorkflowStatus,
 } from "@/components/videos/VideoWorkflowStatusControl";
 import { useProjectData } from "./-project.data";
-import { prewarmTeam } from "./-team.data";
 import { prewarmVideo } from "./-video.data";
 import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
 import { DashboardHeader } from "@/components/DashboardHeader";
@@ -210,7 +208,6 @@ export default function ProjectPage({
 }) {
   const navigate = useNavigate({});
   const pathname = useLocation().pathname;
-  const convex = useConvex();
 
   const currentFolderId = folderId ?? null;
 
@@ -279,9 +276,6 @@ export default function ProjectPage({
 
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
-  const prewarmTeamIntentHandlers = useRoutePrewarmIntent(() =>
-    prewarmTeam(convex, { teamSlug: resolvedTeamSlug }),
-  );
 
   useEffect(() => {
     if (shouldCanonicalize && context) {

@@ -466,6 +466,11 @@ export default defineSchema({
     // share page's version UI. Downloads continue to use `allowDownload`.
     commentsEnabled: v.optional(v.boolean()),
     showAllVersions: v.optional(v.boolean()),
+    // For invite-only links: workspace members of the link's owning team get
+    // in by default (they already have dashboard access to the project). The
+    // owner can turn this off to make the link strictly invite-list-only.
+    // Missing/true → team members allowed; false → invite list only.
+    allowTeamAccess: v.optional(v.boolean()),
   })
     .index("by_token", ["token"])
     .index("by_video", ["videoId"])

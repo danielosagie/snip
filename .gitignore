@@ -48,3 +48,6 @@ yarn-error.log*
 
 # clerk configuration (can include secrets)
 .clerk/
+
+# local benchmarking / cost research scratch
+bench/

@@ -1,7 +1,7 @@
 {
   "name": "snip-desktop",
   "productName": "snip",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "Desktop sync + cloud-mount companion for snip.",
   "main": "electron-main.cjs",
@@ -66,7 +66,7 @@
       {
         "from": "resources",
         "to": ".",
-        "filter": ["**/*", "!icon.icns"]
+        "filter": ["**/*", "!icon.icns", "!pkg-background.png"]
       }
     ],
     "mac": {
@@ -104,7 +104,12 @@
       "isVersionChecked": false,
       "overwriteAction": "upgrade",
       "allowAnywhere": false,
-      "allowCurrentUserHome": false
+      "allowCurrentUserHome": false,
+      "background": {
+        "file": "pkg-background.png",
+        "alignment": "bottomleft",
+        "scaling": "tofit"
+      }
     },
     "dmg": {
       "title": "snip ${version}",

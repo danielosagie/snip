@@ -138,6 +138,26 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
             </>
           )}
         </div>
+        {isInvite ? (
+          <div className="flex items-center justify-between border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
+            <div className="min-w-0 pr-2">
+              <div className="text-sm font-bold">Anyone in this workspace</div>
+              <div className="text-[11px] text-[#888]">
+                Teammates can open this link without an invite, as{" "}
+                {config.defaultRole}.
+              </div>
+            </div>
+            <Toggle
+              on={config.allowTeamAccess}
+              onClick={() =>
+                void setAccess({
+                  linkId,
+                  allowTeamAccess: !config.allowTeamAccess,
+                })
+              }
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* People */}
