@@ -21,6 +21,10 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { FileTile, FileListRow } from "@/components/files/FileTile";
+import {
+  ContextMenu,
+  type ContextMenuEntry,
+} from "@/components/ui/context-menu";
 import { VideoKanban } from "@/components/videos/VideoKanban";
 import { VersionDropdown } from "@/components/projects/VersionDropdown";
 import {
@@ -456,6 +460,94 @@ export default function ProjectPage({
     },
     [updateVideoWorkflowStatus],
   );
+
+  // Right-click context-menu items for a video tile. When the tile is part of a
+  // multi-selection, the actions apply to the whole selection (reusing the
+  // existing bulk handlers); otherwise they act on the single item.
+  const buildVideoMenu = (
+    video: { _id: Id<"videos">; title: string },
+    canDownload: boolean,
+  ): ContextMenuEntry[] => {
+    if (!project) return [];
+    const inSelection = selectedVideoIds.has(video._id);
+    const multi = inSelection && selectedVideoIds.size > 1;
+    const n = selectedVideoIds.size;
+    const open = () =>
+      navigate({ to: videoPath(resolvedTeamSlug, project._id, video._id) });
+
+    if (multi) {
+      return [
+        {
+          label: `Download ${n}`,
+          icon: <Download className="h-4 w-4" />,
+          onSelect: () => void handleBulkDownload(),
+        },
+        {
+          label: `Duplicate ${n}`,
+          icon: <Copy className="h-4 w-4" />,
+          onSelect: () => void handleBulkDuplicate(),
+        },
+        {
+          label: `Move ${n}…`,
+          icon: <FolderInput className="h-4 w-4" />,
+          onSelect: () => setMoveOpen(true),
+        },
+        { type: "separator" },
+        {
+          label: `Move ${n} to trash`,
+          icon: <Trash2 className="h-4 w-4" />,
+          danger: true,
+          onSelect: () => void handleBulkDelete(),
+        },
+      ];
+    }
+
+    return [
+      { label: "Open", icon: <Eye className="h-4 w-4" />, onSelect: open },
+      ...(canDownload
+        ? [
+            {
+              label: "Download",
+              icon: <Download className="h-4 w-4" />,
+              onSelect: () => void handleDownloadVideo(video._id, video.title),
+            } as ContextMenuEntry,
+          ]
+        : []),
+      {
+        label: "Duplicate",
+        icon: <Copy className="h-4 w-4" />,
+        onSelect: () => void duplicateVideo({ videoId: video._id }),
+      },
+      {
+        label: "Move…",
+        icon: <FolderInput className="h-4 w-4" />,
+        onSelect: () => {
+          setSelectedVideoIds(new Set([video._id]));
+          setMoveOpen(true);
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Mark needs review",
+        onSelect: () => void handleUpdateWorkflowStatus(video._id, "review"),
+      },
+      {
+        label: "Mark rework",
+        onSelect: () => void handleUpdateWorkflowStatus(video._id, "rework"),
+      },
+      {
+        label: "Mark done",
+        onSelect: () => void handleUpdateWorkflowStatus(video._id, "done"),
+      },
+      { type: "separator" },
+      {
+        label: "Move to trash",
+        icon: <Trash2 className="h-4 w-4" />,
+        danger: true,
+        onSelect: () => void handleDeleteVideo(video._id),
+      },
+    ];
+  };
 
   const showShareToast = useCallback((tone: ShareToastState["tone"], message: string) => {
     setShareToast({ tone, message });
@@ -1001,8 +1093,11 @@ export default function ProjectPage({
                   projectPresenceCounts?.counts?.[video._id] ?? 0;
 
                 return (
-                  <VideoIntentTarget
+                  <ContextMenu
                     key={video._id}
+                    items={() => buildVideoMenu(video, canDownload)}
+                  >
+                  <VideoIntentTarget
                     className="group cursor-pointer flex flex-col"
                     teamSlug={resolvedTeamSlug}
                     projectId={project._id}
@@ -1131,6 +1226,7 @@ export default function ProjectPage({
                     </div>
                   </div>
                   </VideoIntentTarget>
+                  </ContextMenu>
                 );
               })}
               </div>
@@ -1209,8 +1305,11 @@ export default function ProjectPage({
                 projectPresenceCounts?.counts?.[video._id] ?? 0;
 
               return (
-                <VideoIntentTarget
+                <ContextMenu
                   key={video._id}
+                  items={() => buildVideoMenu(video, canDownload)}
+                >
+                <VideoIntentTarget
                   className="group flex items-center gap-5 px-6 py-3 hover:bg-[#e8e8e0] cursor-pointer transition-colors"
                   teamSlug={resolvedTeamSlug}
                   projectId={project._id}
@@ -1345,6 +1444,7 @@ export default function ProjectPage({
                   </DropdownMenu>
                 </div>
                 </VideoIntentTarget>
+                </ContextMenu>
               );
             })}
             </div>
