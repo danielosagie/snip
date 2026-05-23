@@ -22,6 +22,10 @@ import {
 import { ShareFolderBrowser } from "@/components/share/ShareFolderBrowser";
 import { ShareHeader } from "@/components/share/ShareHeader";
 import { ShareDownloadSheet } from "@/components/share/ShareDownloadSheet";
+import {
+  ShareItemMetadata,
+  type ShareItemMeta,
+} from "@/components/share/ShareItemMetadata";
 
 function formatPrice(cents: number, currency: string): string {
   try {
@@ -106,6 +110,7 @@ export default function SharePage() {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverReload, setCoverReload] = useState(0);
   const [downloadSheetOpen, setDownloadSheetOpen] = useState(false);
+  const [rightTab, setRightTab] = useState<"comments" | "info">("comments");
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const playerSectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -161,6 +166,41 @@ export default function SharePage() {
     () => summary?.bundle?.folders ?? [],
     [summary],
   );
+
+  // Metadata for the focused item (Metadata/Info tab). Sourced from the bundle
+  // item or the single-video summary.
+  const activeMeta = useMemo<ShareItemMeta | null>(() => {
+    if (isBundle) {
+      const it = bundleItems.find((i) => i._id === activeItemId);
+      if (!it) return null;
+      return {
+        title: it.title,
+        contentType: it.contentType,
+        hasMuxPlayback: it.hasMuxPlayback,
+        workflowStatus: it.workflowStatus,
+        uploaderName: it.uploaderName,
+        createdAt: it.createdAt,
+        duration: it.duration,
+        fileSize: it.fileSize,
+        versionNumber: it.versionNumber ?? null,
+        versionLabel: it.versionLabel ?? null,
+      };
+    }
+    const s = summary?.single;
+    if (!s) return null;
+    return {
+      title: s.title,
+      contentType: s.contentType,
+      hasMuxPlayback: null,
+      workflowStatus: s.workflowStatus,
+      uploaderName: s.uploaderName,
+      createdAt: s.createdAt,
+      duration: s.duration,
+      fileSize: s.fileSize,
+      versionNumber: s.versionNumber ?? null,
+      versionLabel: s.versionLabel ?? null,
+    };
+  }, [isBundle, bundleItems, activeItemId, summary]);
 
   // Value-typed (string | boolean) inputs for the playback-loader effect.
   // Depending on these instead of the whole `summary` / `bundleItems` objects
@@ -1233,10 +1273,37 @@ export default function SharePage() {
 
         <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-4 space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
           <div className="flex items-center justify-between">
-            <h2 className="font-black text-[#1a1a1a]">Comments</h2>
+            <div className="flex items-center border-2 border-[#1a1a1a]">
+              <button
+                type="button"
+                onClick={() => setRightTab("comments")}
+                className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${
+                  rightTab === "comments"
+                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]"
+                }`}
+              >
+                Comments
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightTab("info")}
+                className={`px-3 py-1 text-xs font-bold uppercase tracking-widest border-l-2 border-[#1a1a1a] ${
+                  rightTab === "info"
+                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]"
+                }`}
+              >
+                Info
+              </button>
+            </div>
             <span className="text-xs text-[#888] font-mono">{formatTimestamp(currentTime)}</span>
           </div>
 
+          {rightTab === "info" ? (
+            <ShareItemMetadata meta={activeMeta} />
+          ) : (
+          <>
           {!(isUserLoaded && user) ? (
             <a
               href={`/sign-in?redirect_url=${encodeURIComponent(`/share/${token}`)}`}
@@ -1421,6 +1488,8 @@ export default function SharePage() {
                 );
               })}
             </div>
+          )}
+          </>
           )}
         </section>
         </div>
