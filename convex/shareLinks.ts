@@ -51,6 +51,29 @@ async function resolveViewerAccess(
     return { allowed: true, role: link.defaultRole ?? "commenter", isOwner: false };
   }
 
+  // Invite-only. Workspace members of the link's owning team get in by default
+  // — they already have dashboard access to the underlying project — at the
+  // link's default role. The owner can turn this off (allowTeamAccess=false),
+  // hence "team members get access unless told not".
+  if (link.allowTeamAccess !== false && identity?.subject) {
+    const teamId = await resolveLinkTeamId(ctx, link);
+    if (teamId) {
+      const membership = await ctx.db
+        .query("teamMembers")
+        .withIndex("by_team_and_user", (q) =>
+          q.eq("teamId", teamId).eq("userClerkId", identity.subject),
+        )
+        .unique();
+      if (membership) {
+        return {
+          allowed: true,
+          role: link.defaultRole ?? "commenter",
+          isOwner: false,
+        };
+      }
+    }
+  }
+
   const email =
     typeof identity?.email === "string" ? identity.email.toLowerCase() : null;
   if (!email) return { allowed: false, role: "viewer", isOwner: false };
@@ -63,6 +86,26 @@ async function resolveViewerAccess(
     .unique();
   if (!invite) return { allowed: false, role: "viewer", isOwner: false };
   return { allowed: true, role: invite.role, isOwner: false };
+}
+
+/** The team that owns a share link's target (via video→project or bundle→project). */
+async function resolveLinkTeamId(
+  ctx: QueryCtx | MutationCtx,
+  link: Doc<"shareLinks">,
+): Promise<Id<"teams"> | null> {
+  if (link.videoId) {
+    const video = await ctx.db.get(link.videoId);
+    if (!video) return null;
+    const project = await ctx.db.get(video.projectId);
+    return project?.teamId ?? null;
+  }
+  if (link.bundleId) {
+    const bundle = await ctx.db.get(link.bundleId);
+    if (!bundle) return null;
+    const project = await ctx.db.get(bundle.projectId);
+    return project?.teamId ?? null;
+  }
+  return null;
 }
 
 /** Throws unless the caller can manage (member role) the link's target. */
@@ -722,6 +765,7 @@ export const setAccess = mutation({
     commentsEnabled: v.optional(v.boolean()),
     showAllVersions: v.optional(v.boolean()),
     allowDownload: v.optional(v.boolean()),
+    allowTeamAccess: v.optional(v.boolean()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -735,6 +779,7 @@ export const setAccess = mutation({
     if (args.commentsEnabled !== undefined) updates.commentsEnabled = args.commentsEnabled;
     if (args.showAllVersions !== undefined) updates.showAllVersions = args.showAllVersions;
     if (args.allowDownload !== undefined) updates.allowDownload = args.allowDownload;
+    if (args.allowTeamAccess !== undefined) updates.allowTeamAccess = args.allowTeamAccess;
     await ctx.db.patch(args.linkId, updates);
     return null;
   },
@@ -828,6 +873,7 @@ export const getAccessConfig = query({
       commentsEnabled: link.commentsEnabled !== false,
       showAllVersions: link.showAllVersions === true,
       allowDownload: link.allowDownload,
+      allowTeamAccess: link.allowTeamAccess !== false,
       invites: invites
         .map((i) => ({
           _id: i._id,
