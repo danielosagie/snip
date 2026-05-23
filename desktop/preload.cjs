@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("snipDesktop", {
 contextBridge.exposeInMainWorld("api", {
   app: {
     version: () => ipcRenderer.invoke("app:version"),
+    uninstall: () => ipcRenderer.invoke("app:uninstall"),
   },
   update: {
     state: () => ipcRenderer.invoke("update:state"),
