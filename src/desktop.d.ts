@@ -9,6 +9,10 @@ interface DesktopMountState {
 }
 
 interface DesktopApi {
+  app: {
+    version: () => Promise<string>;
+    uninstall: () => Promise<{ ok: boolean; trashed?: boolean }>;
+  };
   settings: {
     get: () => Promise<Record<string, unknown> & { storage: Record<string, unknown> }>;
     set: (next: Record<string, unknown>) => Promise<unknown>;

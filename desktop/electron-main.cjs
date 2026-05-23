@@ -2274,6 +2274,55 @@ function setupAutoUpdater() {
 
 ipcMain.handle("app:version", async () => app.getVersion());
 
+// Self-uninstall: unmount the drive, remove snip's app-managed data (settings,
+// the provisioned rclone, caches), move the app bundle to the Trash, and quit.
+// macFUSE is left installed — it's a shared system component the user may rely
+// on elsewhere and can remove separately.
+ipcMain.handle("app:uninstall", async () => {
+  try {
+    if (mountChild) {
+      await umountPath(mountState.mountPath);
+      try {
+        mountChild.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+      mountChild = null;
+    }
+    stopPresenceLoop();
+    stopPrefetchWatcher();
+    stopLanCacheServer();
+  } catch {
+    // best-effort
+  }
+
+  // Remove our userData (settings.json, bin/rclone, rclone-cache, client-id…).
+  try {
+    await fs.rm(SETTINGS_DIR, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
+
+  // Move the .app bundle to the Trash (works even while running on macOS).
+  let trashed = false;
+  try {
+    if (process.platform === "darwin") {
+      const exe = app.getPath("exe"); // …/snip.app/Contents/MacOS/snip
+      const appBundle = exe.replace(/\/Contents\/MacOS\/[^/]+$/, "");
+      if (appBundle.endsWith(".app")) {
+        await shell.trashItem(appBundle);
+        trashed = true;
+      }
+    }
+  } catch {
+    // ignore — user can drag it to Trash manually
+  }
+
+  // Quit after a beat so the IPC reply lands first.
+  setTimeout(() => app.exit(0), 600);
+  return { ok: true, trashed };
+});
+
 // Snapshot read so the renderer can render the current state on mount — the
 // first background check may finish before Settings is ever opened, and
 // "update:status" only carries future transitions.
