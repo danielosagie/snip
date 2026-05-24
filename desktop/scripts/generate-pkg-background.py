@@ -2,10 +2,12 @@
 """Generate the snip .pkg installer background: a chunky, "pixelly"
 white-to-burnt-orange gradient that matches the snip brand (#C2410C).
 
-The macOS Installer shows this image behind the wizard. We render the gradient
-at a low block resolution and upscale with nearest-neighbor so the transition
-reads as deliberate retro pixel blocks (ordered/Bayer dithering at the band
-edges) rather than a smooth photographic ramp.
+The macOS Installer places this image at the bottom-left of the wizard window.
+The native installer background is white, so the white top of the gradient
+blends seamlessly with it, and the burnt orange appears at the bottom.
+
+Height is kept to ~half the window height so the gradient only occupies the
+lower portion of the installer — the stepper text sits above it on plain white.
 
 Output: desktop/resources/pkg-background.png
 
@@ -16,11 +18,10 @@ import os
 
 from PIL import Image
 
-# Final image size. The installer scales "tofit", so this only needs to be
-# large enough to look crisp on retina. We render the gradient in BLOCK-sized
-# cells then upscale, so the on-screen pixels stay chunky regardless.
+# Final image size. Half-height so the gradient covers only the bottom portion
+# of the installer window; the installer's native white fills the top half.
 WIDTH = 1200
-HEIGHT = 820
+HEIGHT = 410
 BLOCK = 20  # size of one "pixel" block in the final image
 
 # Brand ramp: cream-white at the top → burnt orange at the bottom, easing
