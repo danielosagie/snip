@@ -67,6 +67,10 @@ export default function TeamSettingsPage() {
     api.teams.getInvites,
     team ? { teamId: team._id } : "skip",
   );
+  const projects = useQuery(
+    api.projects.list,
+    team ? { teamId: team._id } : "skip",
+  );
   const updateTeam = useMutation(api.teams.update);
   const deleteTeam = useMutation(api.teams.deleteTeam);
   const inviteMember = useMutation(api.teams.inviteMember);
@@ -78,6 +82,13 @@ export default function TeamSettingsPage() {
   const [editedName, setEditedName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<Role>("member");
+  // Optional invite-time storage scope: when on, the invitee is
+  // restricted to the selected projects (storage-enforced via the vended
+  // credential). Off = full team access.
+  const [scopeRestricted, setScopeRestricted] = useState(false);
+  const [scopedProjectIds, setScopedProjectIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
@@ -157,15 +168,24 @@ export default function TeamSettingsPage() {
     setInviteError(null);
     setInviting(true);
     try {
+      const folderScope =
+        scopeRestricted && team.slug
+          ? [...scopedProjectIds].map(
+              (pid) => `projects/${team.slug}/${pid}/`,
+            )
+          : [];
       const token = await inviteMember({
         teamId: team._id,
         email: inviteEmail.trim(),
         role: inviteRole,
+        folderScope: folderScope.length > 0 ? folderScope : undefined,
       });
       const baseUrl =
         typeof window !== "undefined" ? window.location.origin : "";
       setLastInviteLink(`${baseUrl}/invite/${token}`);
       setInviteEmail("");
+      setScopeRestricted(false);
+      setScopedProjectIds(new Set());
     } catch (e) {
       setInviteError(e instanceof Error ? e.message : "Couldn't send invite.");
     } finally {
@@ -315,13 +335,70 @@ export default function TeamSettingsPage() {
                 />
                 <Button
                   type="submit"
-                  disabled={inviting || !inviteEmail.trim()}
+                  disabled={
+                    inviting ||
+                    !inviteEmail.trim() ||
+                    (scopeRestricted && scopedProjectIds.size === 0)
+                  }
                   className="bg-[#FF6600] hover:bg-[#FF7A1F]"
                 >
                   <Mail className="h-4 w-4 mr-1.5" />
                   {inviting ? "Sending…" : "Invite"}
                 </Button>
               </form>
+
+              {/* Optional storage scope: restrict the invitee to specific
+                  projects. Off → full team access (the efficient default). */}
+              {projects && projects.length > 0 ? (
+                <div className="mt-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+                  <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={scopeRestricted}
+                      onChange={(e) => setScopeRestricted(e.target.checked)}
+                      disabled={inviting}
+                      className="h-4 w-4 accent-[#FF6600]"
+                    />
+                    Restrict to specific projects
+                  </label>
+                  {scopeRestricted ? (
+                    <div className="mt-2 max-h-40 overflow-auto space-y-1">
+                      {projects.map((p) => (
+                        <label
+                          key={p._id}
+                          className="flex items-center gap-2 text-sm cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={scopedProjectIds.has(p._id)}
+                            onChange={(e) =>
+                              setScopedProjectIds((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(p._id);
+                                else next.delete(p._id);
+                                return next;
+                              })
+                            }
+                            disabled={inviting}
+                            className="h-4 w-4 accent-[#FF6600]"
+                          />
+                          {p.name}
+                        </label>
+                      ))}
+                      {scopedProjectIds.size === 0 ? (
+                        <p className="text-xs font-bold text-[#dc2626]">
+                          Pick at least one project, or untick to grant full
+                          access.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[#666] mt-1">
+                      Full access to all current and future team projects.
+                    </p>
+                  )}
+                </div>
+              ) : null}
               {inviteError ? (
                 <div className="text-xs font-bold text-[#dc2626] mt-2">
                   {inviteError}
@@ -377,6 +454,10 @@ export default function TeamSettingsPage() {
                       </div>
                       <div className="text-xs font-mono text-[#888]">
                         Invited as {ROLE_LABEL[inv.role as Role] ?? inv.role}{" "}
+                        ·{" "}
+                        {inv.folderScope && inv.folderScope.length > 0
+                          ? `scoped to ${inv.folderScope.length} project${inv.folderScope.length === 1 ? "" : "s"}`
+                          : "full access"}{" "}
                         · expires{" "}
                         {new Date(inv.expiresAt).toLocaleDateString()}
                       </div>

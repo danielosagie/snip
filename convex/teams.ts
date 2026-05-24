@@ -1,5 +1,11 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  query,
+  MutationCtx,
+} from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 import { getUser, identityAvatarUrl, identityEmail, identityName, requireUser, requireTeamAccess } from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
 import { internal } from "./_generated/api";
@@ -24,6 +30,38 @@ function generateToken(): string {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
+}
+
+// Normalize a bucket path prefix: strip leading slashes, always end in
+// "/" (so `projects/foo` can't match `projects/foobar`). Mirrors
+// folderPermissions.sanitizePrefix.
+function sanitizePrefix(raw: string): string {
+  const trimmed = raw.trim().replace(/^[/\\]+/, "");
+  if (!trimmed) return "";
+  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+// Drop a departing member from the team's per-user folder grants so a
+// removed (or re-invited) user doesn't inherit stale storage scope. A
+// grant left with neither roles nor users is deleted.
+async function removeUserFolderGrants(
+  ctx: MutationCtx,
+  teamId: Id<"teams">,
+  clerkId: string,
+) {
+  const grants = await ctx.db
+    .query("folderPermissions")
+    .withIndex("by_team", (q) => q.eq("teamId", teamId))
+    .collect();
+  for (const g of grants) {
+    if (!g.allowedClerkIds.includes(clerkId)) continue;
+    const remaining = g.allowedClerkIds.filter((id) => id !== clerkId);
+    if (remaining.length === 0 && g.allowedRoles.length === 0) {
+      await ctx.db.delete(g._id);
+    } else {
+      await ctx.db.patch(g._id, { allowedClerkIds: remaining });
+    }
+  }
 }
 
 export const create = mutation({
@@ -188,11 +226,17 @@ export const inviteMember = mutation({
     teamId: v.id("teams"),
     email: v.string(),
     role: v.union(v.literal("admin"), v.literal("member"), v.literal("viewer")),
+    // Optional: restrict this invitee to specific bucket path prefixes.
+    // Omit / empty for full team access.
+    folderScope: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { user } = await requireTeamAccess(ctx, args.teamId, "admin");
 
     const inviteEmail = normalizedEmail(args.email);
+    const folderScope = (args.folderScope ?? [])
+      .map(sanitizePrefix)
+      .filter((p) => p.length > 0);
 
     const existingMembership = await ctx.db
       .query("teamMembers")
@@ -226,6 +270,7 @@ export const inviteMember = mutation({
       invitedByName: identityName(user),
       token,
       expiresAt,
+      folderScope: folderScope.length > 0 ? folderScope : undefined,
     });
 
     // Fire the invite email (best-effort, scheduled — mutations can't
@@ -322,6 +367,26 @@ export const acceptInvite = mutation({
       role: invite.role,
     });
 
+    // Materialize the invite's explicit folder scope as per-user grants
+    // now that we know the member's Clerk subject. The vended storage
+    // credential reads these (storageAccess.getUserStorageScope) and is
+    // scoped to exactly these prefixes — so the restriction holds at the
+    // storage layer, not just the rclone filter.
+    if (invite.folderScope && invite.folderScope.length > 0) {
+      const now = Date.now();
+      for (const pathPrefix of invite.folderScope) {
+        await ctx.db.insert("folderPermissions", {
+          teamId: invite.teamId,
+          pathPrefix,
+          allowedRoles: [],
+          allowedClerkIds: [user.subject],
+          note: `Invite scope for ${normalizedEmail(identityEmail(user))}`,
+          createdAt: now,
+          createdByClerkId: invite.invitedByClerkId,
+        });
+      }
+    }
+
     await ctx.db.delete(invite._id);
 
     const team = await ctx.db.get(invite.teamId);
@@ -403,6 +468,7 @@ export const removeMember = mutation({
       throw new Error("Cannot remove yourself. Use leave instead.");
     }
 
+    await removeUserFolderGrants(ctx, team._id, membership.userClerkId);
     await ctx.db.delete(membership._id);
   },
 });
@@ -443,6 +509,7 @@ export const leave = mutation({
       throw new Error("Team owner cannot leave. Transfer ownership first.");
     }
 
+    await removeUserFolderGrants(ctx, team._id, user.subject);
     await ctx.db.delete(membership._id);
   },
 });
