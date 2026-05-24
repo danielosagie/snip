@@ -19,6 +19,7 @@ import {
   Link2,
   Undo2,
   Redo2,
+  PenTool,
 } from "lucide-react";
 
 /**
@@ -78,7 +79,15 @@ function Divider() {
   return <div className="mx-1 h-5 w-px bg-[#1a1a1a]/30" />;
 }
 
-export function ContractToolbar({ editor }: { editor: Editor | null }) {
+export function ContractToolbar({
+  editor,
+  onOpenFields,
+}: {
+  editor: Editor | null;
+  /** When provided, shows a "Fields" button that opens the signature-field
+   *  placement sheet (only meaningful on a signable multi-contract). */
+  onOpenFields?: () => void;
+}) {
   // Tiptap mutates outside React; subscribe so active states stay live.
   const [, force] = useReducer((x: number) => x + 1, 0);
   useEffect(() => {
@@ -296,6 +305,20 @@ export function ContractToolbar({ editor }: { editor: Editor | null }) {
           <Link2 className="h-3.5 w-3.5" />
         </ToolButton>
       </Group>
+      {onOpenFields ? (
+        <>
+          <div className="ml-auto" />
+          <button
+            type="button"
+            onClick={onOpenFields}
+            title="Place signature fields"
+            className="inline-flex items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] px-3 h-7 text-[11px] font-bold uppercase tracking-wider text-[#f0f0e8] hover:bg-[#C2410C] transition-colors"
+          >
+            <PenTool className="h-3.5 w-3.5" />
+            Fields
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }

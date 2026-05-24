@@ -1,12 +1,15 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
+import type { Editor } from "@tiptap/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { Input } from "@/components/ui/input";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
+import { ContractToolbar } from "@/components/contracts/ContractToolbar";
+import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
 import {
@@ -98,6 +101,7 @@ function ContractEditorPage() {
   const contractId = params.contractId as Id<"contracts">;
 
   const data = useQuery(api.contractsTable.get, { contractId });
+  const [fieldsSheetOpen, setFieldsSheetOpen] = useState(false);
 
   if (data === undefined) {
     return (
@@ -147,7 +151,10 @@ function ContractEditorPage() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-          <ContractBody contract={data.contract} />
+          <ContractBody
+            contract={data.contract}
+            onOpenFields={() => setFieldsSheetOpen(true)}
+          />
           <div className="space-y-6">
             <RecipientsPanel
               contract={data.contract}
@@ -157,20 +164,38 @@ function ContractEditorPage() {
               contract={data.contract}
               recipients={data.recipients}
               fields={data.fields}
+              onOpenPlacement={() => setFieldsSheetOpen(true)}
             />
             <AuditLogPanel audit={data.audit} />
           </div>
         </div>
       </div>
+
+      <SignatureFieldsSheet
+        open={fieldsSheetOpen}
+        onOpenChange={setFieldsSheetOpen}
+        contractId={data.contract._id}
+        contentHtml={data.contract.contentHtml ?? ""}
+        recipients={data.recipients}
+        fields={data.fields}
+        isDraft={data.contract.status === "draft"}
+      />
     </div>
   );
 }
 
-function ContractBody({ contract }: { contract: ContractDoc }) {
+function ContractBody({
+  contract,
+  onOpenFields,
+}: {
+  contract: ContractDoc;
+  onOpenFields: () => void;
+}) {
   const update = useMutation(api.contractsTable.update);
   const [body, setBody] = useState<string>(contract.contentHtml ?? "");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [editor, setEditor] = useState<Editor | null>(null);
   const isEditable = contract.status === "draft";
 
   // Re-sync local state if the contract row changes from outside (e.g.
@@ -213,10 +238,15 @@ function ContractBody({ contract }: { contract: ContractDoc }) {
           </span>
         )}
       </div>
+      <ContractToolbar
+        editor={editor && !editor.isDestroyed ? editor : null}
+        onOpenFields={onOpenFields}
+      />
       <ContractDocPreview
         html={body}
         editable={isEditable}
         resyncWithHtml={!dirty}
+        onEditorReady={setEditor}
         onChange={(next) => {
           setBody(next);
           setDirty(true);
@@ -406,10 +436,12 @@ function FieldsPanel({
   contract,
   recipients,
   fields,
+  onOpenPlacement,
 }: {
   contract: ContractDoc;
   recipients: RecipientDoc[];
   fields: FieldDoc[];
+  onOpenPlacement: () => void;
 }) {
   const addField = useMutation(api.contractsTable.addField);
   const removeField = useMutation(api.contractsTable.removeField);
@@ -478,6 +510,15 @@ function FieldsPanel({
       </div>
 
       <div className="p-4 space-y-5">
+        {/* Drag-and-drop placement on the document */}
+        <button
+          type="button"
+          onClick={onOpenPlacement}
+          className="w-full inline-flex items-center justify-center gap-1.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] h-9 text-[11px] font-bold uppercase tracking-wider hover:bg-[#C2410C] transition-colors"
+        >
+          Place fields on document →
+        </button>
+
         {/* Insert fields for */}
         <div>
           <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1.5">

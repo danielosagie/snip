@@ -1,9 +1,13 @@
 "use client";
 
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
 import { Link } from "@tiptap/extension-link";
+import { TextAlign } from "@tiptap/extension-text-align";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { FontFamily } from "@tiptap/extension-font-family";
+import { FontSize } from "./fontSizeExtension";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +36,8 @@ interface Props {
    *  change unless the user has typed (`userTouched`). */
   resyncWithHtml?: boolean;
   editable?: boolean;
+  /** Surfaces the Tiptap instance so a parent can render a toolbar. */
+  onEditorReady?: (editor: Editor) => void;
 }
 
 export function ContractDocPreview({
@@ -40,6 +46,7 @@ export function ContractDocPreview({
   onUserEdit,
   resyncWithHtml = true,
   editable = true,
+  onEditorReady,
 }: Props) {
   const userTouchedRef = useRef(false);
   const lastAppliedHtmlRef = useRef<string>(html);
@@ -52,6 +59,10 @@ export function ContractDocPreview({
       }),
       Underline,
       Link.configure({ openOnClick: false }),
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      TextStyle,
+      FontFamily.configure({ types: ["textStyle"] }),
+      FontSize,
     ],
     content: html,
     editable,
@@ -93,6 +104,11 @@ export function ContractDocPreview({
     if (!editor || editor.isDestroyed || !editor.view) return;
     editor.setEditable(editable);
   }, [editor, editable]);
+
+  // Surface the editor instance for an external toolbar.
+  useEffect(() => {
+    if (editor && onEditorReady) onEditorReady(editor);
+  }, [editor, onEditorReady]);
 
   return (
     <div className="min-h-full px-6 sm:px-10 py-8 flex flex-col items-center bg-[#e8e8e0]">
