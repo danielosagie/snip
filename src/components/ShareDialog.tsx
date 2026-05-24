@@ -25,6 +25,7 @@ import {
   Globe,
   DollarSign,
   Users,
+  ChevronDown,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -209,36 +210,80 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
           <DialogTitle>Share</DialogTitle>
         </DialogHeader>
 
-        {/* Streamlined: a single segmented toggle for Public/Private.
-            We drop the helper paragraph entirely — the labels +
-            section content already say enough. */}
-        <div className="flex border-2 border-[#1a1a1a]">
-          <button
-            type="button"
-            disabled={isUpdatingVisibility || video === undefined}
-            onClick={() => void handleSetVisibility("public")}
-            className={`flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
-              video?.visibility === "public"
-                ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]"
-            }`}
-          >
-            <Globe className="h-3.5 w-3.5" />
-            Public
-          </button>
-          <button
-            type="button"
-            disabled={isUpdatingVisibility || video === undefined}
-            onClick={() => void handleSetVisibility("private")}
-            className={`flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider transition-colors border-l-2 border-[#1a1a1a] ${
-              video?.visibility === "private"
-                ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]"
-            }`}
-          >
-            <Lock className="h-3.5 w-3.5" />
-            Private
-          </button>
+        {/* Unified "best of both" header — Google-Drive IA (People with
+            access + General access) with snip's public/private folded into
+            the General-access dropdown. The detailed access controls (paywall,
+            expiry, password, download, link list) live below, unchanged. */}
+        <div>
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+            People with access
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="h-8 w-8 flex-shrink-0 inline-flex items-center justify-center rounded-full border-2 border-[#1a1a1a] bg-[#FFEDD5]">
+              <Users className="h-4 w-4 text-[#1a1a1a]" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold text-[#1a1a1a]">You</div>
+              <div className="text-[11px] font-mono text-[#888]">Your team</div>
+            </div>
+            <span className="text-xs font-bold uppercase tracking-wider text-[#888]">
+              Owner
+            </span>
+          </div>
+        </div>
+
+        <div className="border-t-2 border-[#1a1a1a] pt-3">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+            General access
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="h-8 w-8 flex-shrink-0 inline-flex items-center justify-center rounded-full border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+              {video?.visibility === "public" ? (
+                <Globe className="h-4 w-4 text-[#1a1a1a]" />
+              ) : (
+                <Lock className="h-4 w-4 text-[#888]" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={isUpdatingVisibility || video === undefined}
+                    className="inline-flex items-center gap-1 text-sm font-bold text-[#1a1a1a] hover:bg-[#FFEDD5] px-1 -ml-1 disabled:opacity-50"
+                  >
+                    {video?.visibility === "public"
+                      ? "Anyone with the link"
+                      : "Restricted"}
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[240px]">
+                  <DropdownMenuItem
+                    onClick={() => void handleSetVisibility("private")}
+                  >
+                    Restricted
+                    {video?.visibility !== "public" ? (
+                      <Check className="ml-auto h-3.5 w-3.5 text-[#C2410C]" />
+                    ) : null}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => void handleSetVisibility("public")}
+                  >
+                    Anyone with the link
+                    {video?.visibility === "public" ? (
+                      <Check className="ml-auto h-3.5 w-3.5 text-[#C2410C]" />
+                    ) : null}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <div className="text-[11px] font-mono text-[#888]">
+                {video?.visibility === "public"
+                  ? "Anyone with the link can watch"
+                  : "Only people with a link you create below"}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Public branch — just the URL + copy/open. */}
