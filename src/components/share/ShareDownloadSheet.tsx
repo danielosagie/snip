@@ -4,7 +4,13 @@ import { useMemo, useState } from "react";
 import { useAction } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
-import { Download, Lock } from "lucide-react";
+import { Download, Lock, ChevronDown, Check } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
@@ -187,19 +193,33 @@ export function ShareDownloadSheet({
             >
               Quality
             </label>
-            <select
-              id="download-quality"
-              value={quality}
-              onChange={(e) => setQuality(e.target.value)}
-              disabled={downloadsDisabled || locked || downloading}
-              className="border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1 text-sm font-bold text-[#1a1a1a] disabled:opacity-50"
-            >
-              {qualityOptions.map((q) => (
-                <option key={q.label} value={q.label}>
-                  {q.label}
-                </option>
-              ))}
-            </select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  id="download-quality"
+                  disabled={downloadsDisabled || locked || downloading}
+                  className="inline-flex items-center justify-between gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1 text-sm font-bold text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50 min-w-[140px]"
+                >
+                  <span className="truncate">{quality}</span>
+                  <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-[160px]">
+                {qualityOptions.map((q) => (
+                  <DropdownMenuItem
+                    key={q.label}
+                    onClick={() => setQuality(q.label)}
+                    className="flex items-center justify-between"
+                  >
+                    {q.label}
+                    {q.label === quality ? (
+                      <Check className="h-3.5 w-3.5 text-[#C2410C]" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         ) : null}
 

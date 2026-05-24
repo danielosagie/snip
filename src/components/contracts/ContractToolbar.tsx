@@ -20,7 +20,63 @@ import {
   Undo2,
   Redo2,
   PenTool,
+  ChevronDown,
+  Check,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+
+/** Snip-styled select replacement (native <select> can't be themed). */
+function ToolbarSelect({
+  label,
+  options,
+  value,
+  onPick,
+  disabled,
+  minWidth = 84,
+}: {
+  label: string;
+  options: Array<{ label: string; value: string }>;
+  value: string;
+  onPick: (value: string) => void;
+  disabled?: boolean;
+  minWidth?: number;
+}) {
+  const current = options.find((o) => o.value === value) ?? options[0];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={label}
+          title={label}
+          className="inline-flex h-7 items-center justify-between gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-40"
+          style={{ minWidth }}
+        >
+          <span className="truncate">{current?.label ?? ""}</span>
+          <ChevronDown className="h-3 w-3 flex-shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[140px]">
+        {options.map((o) => (
+          <DropdownMenuItem
+            key={o.value || "default"}
+            onClick={() => onPick(o.value)}
+            className="flex items-center justify-between text-xs font-bold uppercase tracking-wider"
+          >
+            {o.label}
+            {o.value === value ? <Check className="h-3.5 w-3.5 text-[#C2410C]" /> : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 /**
  * Persistent formatting toolbar for the contract document editor — the row the
@@ -174,44 +230,34 @@ export function ContractToolbar({
       </Group>
       <Divider />
       <Group>
-        <select
-          aria-label="Font family"
-          title="Font family"
+        <ToolbarSelect
+          label="Font family"
           disabled={disabled}
           value={currentFamily}
-          onChange={(e) => {
-            const next = e.target.value;
+          minWidth={92}
+          options={[
+            { label: "Default", value: "" },
+            ...FONT_FAMILIES.map((f) => ({ label: f.label, value: f.value })),
+          ]}
+          onPick={(next) => {
             if (!next) editor!.chain().focus().unsetFontFamily().run();
             else editor!.chain().focus().setFontFamily(next).run();
           }}
-          className="h-7 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] focus:outline-none disabled:opacity-40"
-        >
-          <option value="">Default</option>
-          {FONT_FAMILIES.map((f) => (
-            <option key={f.value} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Font size"
-          title="Font size"
+        />
+        <ToolbarSelect
+          label="Font size"
           disabled={disabled}
           value={currentSize}
-          onChange={(e) => {
-            const next = e.target.value;
+          minWidth={72}
+          options={[
+            { label: "Auto", value: "" },
+            ...FONT_SIZES.map((s) => ({ label: s, value: s })),
+          ]}
+          onPick={(next) => {
             if (!next) editor!.chain().focus().unsetFontSize().run();
             else editor!.chain().focus().setFontSize(next).run();
           }}
-          className="h-7 w-[68px] border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 text-xs font-mono font-bold hover:bg-[#e8e8e0] focus:outline-none disabled:opacity-40"
-        >
-          <option value="">Auto</option>
-          {FONT_SIZES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        />
       </Group>
       <Divider />
       <Group>

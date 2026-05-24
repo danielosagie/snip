@@ -217,9 +217,9 @@ export function ContractSectionOutline({
 }
 
 /**
- * Collapsed-state rail toggle — pinned at the top-left of the
- * editor area so the document can still take the full width when
- * the outline is hidden.
+ * Collapsed-state rail toggle — sits in the gray editor area BELOW the
+ * formatting toolbar (top-16 clears the toolbar row) so it never overlaps the
+ * toolbar buttons, while the document still takes full width.
  */
 export function ContractSectionOutlineCollapsedToggle({
   onExpand,
@@ -230,7 +230,7 @@ export function ContractSectionOutlineCollapsedToggle({
     <button
       type="button"
       onClick={onExpand}
-      className="hidden lg:inline-flex absolute left-3 top-3 z-10 items-center justify-center w-7 h-7 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+      className="hidden lg:inline-flex absolute left-3 top-16 z-10 items-center justify-center w-7 h-7 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
       title="Show outline"
       aria-label="Show outline"
     >
