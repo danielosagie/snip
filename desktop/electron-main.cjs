@@ -1,7 +1,7 @@
 // Electron main process. Plain CJS so it runs without a build step.
 // Talks to the renderer (React UI in src/) via IPC.
 
-const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
     endpoint: "",
     accessKeyId: "",
     secretAccessKey: "",
+    sessionToken: "",
     region: "auto",
   },
   rootDir: path.join(app.getPath("home"), "VideoInfra"),
@@ -51,6 +52,50 @@ const DEFAULT_SETTINGS = {
   autoMount: true,
   features: DEFAULT_FEATURES,
 };
+
+// Secret fields encrypted at rest in settings.json via Electron
+// safeStorage (OS keychain — Keychain on macOS). Backward compatible:
+// legacy plaintext values are read as-is and re-encrypted on next save.
+// If the OS keychain is unavailable we fall back to plaintext (matching
+// the previous behavior) rather than locking the user out.
+const SECRET_PATHS = [
+  ["convexAuthToken"],
+  ["storage", "accessKeyId"],
+  ["storage", "secretAccessKey"],
+  ["storage", "sessionToken"],
+];
+const ENC_PREFIX = "enc:v1:";
+
+function encryptSecret(value) {
+  if (typeof value !== "string" || value.length === 0) return value;
+  if (value.startsWith(ENC_PREFIX)) return value;
+  if (!safeStorage.isEncryptionAvailable()) return value;
+  return ENC_PREFIX + safeStorage.encryptString(value).toString("base64");
+}
+
+function decryptSecret(value) {
+  if (typeof value !== "string" || !value.startsWith(ENC_PREFIX)) return value;
+  if (!safeStorage.isEncryptionAvailable()) return "";
+  try {
+    return safeStorage.decryptString(
+      Buffer.from(value.slice(ENC_PREFIX.length), "base64"),
+    );
+  } catch {
+    return "";
+  }
+}
+
+function transformSecrets(settings, fn) {
+  const out = { ...settings, storage: { ...(settings.storage || {}) } };
+  for (const parts of SECRET_PATHS) {
+    if (parts.length === 1) {
+      if (parts[0] in out) out[parts[0]] = fn(out[parts[0]]);
+    } else if (out[parts[0]] && parts[1] in out[parts[0]]) {
+      out[parts[0]][parts[1]] = fn(out[parts[0]][parts[1]]);
+    }
+  }
+  return out;
+}
 
 async function loadSettings() {
   try {
@@ -62,7 +107,10 @@ async function loadSettings() {
     for (const key of Object.keys(DEFAULT_FEATURES)) {
       features[key] = { ...DEFAULT_FEATURES[key], ...(features[key] || {}) };
     }
-    return { ...DEFAULT_SETTINGS, ...parsed, features };
+    return transformSecrets(
+      { ...DEFAULT_SETTINGS, ...parsed, features },
+      decryptSecret,
+    );
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -70,7 +118,15 @@ async function loadSettings() {
 
 async function saveSettings(settings) {
   await fs.mkdir(SETTINGS_DIR, { recursive: true });
-  await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  const onDisk = transformSecrets(settings, encryptSecret);
+  await fs.writeFile(SETTINGS_FILE, JSON.stringify(onDisk, null, 2), {
+    mode: 0o600,
+  });
+  try {
+    await fs.chmod(SETTINGS_FILE, 0o600);
+  } catch {
+    // best-effort on platforms without POSIX perms
+  }
 }
 
 // ---- S3 helpers --------------------------------------------------------------
@@ -85,6 +141,9 @@ function makeS3(settings) {
     credentials: {
       accessKeyId: s.accessKeyId,
       secretAccessKey: s.secretAccessKey,
+      // Present for scoped (temporary) credentials; omitted for the
+      // legacy long-lived key.
+      ...(s.sessionToken ? { sessionToken: s.sessionToken } : {}),
     },
     forcePathStyle: s.provider === "railway",
   });
@@ -1344,6 +1403,11 @@ async function startMount({ mountPath } = {}) {
     RCLONE_CONFIG_VIDEOINFRA_ENDPOINT: s.endpoint,
     RCLONE_CONFIG_VIDEOINFRA_REGION: s.region || "auto",
     RCLONE_CONFIG_VIDEOINFRA_ACL: "private",
+    // Scoped (temporary) credentials carry a session token; the legacy
+    // long-lived key does not. rclone reads this at mount start.
+    ...(s.sessionToken
+      ? { RCLONE_CONFIG_VIDEOINFRA_SESSION_TOKEN: s.sessionToken }
+      : {}),
   };
 
   // ── Optional: layer in LAN-peer caches as the first upstreams ──

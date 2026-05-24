@@ -1,7 +1,12 @@
 {
   "CORSRules": [
     {
-      "AllowedOrigins": ["*"],
+      "AllowedOrigins": [
+        "https://snipfilm.vercel.app",
+        "https://snip.film",
+        "https://www.snip.film",
+        "http://localhost:5296"
+      ],
       "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
       "AllowedHeaders": ["*"],
       "ExposeHeaders": ["ETag", "x-amz-request-id", "x-amz-id-2"],

@@ -5,7 +5,7 @@ import {
   internalMutation,
   internalQuery,
 } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { internal, api } from "./_generated/api";
 import { getIdentity, identityName } from "./auth";
 
 /**
@@ -42,7 +42,22 @@ type StorageBootstrap = {
   accessKeyId: string;
   secretAccessKey: string;
   region: string;
+  // Scoped-credential fields. Absent/null on the legacy shared key.
+  sessionToken?: string | null;
+  expiresAt?: number | null;
+  scoped?: boolean;
+  prefixes?: string[];
 };
+
+// True when per-user scoped credentials are configured. When scoping is
+// on we must NOT hand the raw shared key to a paired device — it vends a
+// scoped credential via its own Clerk session instead.
+function scopingConfigured(): boolean {
+  const env = process.env;
+  const r2 = Boolean(env.R2_ACCOUNT_ID && env.R2_API_TOKEN);
+  const sts = Boolean(env.STS_ROLE_ARN);
+  return r2 || sts;
+}
 
 function readStorageBootstrap(): StorageBootstrap | null {
   const env = process.env;
@@ -81,8 +96,14 @@ function readStorageBootstrap(): StorageBootstrap | null {
 export const getStorageBootstrap = action({
   args: {},
   handler: async (ctx): Promise<StorageBootstrap | null> => {
-    await getIdentity(ctx); // require a signed-in user
-    return readStorageBootstrap();
+    // Delegates to the scoped vending action: requires team membership
+    // and returns per-user prefix-scoped credentials when scoping is
+    // configured, otherwise the shared key (members only). See
+    // convex/storageCredentials.ts.
+    return await ctx.runAction(
+      api.storageCredentials.getScopedStorageCredentials,
+      {},
+    );
   },
 });
 
@@ -170,6 +191,15 @@ export const approvePairing = action({
     try {
       const identity = await getIdentity(ctx);
       const userId = identity.subject;
+
+      // Only team members may hand a device the bucket bootstrap.
+      const scope = await ctx.runQuery(
+        internal.storageAccess.getUserStorageScope,
+        {},
+      );
+      if (!scope.isMember) {
+        throw new Error("You must belong to a team to connect a device.");
+      }
 
       const pending = await ctx.runQuery(internal.desktopAuth.lookupPending, {
         code: args.code,
@@ -262,7 +292,9 @@ export const pollPairing = mutation({
     await ctx.db.patch(row._id, { status: "consumed", signInToken: undefined });
     if (!signInToken) return { status: "consumed" as const };
 
-    const storage = readStorageBootstrap();
+    // With scoping on, the device must vend its own scoped credential
+    // after it redeems the sign-in token — never the shared master key.
+    const storage = scopingConfigured() ? null : readStorageBootstrap();
     return {
       status: "approved" as const,
       signInToken,
