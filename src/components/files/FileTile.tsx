@@ -24,7 +24,7 @@ import { fileTypeFromContent, formatBytes } from "@/lib/fileTypes";
  * Google-Drive-style tile for non-video files in the project grid.
  * Renders the file-type icon big and centered, filename below, meta on
  * one line at the bottom. Click downloads — there's no inline viewer
- * yet for PDFs/images, that comes later. Lawn's brutalist 2px-border +
+ * yet for PDFs/images, that comes later. The brutalist 2px-border +
  * hard-shadow treatment kept so it doesn't feel like a Drive clone.
  *
  * For VIDEOS the existing VideoIntentTarget tile in -project.tsx is

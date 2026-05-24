@@ -5,7 +5,7 @@ import { S3Client } from "@aws-sdk/client-s3";
  *
  *   - Cloudflare R2: set R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
  *                    R2_ENDPOINT, R2_BUCKET_NAME, R2_PUBLIC_URL
- *   - Railway S3:    set RAILWAY_* (Lawn's original setup)
+ *   - Railway S3:    set RAILWAY_* (the original setup)
  *
  * R2 takes precedence when both sets are present. If neither is configured,
  * S3-dependent actions throw a friendly "configure storage" error rather

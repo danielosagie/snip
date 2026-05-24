@@ -20,7 +20,8 @@ interface SidebarContextValue {
 }
 
 const Ctx = createContext<SidebarContextValue | null>(null);
-const STORAGE_KEY = "lawn:sidebar:collapsed";
+const STORAGE_KEY = "snip:sidebar:collapsed";
+const LEGACY_STORAGE_KEY = "lawn:sidebar:collapsed";
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsedState] = useState(false);
@@ -29,7 +30,10 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      setCollapsedState(window.localStorage.getItem(STORAGE_KEY) === "1");
+      const stored =
+        window.localStorage.getItem(STORAGE_KEY) ??
+        window.localStorage.getItem(LEGACY_STORAGE_KEY);
+      setCollapsedState(stored === "1");
     } catch {
       // localStorage may be blocked; fall back to default state.
     }

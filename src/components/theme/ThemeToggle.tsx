@@ -10,7 +10,8 @@ import {
   useState,
 } from "react";
 
-const THEME_STORAGE_KEY = "lawn-theme";
+const THEME_STORAGE_KEY = "snip-theme";
+const LEGACY_THEME_STORAGE_KEY = "lawn-theme";
 
 type Theme = "light" | "dark";
 
@@ -29,7 +30,9 @@ function getInitialTheme(): Theme {
     return attributeTheme;
   }
 
-  const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  const storedTheme =
+    localStorage.getItem(THEME_STORAGE_KEY) ??
+    localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
   if (storedTheme === "dark" || storedTheme === "light") {
     return storedTheme;
   }

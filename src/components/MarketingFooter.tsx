@@ -98,7 +98,7 @@ export function MarketingFooter() {
             <ul className="space-y-3 text-sm font-bold">
               <li>
                 <a
-                  href="https://github.com/pingdotgg/lawn"
+                  href="https://github.com/danielosagie/snip"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-[#FFB380] transition-colors"

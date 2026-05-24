@@ -5,7 +5,7 @@ import { useConvexQuery } from "./useConvex";
 import { DiffView } from "./DiffView";
 
 /**
- * Lawn's "GitHub Desktop for Resolve" — but with the dev jargon scrubbed.
+ * snip's "GitHub Desktop for Resolve" — but with the dev jargon scrubbed.
  * No more "branch / commit / push / pull" anywhere visible. Editors see:
  *
  *   - "Save current Resolve timeline" (= snapshot / commit / push)
@@ -64,7 +64,7 @@ export function TimelinesView({ client, projectId }: Props) {
   const [compareFrom, setCompareFrom] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState("");
 
-  // Tell the Electron main process which lawn project Resolve actions
+  // Tell the Electron main process which snip project Resolve actions
   // should target. Without this it doesn't know where to file snapshots.
   useEffect(() => {
     void api.resolve.setActiveProject({ projectId });
@@ -108,7 +108,7 @@ export function TimelinesView({ client, projectId }: Props) {
       });
       setSaveMessage("");
       setInfo(
-        `Saved “${saveMessage.trim() || "Update from Resolve"}” to lawn.`,
+        `Saved “${saveMessage.trim() || "Update from Resolve"}” to snip.`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed.");
@@ -183,7 +183,7 @@ export function TimelinesView({ client, projectId }: Props) {
       });
       setSaveMessage("");
       setInfo(
-        `Saved Premiere project (${chosenPath.split("/").pop()}) to lawn.`,
+        `Saved Premiere project (${chosenPath.split("/").pop()}) to snip.`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Premiere save failed.");
@@ -284,7 +284,7 @@ export function TimelinesView({ client, projectId }: Props) {
           title={
             !resolveStatus?.ok
               ? "Open Resolve first"
-              : `Save the timeline currently open in Resolve to lawn (thread: ${filterBranch ?? "main"})`
+              : `Save the timeline currently open in Resolve to snip (thread: ${filterBranch ?? "main"})`
           }
         >
           {busy === "save" ? "Saving…" : "Save current Resolve timeline"}

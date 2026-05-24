@@ -986,7 +986,23 @@ ipcMain.handle("dialog:pick-folder", async () => {
   return result.filePaths[0];
 });
 
+// Only ever hand http(s)/mailto URLs to the OS. The renderer loads remote
+// web content, so an XSS there must not be able to launch file:// or
+// arbitrary protocol handlers via this bridge.
+function isOpenableExternalUrl(url) {
+  if (typeof url !== "string") return false;
+  try {
+    const scheme = new URL(url).protocol;
+    return scheme === "http:" || scheme === "https:" || scheme === "mailto:";
+  } catch {
+    return false;
+  }
+}
+
 ipcMain.handle("shell:open-external", async (_event, url) => {
+  if (!isOpenableExternalUrl(url)) {
+    throw new Error("Refused to open URL with disallowed scheme.");
+  }
   await shell.openExternal(url);
 });
 
@@ -999,7 +1015,10 @@ ipcMain.handle("sync:pull", async (_event, { s3Prefix, localPath }) => {
   for (const obj of objects) {
     const relKey = obj.key.slice(s3Prefix.length);
     if (!relKey || relKey.endsWith("/")) continue;
-    const dest = path.join(localPath, relKey);
+    // A crafted object key (e.g. "../../") must not let a pull escape the
+    // chosen destination folder.
+    const dest = safeJoinMountRelative(localPath, relKey);
+    if (!dest) continue;
     reportProgress({ kind: "pull", current: done, total: objects.length, file: relKey });
     await downloadObject(s3, settings.storage.bucket, obj.key, dest);
     done++;
@@ -1036,15 +1055,14 @@ ipcMain.handle("local:open-folder", async (_event, folderPath) => {
 // HTTP body straight to disk. Defaults to ~/Downloads/<filename>.
 ipcMain.handle("files:download", async (_event, { url, filename, intoDir }) => {
   const { Readable } = require("node:stream");
+  // Never let a renderer-supplied filename carry path separators / "..".
+  const safeName = path.basename(filename || "download") || "download";
   let filePath;
   if (intoDir) {
     await fs.mkdir(intoDir, { recursive: true });
-    filePath = path.join(intoDir, filename || "download");
+    filePath = path.join(intoDir, safeName);
   } else {
-    const defaultPath = path.join(
-      app.getPath("downloads"),
-      filename || "download",
-    );
+    const defaultPath = path.join(app.getPath("downloads"), safeName);
     const res = await dialog.showSaveDialog(mainWindow, { defaultPath });
     if (res.canceled || !res.filePath) return { ok: false, cancelled: true };
     filePath = res.filePath;
@@ -1565,7 +1583,7 @@ function findPython() {
   // Studio itself ships a Python and macOS has python3 in /usr/bin. If
   // none is found, we surface a categorized error to the UI.
   const candidates = [
-    process.env.LAWN_PYTHON,
+    process.env.SNIP_PYTHON,
     "/usr/bin/python3",
     "/usr/local/bin/python3",
     "/opt/homebrew/bin/python3",
@@ -1589,7 +1607,7 @@ function spawnResolveBridge(args, { timeoutMs = 90_000 } = {}) {
       reject(
         new Error(
           "Couldn't find python3. Install it via `xcode-select --install` " +
-            "(macOS) or set LAWN_PYTHON env var to your Python interpreter.",
+            "(macOS) or set SNIP_PYTHON env var to your Python interpreter.",
         ),
       );
       return;
@@ -1645,7 +1663,7 @@ ipcMain.handle("resolve:snapshot", async (_event, { message, branch }) => {
   if (!settings.convexUrl || !settings.convexAuthToken) {
     throw new Error("Convex URL + auth token must be set in Settings first.");
   }
-  const tmpDir = path.join(app.getPath("temp"), "lawn-resolve");
+  const tmpDir = path.join(app.getPath("temp"), "snip-resolve");
   await fs.mkdir(tmpDir, { recursive: true });
   const fcpxmlPath = path.join(tmpDir, `snapshot-${Date.now()}.fcpxml`);
 
@@ -1712,7 +1730,7 @@ ipcMain.handle("resolve:restore", async (_event, { fcpxml }) => {
   if (typeof fcpxml !== "string" || !fcpxml) {
     throw new Error("FCPXML payload required.");
   }
-  const tmpDir = path.join(app.getPath("temp"), "lawn-resolve");
+  const tmpDir = path.join(app.getPath("temp"), "snip-resolve");
   await fs.mkdir(tmpDir, { recursive: true });
   const fcpxmlPath = path.join(tmpDir, `restore-${Date.now()}.fcpxml`);
   await fs.writeFile(fcpxmlPath, fcpxml, "utf8");
@@ -1918,7 +1936,7 @@ ipcMain.handle("premiere:restore-download", async (_event, { fcpxml, suggestedNa
   return { ok: true, path: result.filePath };
 });
 
-// ─── FCPXML → domain JSON parser (mirrors plugins/resolve/lawn_vit.py) ────
+// ─── FCPXML → domain JSON parser (mirrors the Resolve plugin parser) ────
 //
 // Lightweight XML walk using fast-xml-parser. We keep the parser tolerant —
 // Resolve emits FCPXML 1.10 with quirks across patch versions and we'd
@@ -2375,7 +2393,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 

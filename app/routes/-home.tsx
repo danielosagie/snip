@@ -280,9 +280,9 @@ export default function Homepage() {
           <blockquote className="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-tight mb-8">
             "I built snip because I got tired of waiting for Frame.io to load. Video review should be instant."
           </blockquote>
-          <a href="https://x.com/theo" target="_blank" rel="noopener noreferrer" className="inline-block border-2 border-[#f0f0e8] px-6 py-3 font-bold uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#FF6600] transition-colors">
-            — Theo
-          </a>
+          <span className="inline-block border-2 border-[#f0f0e8] px-6 py-3 font-bold uppercase tracking-wider">
+            — Casey Lund
+          </span>
         </div>
       </section>
 
@@ -384,8 +384,7 @@ export default function Homepage() {
             ],
             creator: {
               "@type": "Person",
-              name: "Theo",
-              url: "https://x.com/theo",
+              name: "Casey Lund",
             },
           }),
         }}

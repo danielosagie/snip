@@ -105,7 +105,7 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
     name: "default",
     jsx: (
       <TextOverlay
-        title="lawn"
+        title="snip"
         titleSize={200}
         subtitle="Video review that doesn't suck"
       />
@@ -115,7 +115,7 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
     name: "home",
     jsx: (
       <TextOverlay
-        title="lawn"
+        title="snip"
         titleSize={200}
         subtitle="Video review that doesn't suck"
       />
@@ -125,7 +125,7 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
     name: "compare-frameio",
     jsx: (
       <TextOverlay
-        title="lawn vs Frame.io"
+        title="snip vs Frame.io"
         titleSize={96}
         subtitle="$25/mo flat vs $19/user/mo"
       />
@@ -135,7 +135,7 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
     name: "compare-wipster",
     jsx: (
       <TextOverlay
-        title="lawn vs Wipster"
+        title="snip vs Wipster"
         titleSize={96}
         subtitle="Simpler. Cheaper. Open source."
       />
@@ -145,7 +145,7 @@ const images: { name: string; jsx: ReturnType<typeof TextOverlay> }[] = [
     name: "compare-lucidlink",
     jsx: (
       <TextOverlay
-        title="lawn vs LucidLink"
+        title="snip vs LucidLink"
         titleSize={88}
         subtitle="Review + your bucket mount"
       />

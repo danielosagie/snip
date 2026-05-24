@@ -379,7 +379,7 @@ export const generatePluginToken = mutation({
     // a shared-secret bearer token.
     const alphabet =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let token = "lawn_";
+    let token = "snip_";
     for (let i = 0; i < 48; i++) {
       token += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
     }
@@ -399,7 +399,7 @@ export const getPluginToken = query({
   },
 });
 
-/** Resolve project ↔ lawn project lookup helper. Returns project + team. */
+/** Resolve project ↔ snip project lookup helper. Returns project + team. */
 export const findProjectForPlugin = internalQuery({
   args: { projectId: v.id("projects"), teamId: v.id("teams") },
   handler: async (ctx, args): Promise<Doc<"projects"> | null> => {

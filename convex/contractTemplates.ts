@@ -295,7 +295,7 @@ export function buildSharedClauses(
       title: "Approval authority",
       required: true,
       order: order++,
-      bodyHtml: `<p>The only person authorized to approve the final deliverable on the client's behalf is <strong>${escape(answers.approverName)}</strong> (<a href="mailto:${escape(answers.approverEmail)}">${escape(answers.approverEmail)}</a>). Approval is signaled by that person clicking "Approve Final" inside the lawn platform.</p>`,
+      bodyHtml: `<p>The only person authorized to approve the final deliverable on the client's behalf is <strong>${escape(answers.approverName)}</strong> (<a href="mailto:${escape(answers.approverEmail)}">${escape(answers.approverEmail)}</a>). Approval is signaled by that person clicking "Approve Final" inside the snip platform.</p>`,
     },
     {
       id: "ip_transfer",
@@ -319,7 +319,7 @@ export function buildSharedClauses(
       title: "Stalled project",
       required: true,
       order: order++,
-      bodyHtml: `<p>If the client neither approves nor requests revisions within <strong>14 days</strong> of a deliverable being marked "Ready for Review", lawn will issue an automated reminder. If no response is received within an additional <strong>14 days</strong>, escrow is released to the agency and the project is considered closed. This clock pauses if the client formally requests an extension.</p>`,
+      bodyHtml: `<p>If the client neither approves nor requests revisions within <strong>14 days</strong> of a deliverable being marked "Ready for Review", snip will issue an automated reminder. If no response is received within an additional <strong>14 days</strong>, escrow is released to the agency and the project is considered closed. This clock pauses if the client formally requests an extension.</p>`,
     },
     {
       id: "dispute",

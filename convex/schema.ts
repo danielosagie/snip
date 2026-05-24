@@ -587,7 +587,7 @@ export default defineSchema({
     lastEditedBy: v.optional(v.string()),
   }).index("by_project", ["projectId"]),
 
-  // Timeline snapshots — lawn's vit-style version control for NLE timelines.
+  // Timeline snapshots — vit-style version control for NLE timelines.
   //
   // Each snapshot is a point-in-time capture of a Resolve / Premiere project,
   // serialized into domain-split JSON (cuts / color / audio / effects /

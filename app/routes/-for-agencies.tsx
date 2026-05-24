@@ -188,7 +188,7 @@ export default function ForAgencies() {
                       </div>
                       <div className="p-6 md:p-8 flex-1 border-b-2 sm:border-b-0 sm:border-r-2 border-[#1a1a1a] bg-[#f0f0e8]">
                         <span className="text-xs font-bold tracking-widest text-[#888] block mb-1">
-                          LAWN
+                          SNIP
                         </span>
                         <span className="text-3xl font-black text-[#FF6600]">
                           {row.snip}
