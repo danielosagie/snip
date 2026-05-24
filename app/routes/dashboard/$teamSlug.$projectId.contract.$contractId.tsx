@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
 import { ContractToolbar } from "@/components/contracts/ContractToolbar";
+import { DocumentOutline } from "@/components/contracts/DocumentOutline";
 import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
@@ -103,6 +104,8 @@ function ContractEditorPage() {
   const data = useQuery(api.contractsTable.get, { contractId });
   const updateContract = useMutation(api.contractsTable.update);
   const [fieldsSheetOpen, setFieldsSheetOpen] = useState(false);
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [outlineOpen, setOutlineOpen] = useState(true);
 
   if (data === undefined) {
     return (
@@ -186,12 +189,25 @@ function ContractEditorPage() {
       <div className="flex-1 overflow-y-auto">
         <div
           className={cn(
-            "max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 gap-6",
-            !isDocument && "lg:grid-cols-[1fr_320px]",
+            "max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 gap-6",
+            isDocument
+              ? outlineOpen
+                ? "lg:grid-cols-[220px_1fr]"
+                : "lg:grid-cols-[auto_1fr]"
+              : outlineOpen
+                ? "lg:grid-cols-[220px_1fr_320px]"
+                : "lg:grid-cols-[auto_1fr_320px]",
           )}
         >
+          <DocumentOutline
+            editor={editor}
+            open={outlineOpen}
+            onOpenChange={setOutlineOpen}
+          />
           <ContractBody
             contract={data.contract}
+            editor={editor}
+            onEditorReady={setEditor}
             onOpenFields={
               isDocument ? undefined : () => setFieldsSheetOpen(true)
             }
@@ -232,9 +248,13 @@ function ContractEditorPage() {
 
 function ContractBody({
   contract,
+  editor,
+  onEditorReady,
   onOpenFields,
 }: {
   contract: ContractDoc;
+  editor: Editor | null;
+  onEditorReady: (editor: Editor) => void;
   /** Omitted for plain documents — hides the toolbar's "Fields" button. */
   onOpenFields?: () => void;
 }) {
@@ -242,7 +262,6 @@ function ContractBody({
   const [body, setBody] = useState<string>(contract.contentHtml ?? "");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [editor, setEditor] = useState<Editor | null>(null);
   const isEditable = contract.status === "draft";
 
   // Re-sync local state if the contract row changes from outside (e.g.
@@ -293,7 +312,7 @@ function ContractBody({
         html={body}
         editable={isEditable}
         resyncWithHtml={!dirty}
-        onEditorReady={setEditor}
+        onEditorReady={onEditorReady}
         onChange={(next) => {
           setBody(next);
           setDirty(true);
