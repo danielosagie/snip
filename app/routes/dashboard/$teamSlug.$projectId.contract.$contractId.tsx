@@ -11,6 +11,7 @@ import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
 import { ContractToolbar } from "@/components/contracts/ContractToolbar";
 import { DocumentOutline } from "@/components/contracts/DocumentOutline";
 import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
+import { ContractWizardFullScreen } from "@/components/contracts/ContractWizardFullScreen";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
 import {
@@ -103,7 +104,9 @@ function ContractEditorPage() {
 
   const data = useQuery(api.contractsTable.get, { contractId });
   const updateContract = useMutation(api.contractsTable.update);
+  const applyWizard = useMutation(api.contractsTable.applyWizard);
   const [fieldsSheetOpen, setFieldsSheetOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(true);
 
@@ -208,6 +211,11 @@ function ContractEditorPage() {
             contract={data.contract}
             editor={editor}
             onEditorReady={setEditor}
+            onRunWizard={
+              data.contract.status === "draft"
+                ? () => setWizardOpen(true)
+                : undefined
+            }
             onOpenFields={
               isDocument ? undefined : () => setFieldsSheetOpen(true)
             }
@@ -242,6 +250,21 @@ function ContractEditorPage() {
           isDraft={data.contract.status === "draft"}
         />
       )}
+
+      {wizardOpen && (
+        <ContractWizardFullScreen
+          projectId={projectId}
+          projectName={data.contract.title}
+          onClose={() => setWizardOpen(false)}
+          onComplete={() => {
+            // The body re-syncs from contract.contentHtml on the next query
+            // tick (ContractBody resyncs while not dirty).
+          }}
+          onGenerate={async (projectType, answers) => {
+            await applyWizard({ contractId, projectType, answers });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -251,12 +274,15 @@ function ContractBody({
   editor,
   onEditorReady,
   onOpenFields,
+  onRunWizard,
 }: {
   contract: ContractDoc;
   editor: Editor | null;
   onEditorReady: (editor: Editor) => void;
   /** Omitted for plain documents — hides the toolbar's "Fields" button. */
   onOpenFields?: () => void;
+  /** Omitted unless the contract is a draft — opens the setup wizard. */
+  onRunWizard?: () => void;
 }) {
   const update = useMutation(api.contractsTable.update);
   const [body, setBody] = useState<string>(contract.contentHtml ?? "");
@@ -294,15 +320,27 @@ function ContractBody({
 
   return (
     <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] p-6">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="text-xl font-black uppercase tracking-tighter text-[#1a1a1a]">
           Body
         </h2>
-        {isEditable && (
-          <span className="text-[10px] font-mono uppercase tracking-wider text-[#888]">
-            {saving ? "Saving…" : dirty ? "Unsaved" : "Saved"}
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {onRunWizard && (
+            <button
+              type="button"
+              onClick={onRunWizard}
+              className="inline-flex items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2.5 h-7 text-[10px] font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] transition-colors"
+              title="Generate the contract from a few questions"
+            >
+              Run setup wizard
+            </button>
+          )}
+          {isEditable && (
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#888]">
+              {saving ? "Saving…" : dirty ? "Unsaved" : "Saved"}
+            </span>
+          )}
+        </div>
       </div>
       <ContractToolbar
         editor={editor && !editor.isDestroyed ? editor : null}

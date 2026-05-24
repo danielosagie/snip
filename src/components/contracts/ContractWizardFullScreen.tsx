@@ -95,6 +95,15 @@ interface Props {
   /** Fired after a successful generation; the parent can re-hydrate
    *  the editor with the newly generated clauses. */
   onComplete: () => void;
+  /** When provided, the wizard calls this instead of writing the legacy
+   *  project.contract — lets the unified multi-contract editor apply the
+   *  generated clauses onto a specific contract row. */
+  onGenerate?: (
+    projectType: ProjectType,
+    answers: {
+      entries: Array<{ key: string; value: string | number | boolean | null }>;
+    },
+  ) => Promise<void>;
 }
 
 export function ContractWizardFullScreen({
@@ -102,6 +111,7 @@ export function ContractWizardFullScreen({
   projectName,
   onClose,
   onComplete,
+  onGenerate,
 }: Props) {
   const startFromWizard = useMutation(api.contractClauses.startFromWizard);
 
@@ -266,11 +276,15 @@ export function ContractWizardFullScreen({
         key,
         value: value ?? null,
       }));
-      await startFromWizard({
-        projectId,
-        projectType,
-        answers: { entries },
-      });
+      if (onGenerate) {
+        await onGenerate(projectType, { entries });
+      } else {
+        await startFromWizard({
+          projectId,
+          projectType,
+          answers: { entries },
+        });
+      }
       onComplete();
       onClose();
     } catch (e) {

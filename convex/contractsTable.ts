@@ -11,6 +11,24 @@ import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { identityName, requireProjectAccess, requireUser } from "./auth";
 import { generateUniqueToken } from "./security";
+import {
+  generateClausesFromAnswers,
+  renderClausesAsHtml,
+  type ProjectType,
+  type WizardAnswers,
+} from "./contractTemplates";
+
+const projectTypeValidator = v.union(
+  v.literal("logo_design"),
+  v.literal("video_production"),
+  v.literal("web_design"),
+  v.literal("photography"),
+  v.literal("brand_identity"),
+  v.literal("copywriting"),
+  v.literal("music"),
+  v.literal("animation"),
+  v.literal("custom"),
+);
 
 /**
  * Multi-contract management. Replaces the singleton `projects.contract`
@@ -247,6 +265,71 @@ export const update = mutation({
     if (args.clientName !== undefined) patch.clientName = args.clientName;
     if (args.clientEmail !== undefined) patch.clientEmail = args.clientEmail;
     await ctx.db.patch(args.contractId, patch);
+  },
+});
+
+// Setup wizard applied to a contract ROW (the multi-contract port of
+// contractClauses.startFromWizard, which wrote the legacy project.contract).
+// Regenerates clauses + body HTML from the answers and writes them onto the row.
+export const applyWizard = mutation({
+  args: {
+    contractId: v.id("contracts"),
+    projectType: projectTypeValidator,
+    answers: v.object({
+      entries: v.array(
+        v.object({
+          key: v.string(),
+          value: v.union(v.string(), v.number(), v.boolean(), v.null()),
+        }),
+      ),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    if (contract.status !== "draft") {
+      throw new Error("Only draft contracts can run the wizard.");
+    }
+    const answers: WizardAnswers = {};
+    for (const e of args.answers.entries) answers[e.key] = e.value;
+
+    const drafts = generateClausesFromAnswers(
+      args.projectType as ProjectType,
+      answers,
+    );
+    const clauses = drafts.map((d) => ({
+      id: d.id,
+      sectionKey: d.sectionKey,
+      title: d.title,
+      bodyHtml: d.bodyHtml,
+      state: "draft" as const,
+      required: d.required,
+      order: d.order,
+      sourceAnswerId: d.sourceAnswerId,
+    }));
+    const contentHtml = renderClausesAsHtml(clauses);
+    const priceDollars =
+      typeof answers.priceDollars === "number"
+        ? answers.priceDollars
+        : parseFloat(String(answers.priceDollars ?? "0"));
+    const priceCents = Number.isFinite(priceDollars)
+      ? Math.round(priceDollars * 100)
+      : undefined;
+
+    await ctx.db.patch(args.contractId, {
+      contentHtml,
+      clauses,
+      projectType: args.projectType,
+      wizardAnswers: JSON.stringify(answers),
+      clientName:
+        typeof answers.clientName === "string" ? answers.clientName : undefined,
+      clientEmail:
+        typeof answers.clientEmail === "string" ? answers.clientEmail : undefined,
+      priceCents,
+      currency: "usd",
+      deadline:
+        typeof answers.deadline === "string" ? answers.deadline : undefined,
+      lastSavedAt: Date.now(),
+    });
   },
 });
 
