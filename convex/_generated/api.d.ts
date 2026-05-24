@@ -47,6 +47,8 @@ import type * as security from "../security.js";
 import type * as shareAccess from "../shareAccess.js";
 import type * as shareBundles from "../shareBundles.js";
 import type * as shareLinks from "../shareLinks.js";
+import type * as storageAccess from "../storageAccess.js";
+import type * as storageCredentials from "../storageCredentials.js";
 import type * as stripeConnect from "../stripeConnect.js";
 import type * as stripeConnectActions from "../stripeConnectActions.js";
 import type * as teams from "../teams.js";
@@ -108,6 +110,8 @@ declare const fullApi: ApiFromModules<{
   shareAccess: typeof shareAccess;
   shareBundles: typeof shareBundles;
   shareLinks: typeof shareLinks;
+  storageAccess: typeof storageAccess;
+  storageCredentials: typeof storageCredentials;
   stripeConnect: typeof stripeConnect;
   stripeConnectActions: typeof stripeConnectActions;
   teams: typeof teams;

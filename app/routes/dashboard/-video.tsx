@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Id } from "@convex/_generated/dataModel";
 import { projectPath, teamHomePath } from "@/lib/routes";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmProject } from "./-project.data";
 import { prewarmTeam } from "./-team.data";
@@ -716,7 +717,7 @@ export default function VideoPage() {
                 ) : (
                   <article
                     className="prose prose-sm max-w-none text-[#1a1a1a]"
-                    dangerouslySetInnerHTML={{ __html: docHtml }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(docHtml) }}
                   />
                 )}
               </div>

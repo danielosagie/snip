@@ -464,6 +464,9 @@ function DesktopAppOrDrive() {
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Epoch ms when the current storage credential expires (scoped creds
+  // only; null for the legacy shared key). Drives the refresh timer.
+  const [credExpiresAt, setCredExpiresAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.snipDesktop?.isDesktop || !window.api) return;
@@ -471,6 +474,33 @@ function DesktopAppOrDrive() {
     void window.api.mount.status().then(setMount).catch(() => {});
     return window.api.mount.onStatus(setMount);
   }, []);
+
+  // Scoped credentials are short-lived. Re-vend shortly before expiry and
+  // remount so the long-lived FUSE mount keeps a valid token. Inert when
+  // creds don't expire (shared-key deployments leave credExpiresAt null).
+  const mountStatus = mount?.status ?? null;
+  useEffect(() => {
+    if (!credExpiresAt) return;
+    if (typeof window === "undefined" || !window.api) return;
+    const leadMs = 5 * 60_000;
+    const delay = Math.max(0, credExpiresAt - Date.now() - leadMs);
+    const timer = setTimeout(async () => {
+      try {
+        const boot = await getStorageBootstrap({});
+        if (!boot || !window.api) return;
+        const cur = await window.api.settings.get();
+        await window.api.settings.set({
+          ...cur,
+          storage: { ...cur.storage, ...boot },
+        });
+        if (mountStatus === "mounted") await window.api.mount.start({});
+        setCredExpiresAt(boot.expiresAt ?? null);
+      } catch {
+        // Keep existing creds; the next user action can re-enable.
+      }
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [credExpiresAt, mountStatus, getStorageBootstrap]);
 
   const enable = useCallback(async () => {
     if (!window.api) {
@@ -487,6 +517,7 @@ function DesktopAppOrDrive() {
       }
       const cur = await window.api.settings.get();
       await window.api.settings.set({ ...cur, storage: { ...cur.storage, ...boot } });
+      setCredExpiresAt(boot.expiresAt ?? null);
       await window.api.mount.start({});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't enable the drive.");

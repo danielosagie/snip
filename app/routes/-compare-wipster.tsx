@@ -218,7 +218,7 @@ export default function CompareWipster() {
               trust required. Just code you can read, fork, and judge silently.
             </p>
             <a
-              href="https://github.com/pingdotgg/lawn"
+              href="https://github.com/danielosagie/snip"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block mt-4 text-sm font-black uppercase tracking-wider underline underline-offset-4 hover:text-[var(--accent-light)] transition-colors"

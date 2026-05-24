@@ -25,7 +25,6 @@ export const Route = createRootRoute({
           "Video review and collaboration for creative teams. Frame-accurate comments, unlimited seats, flat pricing from $25/month. The open source Frame.io alternative.",
       },
       { property: "og:site_name", content: "snip" },
-      { name: "twitter:site", content: "@theo" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -89,7 +88,7 @@ function RootDocument({ children }: { children: ReactNode }) {
   const themeInitScript = `
     (() => {
       try {
-        const stored = localStorage.getItem("lawn-theme");
+        const stored = localStorage.getItem("snip-theme") || localStorage.getItem("lawn-theme");
         if (stored === "light" || stored === "dark") {
           document.documentElement.setAttribute("data-theme", stored);
           return;

@@ -70,6 +70,12 @@ whitespace do the heavy lifting.
   at CI time), and any in-product logo surface. Filename is kept
   stable to avoid breaking static references — replace the contents,
   not the path.
-- Bulk rebrand happened via sed; a few historic identifiers stayed for safety:
-  - `localStorage` keys (`lawn-theme`, `lawn:sidebar:collapsed`, `lawn.presence.client_id`)
-  - The GitHub URL `github.com/pingdotgg/lawn`
+- Bulk rebrand happened via sed. The remaining `lawn` linkage has since been
+  scrubbed:
+  - `localStorage` keys are now `snip-theme`, `snip:sidebar:collapsed`,
+    `snip.presence.client_id`. The readers still fall back to the old `lawn-*`
+    keys once so existing users don't lose their preferences — that fallback
+    can be dropped later.
+  - Public GitHub links point to `github.com/danielosagie/snip`. (The git
+    `origin` remote may still be `pingdotgg/lawn`; that's a local git config,
+    not a source reference.)

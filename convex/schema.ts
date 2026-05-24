@@ -72,6 +72,12 @@ export default defineSchema({
     invitedByName: v.string(),
     token: v.string(),
     expiresAt: v.number(),
+    // Optional explicit storage scope chosen at invite time: the bucket
+    // path prefixes this member may access. Absent/empty = full team
+    // access (their role's default). Materialized into per-user
+    // folderPermissions on accept; the vended credential is scoped to
+    // exactly these prefixes so the restriction is storage-enforced.
+    folderScope: v.optional(v.array(v.string())),
   })
     .index("by_team", ["teamId"])
     .index("by_email", ["email"])
@@ -617,7 +623,7 @@ export default defineSchema({
     lastEditedBy: v.optional(v.string()),
   }).index("by_project", ["projectId"]),
 
-  // Timeline snapshots — lawn's vit-style version control for NLE timelines.
+  // Timeline snapshots — vit-style version control for NLE timelines.
   //
   // Each snapshot is a point-in-time capture of a Resolve / Premiere project,
   // serialized into domain-split JSON (cuts / color / audio / effects /

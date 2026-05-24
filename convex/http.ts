@@ -126,7 +126,7 @@ registerRoutes(http, components.stripe, {
 });
 
 /**
- * Resolve / Premiere plugin → lawn snapshot ingest.
+ * Resolve / Premiere plugin → snip snapshot ingest.
  *
  * Auth: Bearer pluginToken from the team. Plugin POSTs a JSON body with
  * domain-split timeline payloads + project pointer. We verify the token,

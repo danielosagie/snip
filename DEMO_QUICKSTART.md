@@ -24,7 +24,7 @@ settings screen and refuses to push/pull until creds are entered.
 ## 1. Sign up for Convex
 
 1. Go to https://convex.dev and click "Sign in" (free tier is enough).
-2. In the repo: `cd /Users/dosagie/Documents/CodeProjects/lawn-fork`
+2. In the repo: `cd /path/to/snip`
 3. Run `bunx convex dev` and follow the prompts. It will:
    - Open a browser to authorize
    - Create a new deployment for this project

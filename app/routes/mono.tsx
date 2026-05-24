@@ -167,7 +167,7 @@ export default function HomepageMono() {
             "I built snip because I got tired of waiting for Frame.io to load.
             Video review should be instant."
           </blockquote>
-          <p className="mt-4 text-[#888]">— <a href="https://x.com/theo" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#1a1a1a]">Theo</a></p>
+          <p className="mt-4 text-[#888]">— Casey Lund</p>
         </div>
       </section>
 

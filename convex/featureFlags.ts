@@ -27,7 +27,7 @@ function hasAll(...names: string[]): boolean {
 }
 
 export const FEATURES = {
-  /** Lawn's SaaS billing (existing) — Stripe customer/subscription for team plans. */
+  /** SaaS billing — Stripe customer/subscription for team plans. */
   stripeBilling: () => has("STRIPE_SECRET_KEY"),
 
   /** Stripe Connect for agency → client payments. Reuses STRIPE_SECRET_KEY. */

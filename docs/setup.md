@@ -60,7 +60,7 @@ you need.
 
 - `STRIPE_SECRET_KEY` (shared by both)
 - `STRIPE_WEBHOOK_SECRET`
-- `STRIPE_PRICE_BASIC_MONTHLY` (Lawn's existing team subscription)
+- `STRIPE_PRICE_BASIC_MONTHLY` (the team subscription)
 - `STRIPE_PRICE_PRO_MONTHLY`
 - `VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS` (optional, default 0 — set to e.g. 100 for 1%)
 
@@ -79,7 +79,7 @@ Cloudflare R2 (recommended for desktop sync — no egress fees):
 - `R2_PUBLIC_URL` (the public r2.dev or custom-domain URL for the bucket)
 - `R2_REGION` (optional, defaults to `auto`)
 
-Or Railway S3 (Lawn's original setup):
+Or Railway S3 (the original setup):
 
 - `RAILWAY_ACCESS_KEY_ID`
 - `RAILWAY_SECRET_ACCESS_KEY`

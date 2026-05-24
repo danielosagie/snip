@@ -1,18 +1,15 @@
-# lawn
+# snip
 
-Video review platform for creative teams. Built by Theo.
+Video review + contracts + paywalled delivery for creative teams.
 
-## IMPORTANT NOTICE
+## ...why build this?
 
-I am, effectively, not accepting PRs at this time. This may change in the future. My preferred "PR" method is to describe problems in the issues tab and give me detailed prompts I can quickly copy/paste into my agent of choice.
+I got tired of Frame.io slowly regressing. I wanted something simple, fast and
+reliable — so snip is the review tool plus the contract and paywalled-delivery
+flow my team needs day to day.
 
-## ...why did you build this?
-
-I got tired of Frame.io slowly regressing. I wanted something simple, fast and reliable.
-
-I don't know how much time I'll have to maintain this long term, so I decided to open source it. I have no idea where this project is going long term.
-
-My team is using lawn every day already. We intend to continue, and we intend to keep adding things we need throughout.
+I don't know how much time I'll have to maintain this long term, so I decided to
+open source it.
 
 ## Docs
 

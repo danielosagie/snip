@@ -2,6 +2,7 @@ import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { SnipMark } from "@/components/SnipMark";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 /**
  * Public-by-token contract viewer. Consumes the token written by
@@ -81,7 +82,9 @@ function ContractShareViewer() {
           <div
             className="prose prose-sm max-w-none text-[#1a1a1a]"
             dangerouslySetInnerHTML={{
-              __html: contract.contentHtml || "<p><em>(no body yet)</em></p>",
+              __html: contract.contentHtml
+                ? sanitizeHtml(contract.contentHtml)
+                : "<p><em>(no body yet)</em></p>",
             }}
           />
         </article>

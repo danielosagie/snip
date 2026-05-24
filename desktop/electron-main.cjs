@@ -1,7 +1,7 @@
 // Electron main process. Plain CJS so it runs without a build step.
 // Talks to the renderer (React UI in src/) via IPC.
 
-const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
@@ -48,6 +48,7 @@ const DEFAULT_SETTINGS = {
     endpoint: "",
     accessKeyId: "",
     secretAccessKey: "",
+    sessionToken: "",
     region: "auto",
   },
   rootDir: path.join(app.getPath("home"), "VideoInfra"),
@@ -57,6 +58,50 @@ const DEFAULT_SETTINGS = {
   autoMount: true,
   features: DEFAULT_FEATURES,
 };
+
+// Secret fields encrypted at rest in settings.json via Electron
+// safeStorage (OS keychain — Keychain on macOS). Backward compatible:
+// legacy plaintext values are read as-is and re-encrypted on next save.
+// If the OS keychain is unavailable we fall back to plaintext (matching
+// the previous behavior) rather than locking the user out.
+const SECRET_PATHS = [
+  ["convexAuthToken"],
+  ["storage", "accessKeyId"],
+  ["storage", "secretAccessKey"],
+  ["storage", "sessionToken"],
+];
+const ENC_PREFIX = "enc:v1:";
+
+function encryptSecret(value) {
+  if (typeof value !== "string" || value.length === 0) return value;
+  if (value.startsWith(ENC_PREFIX)) return value;
+  if (!safeStorage.isEncryptionAvailable()) return value;
+  return ENC_PREFIX + safeStorage.encryptString(value).toString("base64");
+}
+
+function decryptSecret(value) {
+  if (typeof value !== "string" || !value.startsWith(ENC_PREFIX)) return value;
+  if (!safeStorage.isEncryptionAvailable()) return "";
+  try {
+    return safeStorage.decryptString(
+      Buffer.from(value.slice(ENC_PREFIX.length), "base64"),
+    );
+  } catch {
+    return "";
+  }
+}
+
+function transformSecrets(settings, fn) {
+  const out = { ...settings, storage: { ...(settings.storage || {}) } };
+  for (const parts of SECRET_PATHS) {
+    if (parts.length === 1) {
+      if (parts[0] in out) out[parts[0]] = fn(out[parts[0]]);
+    } else if (out[parts[0]] && parts[1] in out[parts[0]]) {
+      out[parts[0]][parts[1]] = fn(out[parts[0]][parts[1]]);
+    }
+  }
+  return out;
+}
 
 async function loadSettings() {
   try {
@@ -68,7 +113,10 @@ async function loadSettings() {
     for (const key of Object.keys(DEFAULT_FEATURES)) {
       features[key] = { ...DEFAULT_FEATURES[key], ...(features[key] || {}) };
     }
-    return { ...DEFAULT_SETTINGS, ...parsed, features };
+    return transformSecrets(
+      { ...DEFAULT_SETTINGS, ...parsed, features },
+      decryptSecret,
+    );
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -76,7 +124,15 @@ async function loadSettings() {
 
 async function saveSettings(settings) {
   await fs.mkdir(SETTINGS_DIR, { recursive: true });
-  await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  const onDisk = transformSecrets(settings, encryptSecret);
+  await fs.writeFile(SETTINGS_FILE, JSON.stringify(onDisk, null, 2), {
+    mode: 0o600,
+  });
+  try {
+    await fs.chmod(SETTINGS_FILE, 0o600);
+  } catch {
+    // best-effort on platforms without POSIX perms
+  }
 }
 
 // ---- S3 helpers --------------------------------------------------------------
@@ -91,6 +147,9 @@ function makeS3(settings) {
     credentials: {
       accessKeyId: s.accessKeyId,
       secretAccessKey: s.secretAccessKey,
+      // Present for scoped (temporary) credentials; omitted for the
+      // legacy long-lived key.
+      ...(s.sessionToken ? { sessionToken: s.sessionToken } : {}),
     },
     forcePathStyle: s.provider === "railway",
   });
@@ -992,7 +1051,23 @@ ipcMain.handle("dialog:pick-folder", async () => {
   return result.filePaths[0];
 });
 
+// Only ever hand http(s)/mailto URLs to the OS. The renderer loads remote
+// web content, so an XSS there must not be able to launch file:// or
+// arbitrary protocol handlers via this bridge.
+function isOpenableExternalUrl(url) {
+  if (typeof url !== "string") return false;
+  try {
+    const scheme = new URL(url).protocol;
+    return scheme === "http:" || scheme === "https:" || scheme === "mailto:";
+  } catch {
+    return false;
+  }
+}
+
 ipcMain.handle("shell:open-external", async (_event, url) => {
+  if (!isOpenableExternalUrl(url)) {
+    throw new Error("Refused to open URL with disallowed scheme.");
+  }
   await shell.openExternal(url);
 });
 
@@ -1005,7 +1080,10 @@ ipcMain.handle("sync:pull", async (_event, { s3Prefix, localPath }) => {
   for (const obj of objects) {
     const relKey = obj.key.slice(s3Prefix.length);
     if (!relKey || relKey.endsWith("/")) continue;
-    const dest = path.join(localPath, relKey);
+    // A crafted object key (e.g. "../../") must not let a pull escape the
+    // chosen destination folder.
+    const dest = safeJoinMountRelative(localPath, relKey);
+    if (!dest) continue;
     reportProgress({ kind: "pull", current: done, total: objects.length, file: relKey });
     await downloadObject(s3, settings.storage.bucket, obj.key, dest);
     done++;
@@ -1042,15 +1120,14 @@ ipcMain.handle("local:open-folder", async (_event, folderPath) => {
 // HTTP body straight to disk. Defaults to ~/Downloads/<filename>.
 ipcMain.handle("files:download", async (_event, { url, filename, intoDir }) => {
   const { Readable } = require("node:stream");
+  // Never let a renderer-supplied filename carry path separators / "..".
+  const safeName = path.basename(filename || "download") || "download";
   let filePath;
   if (intoDir) {
     await fs.mkdir(intoDir, { recursive: true });
-    filePath = path.join(intoDir, filename || "download");
+    filePath = path.join(intoDir, safeName);
   } else {
-    const defaultPath = path.join(
-      app.getPath("downloads"),
-      filename || "download",
-    );
+    const defaultPath = path.join(app.getPath("downloads"), safeName);
     const res = await dialog.showSaveDialog(mainWindow, { defaultPath });
     if (res.canceled || !res.filePath) return { ok: false, cancelled: true };
     filePath = res.filePath;
@@ -1332,6 +1409,11 @@ async function startMount({ mountPath } = {}) {
     RCLONE_CONFIG_VIDEOINFRA_ENDPOINT: s.endpoint,
     RCLONE_CONFIG_VIDEOINFRA_REGION: s.region || "auto",
     RCLONE_CONFIG_VIDEOINFRA_ACL: "private",
+    // Scoped (temporary) credentials carry a session token; the legacy
+    // long-lived key does not. rclone reads this at mount start.
+    ...(s.sessionToken
+      ? { RCLONE_CONFIG_VIDEOINFRA_SESSION_TOKEN: s.sessionToken }
+      : {}),
   };
 
   // ── Optional: layer in LAN-peer caches as the first upstreams ──
@@ -1582,7 +1664,7 @@ function findPython() {
   // Studio itself ships a Python and macOS has python3 in /usr/bin. If
   // none is found, we surface a categorized error to the UI.
   const candidates = [
-    process.env.LAWN_PYTHON,
+    process.env.SNIP_PYTHON,
     "/usr/bin/python3",
     "/usr/local/bin/python3",
     "/opt/homebrew/bin/python3",
@@ -1606,7 +1688,7 @@ function spawnResolveBridge(args, { timeoutMs = 90_000 } = {}) {
       reject(
         new Error(
           "Couldn't find python3. Install it via `xcode-select --install` " +
-            "(macOS) or set LAWN_PYTHON env var to your Python interpreter.",
+            "(macOS) or set SNIP_PYTHON env var to your Python interpreter.",
         ),
       );
       return;
@@ -1662,7 +1744,7 @@ ipcMain.handle("resolve:snapshot", async (_event, { message, branch }) => {
   if (!settings.convexUrl || !settings.convexAuthToken) {
     throw new Error("Convex URL + auth token must be set in Settings first.");
   }
-  const tmpDir = path.join(app.getPath("temp"), "lawn-resolve");
+  const tmpDir = path.join(app.getPath("temp"), "snip-resolve");
   await fs.mkdir(tmpDir, { recursive: true });
   const fcpxmlPath = path.join(tmpDir, `snapshot-${Date.now()}.fcpxml`);
 
@@ -1729,7 +1811,7 @@ ipcMain.handle("resolve:restore", async (_event, { fcpxml }) => {
   if (typeof fcpxml !== "string" || !fcpxml) {
     throw new Error("FCPXML payload required.");
   }
-  const tmpDir = path.join(app.getPath("temp"), "lawn-resolve");
+  const tmpDir = path.join(app.getPath("temp"), "snip-resolve");
   await fs.mkdir(tmpDir, { recursive: true });
   const fcpxmlPath = path.join(tmpDir, `restore-${Date.now()}.fcpxml`);
   await fs.writeFile(fcpxmlPath, fcpxml, "utf8");
@@ -1935,7 +2017,7 @@ ipcMain.handle("premiere:restore-download", async (_event, { fcpxml, suggestedNa
   return { ok: true, path: result.filePath };
 });
 
-// ─── FCPXML → domain JSON parser (mirrors plugins/resolve/lawn_vit.py) ────
+// ─── FCPXML → domain JSON parser (mirrors the Resolve plugin parser) ────
 //
 // Lightweight XML walk using fast-xml-parser. We keep the parser tolerant —
 // Resolve emits FCPXML 1.10 with quirks across patch versions and we'd
@@ -2392,7 +2474,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 

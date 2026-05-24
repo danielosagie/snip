@@ -1,9 +1,9 @@
 # Resolve integration
 
 > **Heads up:** the standalone Resolve plugin from earlier builds is gone.
-> The lawn desktop app now talks to Resolve directly via the scripting
+> The snip desktop app now talks to Resolve directly via the scripting
 > API. Everything — save / open / compare — happens from the desktop app.
-> No second install dance, no plugin folder, no `~/.lawn/config.json`.
+> No second install dance, no plugin folder, no `~/.snip/config.json`.
 
 ## Prerequisites (one-time, ~3 minutes)
 
@@ -14,7 +14,7 @@
    - Restart Resolve.
 3. **Python 3** — macOS already has `/usr/bin/python3`. If not, install
    via `xcode-select --install`. The desktop app looks for python3 in:
-   - `$LAWN_PYTHON` env var
+   - `$SNIP_PYTHON` env var
    - `/usr/bin/python3`
    - `/usr/local/bin/python3`
    - `/opt/homebrew/bin/python3`
@@ -24,7 +24,7 @@ That's it. No Resolve plugin to install.
 
 ## How to use
 
-Open the lawn desktop app, sign in, open a project. You'll see a
+Open the snip desktop app, sign in, open a project. You'll see a
 **Resolve history** section under the version folders. Three things to
 know:
 
@@ -37,7 +37,7 @@ desktop app:
 1. Tells Resolve to export the current timeline as FCPXML 1.10.
 2. Parses it into six domain views (cuts / color / audio / effects /
    markers / metadata).
-3. Uploads to lawn as a new save on the current thread.
+3. Uploads to snip as a new save on the current thread.
 
 Saves are immutable. To "fix" one, save again — like git commits.
 
@@ -68,7 +68,7 @@ The "Resolve history" header shows the live status of your Resolve:
 
 | Badge | Meaning | Fix |
 |---|---|---|
-| `CONNECTED` | Resolve is open, lawn can talk to it | — |
+| `CONNECTED` | Resolve is open, snip can talk to it | — |
 | `NOT_RUNNING` | Resolve isn't open | Open Resolve, click **Refresh** |
 | `SCRIPTING_OFF` | Resolve is open but scripting is disabled | Preferences → System → General → External scripting = Local |
 | `API_UNAVAILABLE` | The scripting Python module isn't installed | Install Resolve Studio (free version blocks this) |

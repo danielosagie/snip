@@ -1,7 +1,6 @@
 const SITE_URL = "https://snip.film";
 const SITE_NAME = "snip";
 const DEFAULT_OG_IMAGE = "/og/default.png";
-const TWITTER_HANDLE = "@theo";
 
 type SeoOptions = {
   title: string;
@@ -43,7 +42,6 @@ export function seoHead({
     { name: "twitter:title", content: fullTitle },
     { name: "twitter:description", content: description },
     { name: "twitter:image", content: imageUrl },
-    { name: "twitter:site", content: TWITTER_HANDLE },
   ];
 
   if (noIndex) {
