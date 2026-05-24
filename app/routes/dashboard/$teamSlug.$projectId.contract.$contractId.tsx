@@ -212,7 +212,7 @@ function ContractEditorPage() {
             editor={editor}
             onEditorReady={setEditor}
             onRunWizard={
-              data.contract.status === "draft"
+              data.contract.status === "draft" && !isDocument
                 ? () => setWizardOpen(true)
                 : undefined
             }

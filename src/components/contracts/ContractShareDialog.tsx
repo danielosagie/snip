@@ -14,40 +14,40 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Check,
-  Copy,
-  ExternalLink,
-  PenSquare,
-  Eye,
+  ChevronDown,
+  Globe,
+  Link2,
+  Lock,
   FileSignature,
-  Send,
+  User,
   AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Share dialog for the contract. Replaces the single "Send for
- * signature" button with a multi-tab dialog so the user can invite
- * three flavors of collaborator:
- *
- *   - **Signer** — the client. Routes through the existing
- *     `sendContractForSignature` mutation (production: Dropbox Sign
- *     or Docusign; demo: simulated).
- *   - **Reviewer** — read-only access via a share link. Hooked up to
- *     a placeholder for now; real implementation lands when we wire
- *     the contract-share-link table.
- *   - **Editor** — full edit access via a share link. Same as
- *     reviewer at the data layer for now; just shown so the user can
- *     see the intended access model.
- *
- * The "demo sign as client" affordance that used to live below the
- * contract canvas now lives inside the Signer tab, so the doc area
- * stays clean.
+ * Google-Drive-style share dialog for a contract/document:
+ *   - "People with access" (the owner today; per-person invites later).
+ *   - "General access" — link access with a Viewer/Editor role dropdown +
+ *     Copy link (backed by createContractShareLink).
+ *   - "Signing" — the contract-specific action that opens the signing editor
+ *     (recipients, field placement, audit trail, certificate). No demo stub.
  */
+
+type LinkRole = "review" | "edit";
+
+const ROLE_META: Record<LinkRole, { label: string; help: string }> = {
+  review: { label: "Reviewer", help: "Can read + leave comments" },
+  edit: { label: "Editor", help: "Can edit the contract" },
+};
 
 interface Props {
   projectId: Id<"projects">;
@@ -58,29 +58,6 @@ interface Props {
   signedByName: string | undefined;
   signedAt: number | undefined;
 }
-
-type Tab = "sign" | "review" | "edit";
-
-const TAB_META: Record<
-  Tab,
-  { label: string; icon: React.ReactNode; help: string }
-> = {
-  sign: {
-    label: "Set up signing",
-    icon: <FileSignature className="h-3.5 w-3.5" />,
-    help: "Opens the signing editor: add signers, place signature fields, and send. Signing is recorded with a tamper-evident hash, ESIGN consent, IP + audit trail, and a Certificate of Completion.",
-  },
-  review: {
-    label: "Invite reviewer",
-    icon: <Eye className="h-3.5 w-3.5" />,
-    help: "Read-only access. Reviewers can read the contract + leave comments but can't change the text.",
-  },
-  edit: {
-    label: "Invite editor",
-    icon: <PenSquare className="h-3.5 w-3.5" />,
-    help: "Full edit access. Co-editors see live cursors and can change any section.",
-  },
-};
 
 export function ContractShareDialog({
   projectId,
@@ -97,28 +74,20 @@ export function ContractShareDialog({
     api.projects.createContractShareLink,
   );
 
-  const [tab, setTab] = useState<Tab>("sign");
-  const [signerEmail, setSignerEmail] = useState("");
-  const [reviewerEmail, setReviewerEmail] = useState("");
-  const [editorEmail, setEditorEmail] = useState("");
-  const [demoSignName, setDemoSignName] = useState("");
+  const [linkEnabled, setLinkEnabled] = useState(true);
+  const [role, setRole] = useState<LinkRole>("review");
   const [busy, setBusy] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-  // Cache one link per role so repeated copies hand back the same URL
-  // instead of minting a fresh row on every click.
-  const [linkUrls, setLinkUrls] = useState<Record<"review" | "edit", string | undefined>>({
-    review: undefined,
-    edit: undefined,
-  });
+  // Cache one link per role so re-copying hands back the same URL.
+  const [linkUrls, setLinkUrls] = useState<Record<LinkRole, string | undefined>>(
+    { review: undefined, edit: undefined },
+  );
 
-  // Bridge the legacy contract into the real, court-grade multi-contract signing
-  // editor (recipients, field placement, audit trail, certificate) instead of
-  // the old no-op stamp. Both the "send" and the former "demo sign" actions go
-  // here now — no more stub signing.
-  const startRealSigning = async () => {
-    setBusy("send");
+  const isSigned = contractState === "signed";
+
+  const handleSetUpSigning = async () => {
+    setBusy("sign");
     setError(null);
     try {
       const contractId = await startSignableContract({ projectId });
@@ -131,27 +100,21 @@ export function ContractShareDialog({
     }
   };
 
-  const handleSend = startRealSigning;
-  const handleDemoSign = startRealSigning;
-
-  const copyShareLink = async (kind: "review" | "edit") => {
+  const handleCopyLink = async () => {
     setError(null);
     try {
-      let url = linkUrls[kind];
+      let url = linkUrls[role];
       if (!url) {
-        setBusy(`copy:${kind}`);
-        const { token } = await createContractShareLink({
-          projectId,
-          role: kind,
-        });
+        setBusy("copy");
+        const { token } = await createContractShareLink({ projectId, role });
         const origin =
           typeof window !== "undefined" ? window.location.origin : "";
         url = `${origin}/c/${token}`;
-        setLinkUrls((prev) => ({ ...prev, [kind]: url }));
+        setLinkUrls((prev) => ({ ...prev, [role]: url }));
       }
       await navigator.clipboard.writeText(url);
-      setCopied(kind);
-      setTimeout(() => setCopied(null), 1800);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
     } catch (e) {
       setError(
         e instanceof Error
@@ -163,220 +126,192 @@ export function ContractShareDialog({
     }
   };
 
-  const isSigned = contractState === "signed";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Share contract</DialogTitle>
+          <DialogTitle>Share</DialogTitle>
           <DialogDescription>
             Pick who gets in and what they can do.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Tab strip — sticks to the brutalist palette so it reads
-            as a deliberate control row, not an afterthought. */}
-        <div className="flex border-2 border-[#1a1a1a]">
-          {(Object.keys(TAB_META) as Tab[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => {
-                setTab(t);
-                setError(null);
-                setNotice(null);
-              }}
-              className={cn(
-                "flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors",
-                tab === t
-                  ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
-              )}
-            >
-              {TAB_META[t].icon}
-              <span className="hidden sm:inline">{TAB_META[t].label}</span>
-              <span className="sm:hidden">{t}</span>
-            </button>
-          ))}
-        </div>
-
-        <p className="text-xs text-[#666]">{TAB_META[tab].help}</p>
-
-        {tab === "sign" ? (
-          <div className="space-y-3">
-            {isSigned ? (
-              <div className="border-2 border-[#FF6600] bg-[#FFE7D6] p-3">
-                <div className="font-bold text-sm text-[#FF6600] flex items-center gap-2">
-                  <Check className="h-4 w-4" />
-                  Signed by {signedByName}
-                </div>
-                {signedAt ? (
-                  <div className="text-xs text-[#666] mt-0.5">
-                    {new Date(signedAt).toLocaleString()}
-                  </div>
-                ) : null}
+        {isSigned ? (
+          <div className="border-2 border-[#16a34a] bg-[#dcfce7] p-3">
+            <div className="font-bold text-sm text-[#16a34a] flex items-center gap-2">
+              <Check className="h-4 w-4" />
+              Signed by {signedByName}
+            </div>
+            {signedAt ? (
+              <div className="text-xs text-[#666] mt-0.5">
+                {new Date(signedAt).toLocaleString()}
               </div>
-            ) : (
-              <>
-                <Field label="Signer email (client)">
-                  <Input
-                    type="email"
-                    placeholder="client@acme.com"
-                    value={signerEmail}
-                    onChange={(e) => setSignerEmail(e.target.value)}
-                  />
-                </Field>
-                <Button
-                  onClick={() => void handleSend()}
-                  disabled={busy !== null}
-                  className="bg-[#FF6600] hover:bg-[#FF7A1F] w-full"
-                >
-                  <Send className="h-4 w-4 mr-1.5" />
-                  {busy === "send" ? "Sending…" : "Send for signature"}
-                </Button>
-
-                <div className="pt-3 border-t-2 border-[#1a1a1a]">
-                  <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
-                    Demo sign as client
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      placeholder="Client name"
-                      value={demoSignName}
-                      onChange={(e) => setDemoSignName(e.target.value)}
-                    />
-                    <Button
-                      onClick={() => void handleDemoSign()}
-                      disabled={busy !== null || !demoSignName.trim()}
-                      variant="outline"
-                    >
-                      <Check className="h-4 w-4 mr-1" />
-                      Sign
-                    </Button>
-                  </div>
-                  <p className="text-[11px] font-mono text-[#888] mt-2">
-                    In production this routes through Dropbox Sign /
-                    Docusign — the demo button skips that and stamps
-                    the contract locally so you can click through the
-                    rest of the flow.
-                  </p>
-                </div>
-              </>
-            )}
+            ) : null}
           </div>
         ) : null}
 
-        {tab === "review" ? (
-          <ShareLinkPanel
-            badge="Read-only"
-            email={reviewerEmail}
-            onEmailChange={setReviewerEmail}
-            onCopyLink={() => void copyShareLink("review")}
-            copied={copied === "review"}
-          />
-        ) : null}
+        {/* People with access */}
+        <div>
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+            People with access
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="h-8 w-8 flex-shrink-0 inline-flex items-center justify-center rounded-full border-2 border-[#1a1a1a] bg-[#FFEDD5]">
+              <User className="h-4 w-4 text-[#1a1a1a]" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold text-[#1a1a1a]">You</div>
+              <div className="text-[11px] font-mono text-[#888]">
+                Your team
+              </div>
+            </div>
+            <span className="text-xs font-bold uppercase tracking-wider text-[#888]">
+              Owner
+            </span>
+          </div>
+        </div>
 
-        {tab === "edit" ? (
-          <ShareLinkPanel
-            badge="Can edit"
-            email={editorEmail}
-            onEmailChange={setEditorEmail}
-            onCopyLink={() => void copyShareLink("edit")}
-            copied={copied === "edit"}
-          />
+        {/* General access — link sharing with a role */}
+        <div className="border-t-2 border-[#1a1a1a] pt-3">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+            General access
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="h-8 w-8 flex-shrink-0 inline-flex items-center justify-center rounded-full border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+              {linkEnabled ? (
+                <Globe className="h-4 w-4 text-[#1a1a1a]" />
+              ) : (
+                <Lock className="h-4 w-4 text-[#888]" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              {/* Restricted ⇄ Anyone-with-link */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-sm font-bold text-[#1a1a1a] hover:bg-[#FFEDD5] px-1 -ml-1"
+                  >
+                    {linkEnabled ? "Anyone with the link" : "Restricted"}
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[200px]">
+                  <DropdownMenuItem onClick={() => setLinkEnabled(false)}>
+                    Restricted
+                    {!linkEnabled ? (
+                      <Check className="ml-auto h-3.5 w-3.5 text-[#C2410C]" />
+                    ) : null}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLinkEnabled(true)}>
+                    Anyone with the link
+                    {linkEnabled ? (
+                      <Check className="ml-auto h-3.5 w-3.5 text-[#C2410C]" />
+                    ) : null}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <div className="text-[11px] font-mono text-[#888]">
+                {linkEnabled
+                  ? `Anyone with the link can ${role === "edit" ? "edit" : "review"}`
+                  : "Only people you add can open this"}
+              </div>
+            </div>
+            {/* Role picker */}
+            {linkEnabled ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 h-8 text-xs font-bold uppercase tracking-wider hover:bg-[#FFEDD5]"
+                  >
+                    {ROLE_META[role].label}
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[200px]">
+                  {(Object.keys(ROLE_META) as LinkRole[]).map((r) => (
+                    <DropdownMenuItem
+                      key={r}
+                      onClick={() => {
+                        setRole(r);
+                        setCopied(false);
+                      }}
+                      className="flex-col items-start"
+                    >
+                      <span className="flex w-full items-center justify-between font-bold">
+                        {ROLE_META[r].label}
+                        {role === r ? (
+                          <Check className="h-3.5 w-3.5 text-[#C2410C]" />
+                        ) : null}
+                      </span>
+                      <span className="text-[11px] text-[#888]">
+                        {ROLE_META[r].help}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
+
+          {linkEnabled ? (
+            <button
+              type="button"
+              onClick={() => void handleCopyLink()}
+              disabled={busy === "copy"}
+              className="mt-3 inline-flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 h-9 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50"
+            >
+              {copied ? (
+                <>
+                  <Check className="h-3.5 w-3.5" /> Copied
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-3.5 w-3.5" />
+                  {busy === "copy" ? "Creating…" : "Copy link"}
+                </>
+              )}
+            </button>
+          ) : null}
+        </div>
+
+        {/* Signing — the contract-specific action */}
+        {!isSigned ? (
+          <div className="border-t-2 border-[#1a1a1a] pt-3">
+            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1.5">
+              Signing
+            </div>
+            <p className="text-xs text-[#666] mb-2">
+              Open the signing editor — add signers, place fields, send.
+              Recorded with a tamper-evident hash, ESIGN consent, IP + audit
+              trail, and a Certificate of Completion.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleSetUpSigning()}
+              disabled={busy === "sign"}
+              className="inline-flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#C2410C] px-3 h-9 text-xs font-bold uppercase tracking-wider text-[#f0f0e8] hover:bg-[#9A3412] disabled:opacity-50"
+            >
+              <FileSignature className="h-3.5 w-3.5" />
+              {busy === "sign" ? "Opening…" : "Set up signing"}
+            </button>
+          </div>
         ) : null}
 
         {error ? (
           <div className="text-xs text-[#dc2626] font-bold flex items-start gap-2">
-            <AlertCircle className="h-3.5 w-3.5 mt-0.5" />
+            <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
             {error}
           </div>
-        ) : null}
-        {notice ? (
-          <div className="text-xs text-[#FF6600] font-bold">{notice}</div>
         ) : null}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
+            Done
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function ShareLinkPanel({
-  badge,
-  email,
-  onEmailChange,
-  onCopyLink,
-  copied,
-}: {
-  badge: string;
-  email: string;
-  onEmailChange: (next: string) => void;
-  onCopyLink: () => void;
-  copied: boolean;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Badge variant="secondary">{badge}</Badge>
-        <span className="text-[10px] font-mono text-[#888]">
-          Public link — anyone with the URL can open the contract
-        </span>
-      </div>
-      <Field label="Invite by email">
-        <Input
-          type="email"
-          placeholder="teammate@studio.com"
-          value={email}
-          onChange={(e) => onEmailChange(e.target.value)}
-        />
-      </Field>
-      <Button disabled={!email.trim()} variant="outline" className="w-full">
-        <Send className="h-4 w-4 mr-1.5" />
-        Send invite
-      </Button>
-
-      <div className="pt-3 border-t-2 border-[#1a1a1a]">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
-          Or copy link
-        </div>
-        <Button onClick={onCopyLink} variant="outline" className="w-full">
-          {copied ? (
-            <>
-              <Check className="h-4 w-4 mr-1.5" />
-              Copied
-            </>
-          ) : (
-            <>
-              <Copy className="h-4 w-4 mr-1.5" />
-              Copy share link
-            </>
-          )}
-          <ExternalLink className="h-3.5 w-3.5 ml-auto opacity-60" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <div className="text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
-        {label}
-      </div>
-      {children}
-    </label>
   );
 }
