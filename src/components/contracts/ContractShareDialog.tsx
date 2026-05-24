@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useMutation } from "convex/react";
+import { useNavigate } from "@tanstack/react-router";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
+import { contractPath } from "@/lib/routes";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +51,7 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   projectId: Id<"projects">;
+  teamSlug: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contractState: "none" | "draft" | "awaiting" | "signed";
@@ -63,9 +66,9 @@ const TAB_META: Record<
   { label: string; icon: React.ReactNode; help: string }
 > = {
   sign: {
-    label: "Send for signature",
+    label: "Set up signing",
     icon: <FileSignature className="h-3.5 w-3.5" />,
-    help: "Email the client a link to sign. They get a signing pane through Dropbox Sign / Docusign in production.",
+    help: "Opens the signing editor: add signers, place signature fields, and send. Signing is recorded with a tamper-evident hash, ESIGN consent, IP + audit trail, and a Certificate of Completion.",
   },
   review: {
     label: "Invite reviewer",
@@ -81,14 +84,15 @@ const TAB_META: Record<
 
 export function ContractShareDialog({
   projectId,
+  teamSlug,
   open,
   onOpenChange,
   contractState,
   signedByName,
   signedAt,
 }: Props) {
-  const sendForSignature = useMutation(api.projects.sendContractForSignature);
-  const signContractDemo = useMutation(api.projects.signContractDemo);
+  const navigate = useNavigate();
+  const startSignableContract = useMutation(api.projects.startSignableContract);
   const createContractShareLink = useMutation(
     api.projects.createContractShareLink,
   );
@@ -109,42 +113,26 @@ export function ContractShareDialog({
     edit: undefined,
   });
 
-  const handleSend = async () => {
+  // Bridge the legacy contract into the real, court-grade multi-contract signing
+  // editor (recipients, field placement, audit trail, certificate) instead of
+  // the old no-op stamp. Both the "send" and the former "demo sign" actions go
+  // here now — no more stub signing.
+  const startRealSigning = async () => {
     setBusy("send");
     setError(null);
     try {
-      await sendForSignature({ projectId });
-      setNotice(
-        signerEmail
-          ? `Sent for signature to ${signerEmail}.`
-          : "Sent for signature.",
-      );
+      const contractId = await startSignableContract({ projectId });
+      onOpenChange(false);
+      void navigate({ to: contractPath(teamSlug, projectId, contractId) });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Send failed.");
+      setError(e instanceof Error ? e.message : "Couldn't start signing.");
     } finally {
       setBusy(null);
     }
   };
 
-  const handleDemoSign = async () => {
-    if (!demoSignName.trim()) {
-      setError("Type a name to sign.");
-      return;
-    }
-    setBusy("demosign");
-    setError(null);
-    try {
-      await signContractDemo({
-        projectId,
-        signedByName: demoSignName.trim(),
-      });
-      setNotice(`Signed as ${demoSignName}.`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Signature failed.");
-    } finally {
-      setBusy(null);
-    }
-  };
+  const handleSend = startRealSigning;
+  const handleDemoSign = startRealSigning;
 
   const copyShareLink = async (kind: "review" | "edit") => {
     setError(null);

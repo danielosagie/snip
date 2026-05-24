@@ -230,6 +230,8 @@ export default function ProjectPage({
   const moveVideoToFolder = useMutation(api.folders.moveVideoToFolder);
   const moveFolder = useMutation(api.folders.moveFolder);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
+  const getProxyDownloadUrl = useAction(api.videoActions.getProxyDownloadUrl);
+  const requestProxies = useAction(api.videoActions.requestProxies);
 
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sort, setSort] = useState<ProjectSortMode>("newest");
@@ -349,6 +351,34 @@ export default function ProjectPage({
     [getDownloadUrl],
   );
 
+  // Download a ready Mux static-rendition proxy (smaller MP4) by its file name.
+  const handleDownloadProxy = useCallback(
+    async (videoId: Id<"videos">, renditionName: string, title: string) => {
+      try {
+        const result = await getProxyDownloadUrl({ videoId, renditionName });
+        if (result?.url) {
+          triggerDownload(result.url, result.filename ?? `${title}.mp4`);
+        }
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Proxy download failed.");
+      }
+    },
+    [getProxyDownloadUrl],
+  );
+
+  // Kick off proxy generation (costs a Mux re-encode). Default single 720p.
+  const handleGenerateProxies = useCallback(
+    async (videoId: Id<"videos">) => {
+      try {
+        await requestProxies({ videoId });
+        alert("Generating a 720p proxy — it'll appear here once Mux finishes.");
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Couldn't start proxy generation.");
+      }
+    },
+    [requestProxies],
+  );
+
   const handleMoveVideo = useCallback(
     async (videoId: Id<"videos">, folderId: Id<"folders"> | null) => {
       try {
@@ -465,7 +495,16 @@ export default function ProjectPage({
   // multi-selection, the actions apply to the whole selection (reusing the
   // existing bulk handlers); otherwise they act on the single item.
   const buildVideoMenu = (
-    video: { _id: Id<"videos">; title: string },
+    video: {
+      _id: Id<"videos">;
+      title: string;
+      muxAssetId?: string;
+      staticRenditions?: Array<{
+        name: string;
+        resolution: string;
+        status: string;
+      }>;
+    },
     canDownload: boolean,
   ): ContextMenuEntry[] => {
     if (!project) return [];
@@ -512,6 +551,40 @@ export default function ProjectPage({
       ];
     }
 
+    // Proxy (Mux static-rendition) entries — only for items with a Mux asset.
+    // Show a download per ready rendition, a disabled "generating…" per pending
+    // one, or a "Generate proxy" trigger when none exist yet.
+    const proxyEntries: ContextMenuEntry[] = [];
+    if (canDownload && video.muxAssetId) {
+      const rends = video.staticRenditions ?? [];
+      const ready = rends.filter((r) => r.status === "ready");
+      const preparing = rends.filter((r) => r.status === "preparing");
+      proxyEntries.push({ type: "separator" });
+      for (const r of ready) {
+        proxyEntries.push({
+          label: `Download proxy (${r.resolution})`,
+          icon: <Download className="h-4 w-4" />,
+          onSelect: () =>
+            void handleDownloadProxy(video._id, r.name, video.title),
+        });
+      }
+      for (const r of preparing) {
+        proxyEntries.push({
+          label: `Proxy (${r.resolution}) — generating…`,
+          icon: <Download className="h-4 w-4" />,
+          disabled: true,
+          onSelect: () => {},
+        });
+      }
+      if (ready.length === 0 && preparing.length === 0) {
+        proxyEntries.push({
+          label: "Generate proxy (720p)",
+          icon: <Download className="h-4 w-4" />,
+          onSelect: () => void handleGenerateProxies(video._id),
+        });
+      }
+    }
+
     return [
       { label: "Open", icon: <Eye className="h-4 w-4" />, onSelect: open },
       ...(canDownload
@@ -523,6 +596,7 @@ export default function ProjectPage({
             } as ContextMenuEntry,
           ]
         : []),
+      ...proxyEntries,
       {
         label: "Duplicate",
         icon: <Copy className="h-4 w-4" />,
@@ -791,15 +865,6 @@ export default function ProjectPage({
 
   const canUpload = project?.role !== "viewer";
 
-  const contractState: "none" | "draft" | "awaiting" | "signed" =
-    project?.contract?.signedAt
-      ? "signed"
-      : project?.contract?.sentForSignatureAt
-        ? "awaiting"
-        : project?.contract
-          ? "draft"
-          : "none";
-
   return (
     <div className="h-full flex flex-col">
       {/* Floating selection toolbar — surfaces only when the user has
@@ -988,10 +1053,9 @@ export default function ProjectPage({
           {resolvedProjectId && canUpload ? (
             <ProjectAddButton
               projectId={resolvedProjectId}
+              teamSlug={resolvedTeamSlug}
               currentFolderId={currentFolderId}
               onAddFiles={openFilePicker}
-              contractHref={`/dashboard/${resolvedTeamSlug}/${resolvedProjectId}/contract`}
-              contractState={contractState}
             />
           ) : null}
         </div>

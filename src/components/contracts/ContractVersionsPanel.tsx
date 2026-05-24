@@ -20,9 +20,14 @@ import { formatRelativeTime } from "@/lib/utils";
 export function ContractVersionsPanel({
   projectId,
   readOnly,
+  onRestored,
 }: {
   projectId: Id<"projects">;
   readOnly: boolean;
+  /** Fired after a successful restore so the parent can rebuild the live
+   *  collab doc — restore only patches contract.contentHtml, which the Yjs
+   *  editor would otherwise ignore (it shows the in-memory Y.Doc). */
+  onRestored?: () => void;
 }) {
   const versions = useQuery(api.contractVersions.list, { projectId });
   const snapshot = useMutation(api.contractVersions.snapshot);
@@ -58,6 +63,9 @@ export function ContractVersionsPanel({
     setBusy(true);
     try {
       await restore({ versionId });
+      // Rebuild the live editor from the restored body — without this the
+      // Y.Doc keeps the pre-restore content and the restore looks like a no-op.
+      onRestored?.();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Restore failed.");
     } finally {

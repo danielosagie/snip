@@ -104,6 +104,16 @@ export function ContractEditor({
   const collabMode = Boolean(ydoc);
   const seededRef = useRef(false);
 
+  // The seed guard is per-mount, but the parent swaps in a brand-new empty
+  // Y.Doc on "Clear" / "Re-run wizard" / wizard-complete (a `docEpoch` bump).
+  // Without resetting the guard, that fresh doc would never get seeded and the
+  // regenerated contract would render empty — the data-loss symptom. Reset on
+  // every ydoc identity change; the empty-fragment check below still prevents
+  // double-seeding a doc that already has content.
+  useEffect(() => {
+    seededRef.current = false;
+  }, [ydoc]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({

@@ -1512,6 +1512,7 @@ export default function SharePage() {
             _id: i._id,
             title: i.title,
             fileSize: i.fileSize ?? null,
+            proxies: i.proxies ?? [],
           }))}
           grantToken={grantToken}
           canDownload={canDownloadGrant}

@@ -542,6 +542,11 @@ export const getByShareGrantForDownload = query({
         contentType: video.contentType,
         s3Key: video.s3Key,
         status: video.status,
+        // Proxy (static-rendition) download support. Signed id is preferred for
+        // gated downloads; public id is the fallback for non-paywalled shares.
+        muxPlaybackId: video.muxPlaybackId,
+        muxSignedPlaybackId: video.muxSignedPlaybackId,
+        staticRenditions: video.staticRenditions ?? [],
       },
     };
   },
@@ -1516,6 +1521,150 @@ export const setMuxPreviewAssetErrored = internalMutation({
   },
 });
 
+// ── Static renditions (downloadable MP4 proxies / drive edit-proxies) ───────
+// See plans/proxies-unified.md. Mirrors the muxPreviewAsset* webhook pattern.
+
+// Mark a set of renditions as "preparing" right after requestProxies fires the
+// Mux create calls. Never downgrades a rendition that's already ready.
+export const setStaticRenditionsRequested = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    entries: v.array(
+      v.object({
+        name: v.string(),
+        resolution: v.string(),
+        ext: v.string(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return;
+    const byName = new Map(
+      (video.staticRenditions ?? []).map((r) => [r.name, r]),
+    );
+    for (const e of args.entries) {
+      const prev = byName.get(e.name);
+      if (prev && prev.status === "ready") continue; // don't clobber a ready file
+      byName.set(e.name, {
+        name: e.name,
+        resolution: e.resolution,
+        ext: e.ext,
+        status: "preparing" as const,
+        filesizeBytes: prev?.filesizeBytes,
+        error: undefined,
+      });
+    }
+    await ctx.db.patch(args.videoId, {
+      staticRenditions: Array.from(byName.values()),
+      staticRenditionsUpdatedAt: Date.now(),
+    });
+  },
+});
+
+// Upsert a single rendition's terminal state from the Mux webhook.
+export const upsertStaticRendition = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    name: v.string(),
+    resolution: v.string(),
+    ext: v.string(),
+    status: v.union(
+      v.literal("preparing"),
+      v.literal("ready"),
+      v.literal("errored"),
+      v.literal("skipped"),
+    ),
+    filesizeBytes: v.optional(v.number()),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return;
+    const byName = new Map(
+      (video.staticRenditions ?? []).map((r) => [r.name, r]),
+    );
+    byName.set(args.name, {
+      name: args.name,
+      resolution: args.resolution,
+      ext: args.ext,
+      status: args.status,
+      filesizeBytes: args.filesizeBytes ?? byName.get(args.name)?.filesizeBytes,
+      error: args.error,
+    });
+    await ctx.db.patch(args.videoId, {
+      staticRenditions: Array.from(byName.values()),
+      staticRenditionsUpdatedAt: Date.now(),
+    });
+  },
+});
+
+// Context the R2-mirror action needs: the project layout (teamSlug/projectId)
+// to build the proxy key, the public playback id to fetch the MP4 from Mux, and
+// the current renditions. Internal (no auth) — called only by mirrorRenditionToR2.
+export const getProxyMirrorContext = internalQuery({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return null;
+    const project = await ctx.db.get(video.projectId);
+    if (!project) return null;
+    const team = await ctx.db.get(project.teamId);
+    if (!team) return null;
+    return {
+      teamSlug: team.slug,
+      projectId: video.projectId as string,
+      muxPlaybackId: video.muxPlaybackId,
+      status: video.status,
+      staticRenditions: video.staticRenditions ?? [],
+    };
+  },
+});
+
+// Record the R2 object key once a rendition has been mirrored for the drive.
+export const setStaticRenditionR2Key = internalMutation({
+  args: { videoId: v.id("videos"), name: v.string(), r2Key: v.string() },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return;
+    const renditions = (video.staticRenditions ?? []).map((r) =>
+      r.name === args.name ? { ...r, r2Key: args.r2Key } : r,
+    );
+    await ctx.db.patch(args.videoId, {
+      staticRenditions: renditions,
+      staticRenditionsUpdatedAt: Date.now(),
+    });
+  },
+});
+
+// Videos in a project that are ready, have a Mux asset, and have no proxy yet
+// (none ready/preparing). Used by the backfill action. Capped so one run can't
+// queue an unbounded Mux re-encode bill. Internal — access is checked by the
+// calling action via api.projects.get.
+export const listProxyBackfillCandidates = internalQuery({
+  args: { projectId: v.id("projects"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 50;
+    const all = await ctx.db
+      .query("videos")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    const out: Array<{ videoId: Id<"videos">; muxAssetId: string }> = [];
+    for (const video of all) {
+      if (video.deletedAt) continue;
+      if (video.status !== "ready") continue;
+      if (!video.muxAssetId) continue;
+      const rends = video.staticRenditions ?? [];
+      if (rends.some((r) => r.status === "ready" || r.status === "preparing")) {
+        continue;
+      }
+      out.push({ videoId: video._id, muxAssetId: video.muxAssetId });
+      if (out.length >= limit) break;
+    }
+    return out;
+  },
+});
+
 // Owner-triggered reset: clears preview state so `ensurePreviewAssetForVideo`
 // runs again on the next viewer poll (or when explicitly re-scheduled by
 // the retry action).
@@ -1799,6 +1948,11 @@ export const getShareSummaryByGrant = query({
               // a Mux playable.
               imagePreviewStatus: v.imagePreviewStatus ?? null,
               hasMuxPlayback: Boolean(v.muxPlaybackId),
+              // Ready downloadable proxies (Mux static renditions) so the share
+              // download sheet only offers qualities that actually exist.
+              proxies: (v.staticRenditions ?? [])
+                .filter((r) => r.status === "ready")
+                .map((r) => ({ name: r.name, resolution: r.resolution })),
               // Folder-aware fields (Phase 1): which folder the item lives in
               // (normalized to null at the root), plus metadata for the share
               // page's filters / sort / list view.

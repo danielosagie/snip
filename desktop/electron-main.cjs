@@ -31,6 +31,12 @@ const DEFAULT_FEATURES = {
   prefetch: { enabled: false },
   lanCache: { enabled: false, port: 17900 },
   acls: { enabled: false },
+  // Proxy mode is the ONE feature that defaults ON — proxy-first editing is the
+  // whole point of the drive (cheap, fast, cache-friendly). When on, the mount
+  // hides the heavy `originals/` subtrees so editors browse + stream the
+  // lightweight Mux proxies the backend mirrors to R2. Flip off to expose
+  // full-res for conform/online. See plans/proxies-unified.md.
+  proxy: { enabled: true },
 };
 
 const DEFAULT_SETTINGS = {
@@ -1377,16 +1383,28 @@ async function startMount({ mountPath } = {}) {
   const cacheDir = path.join(SETTINGS_DIR, "rclone-cache");
   await fs.mkdir(cacheDir, { recursive: true });
 
-  // ── Optional: --filter-from from Convex-stored folder permissions ──
+  // ── Optional: combined --filter-from (proxy mode + Convex ACLs) ──
   //
-  // When `features.acls.enabled` is on, fetch the user's effective
-  // rules from Convex (one + or - line per matching folderPermissions
-  // grant), write them to a file, and pass `--filter-from` to rclone.
-  // The FUSE layer then hides files the user isn't entitled to —
-  // Finder/Premiere/Resolve all see a filtered view of the bucket.
+  // We build ONE rclone filter file so rule precedence is explicit (rules
+  // evaluate top-to-bottom, first match wins) and we never mix `--exclude`
+  // with `--filter-from` (their interaction is surprising). Two sources:
+  //  1. Proxy mode (default ON): hide the heavy `originals/` subtrees so the
+  //     drive presents the lightweight Mux proxies the backend mirrors to R2.
+  //     Toggle off (Settings → Proxy mode) to expose full-res for conform.
+  //  2. ACLs (`features.acls.enabled`): per-folder allow/deny from Convex,
+  //     fail-CLOSED to deny-all if the rule fetch fails.
   let filterFromArgs = [];
+  const filterLines = [];
+  const proxyMode = settings.features?.proxy?.enabled !== false; // default on
+  if (proxyMode) {
+    // Path is relative to the mount root (the bucket's `projects/`), so a clip's
+    // originals live at `/<team>/<project>/originals/**`.
+    filterLines.push("- /**/originals/**");
+    pushLog(
+      "Proxy mode ON — hiding originals/ (full-res). Toggle off to expose full-res.",
+    );
+  }
   if (settings.features?.acls?.enabled) {
-    const filterPath = path.join(SETTINGS_DIR, "rclone-filters.txt");
     try {
       const rules = await convexCall(
         "query",
@@ -1394,26 +1412,25 @@ async function startMount({ mountPath } = {}) {
         {},
       );
       if (Array.isArray(rules) && rules.length > 0) {
-        const lines = rules.map((r) => `${r.action} ${r.pattern}`);
-        await fs.writeFile(filterPath, lines.join("\n") + "\n");
-        filterFromArgs = ["--filter-from", filterPath];
+        for (const r of rules) filterLines.push(`${r.action} ${r.pattern}`);
         pushLog(`ACLs: applying ${rules.length} filter rule(s) from Convex`);
       } else {
         pushLog(`ACLs enabled, no grants matched — mount stays default-allow.`);
       }
     } catch (err) {
-      // Fail-CLOSED. If the user enabled ACL enforcement and we can't
-      // fetch the rules (Convex down, token expired, network blip),
-      // the right behaviour is to hide everything until we recover —
-      // not silently mount full-access. We write a deny-all filter
-      // file and feed it to rclone; the FUSE mount comes up showing
-      // an empty bucket, and the log line tells the user why.
-      await fs.writeFile(filterPath, "- *\n");
-      filterFromArgs = ["--filter-from", filterPath];
+      // Fail-CLOSED. If the user enabled ACL enforcement and we can't fetch
+      // the rules (Convex down, token expired, network blip), hide everything
+      // until we recover rather than silently mounting full-access.
+      filterLines.push("- *");
       pushLog(
         `ACLs: filter fetch failed (${err.message}) — mounting deny-all to fail closed. Fix the Convex connection and re-mount.`,
       );
     }
+  }
+  if (filterLines.length > 0) {
+    const filterPath = path.join(SETTINGS_DIR, "rclone-filters.txt");
+    await fs.writeFile(filterPath, filterLines.join("\n") + "\n");
+    filterFromArgs = ["--filter-from", filterPath];
   }
 
   // VFS tuned for LucidLink-style streaming on NLE workloads:

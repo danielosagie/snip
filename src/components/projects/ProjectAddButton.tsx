@@ -1,17 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
-import {
-  Plus,
-  Upload,
-  FolderPlus,
-  FileSignature,
-  Check,
-} from "lucide-react";
+import { Plus, Upload, FolderPlus, FileSignature } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
+import { contractPath } from "@/lib/routes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,30 +15,33 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /**
- * Compact "Add" dropdown that lives in the DashboardHeader on a
- * project page. Three actions: upload files, create a folder, jump
- * to the contract editor. Mutations are owned here so the caller
- * only has to pass identity (`projectId`, current folder) and the
- * uploader hook.
+ * Compact "Add" dropdown in the DashboardHeader on a project page. Actions:
+ * upload files, create a folder, add a contract.
+ *
+ * "Add contract" creates a new draft in the multi-contract table and drops you
+ * into its editor. There's no single "the contract" per project anymore, so the
+ * old contract-aware Edit/View link is gone — every contract is its own tile in
+ * the Contracts section.
  */
 
 interface Props {
   projectId: Id<"projects">;
+  teamSlug: string;
   currentFolderId: Id<"folders"> | null;
   onAddFiles: () => void;
-  contractHref: string;
-  contractState: "none" | "draft" | "awaiting" | "signed";
 }
 
 export function ProjectAddButton({
   projectId,
+  teamSlug,
   currentFolderId,
   onAddFiles,
-  contractHref,
-  contractState,
 }: Props) {
+  const navigate = useNavigate();
   const createFolder = useMutation(api.folders.create);
+  const createContract = useMutation(api.contractsTable.create);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [creatingContract, setCreatingContract] = useState(false);
 
   const handleAddFolder = async () => {
     if (creatingFolder) return;
@@ -60,6 +58,27 @@ export function ProjectAddButton({
       alert(e instanceof Error ? e.message : "Couldn't create folder.");
     } finally {
       setCreatingFolder(false);
+    }
+  };
+
+  const handleAddContract = async () => {
+    if (creatingContract) return;
+    const raw = prompt("Contract title", "Untitled contract");
+    if (!raw) return;
+    setCreatingContract(true);
+    try {
+      const contractId = await createContract({
+        projectId,
+        title: raw.trim() || "Untitled contract",
+        kind: "sow",
+        contentHtml: "",
+      });
+      // Drop straight into the new contract's editor.
+      navigate({ to: contractPath(teamSlug, projectId, contractId) });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't create contract.");
+    } finally {
+      setCreatingContract(false);
     }
   };
 
@@ -86,24 +105,12 @@ export function ProjectAddButton({
           <FolderPlus className="mr-2 h-4 w-4" />
           Add folder
         </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link
-            to={contractHref}
-            className="flex items-center w-full cursor-pointer"
-          >
-            {contractState === "signed" ? (
-              <Check className="mr-2 h-4 w-4 text-[#FF6600]" />
-            ) : (
-              <FileSignature className="mr-2 h-4 w-4" />
-            )}
-            {contractState === "signed"
-              ? "View signed contract"
-              : contractState === "awaiting"
-                ? "Contract — awaiting signature"
-                : contractState === "draft"
-                  ? "Edit contract"
-                  : "Add contract"}
-          </Link>
+        <DropdownMenuItem
+          onClick={() => void handleAddContract()}
+          disabled={creatingContract}
+        >
+          <FileSignature className="mr-2 h-4 w-4" />
+          Add contract
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

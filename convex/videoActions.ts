@@ -8,18 +8,21 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v } from "convex/values";
-import { action, ActionCtx } from "./_generated/server";
+import { action, ActionCtx, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import {
   buildMuxPlaybackUrl,
   buildMuxPreviewUrl,
+  buildMuxRenditionDownloadUrl,
   buildMuxThumbnailUrl,
   createMuxAssetFromInputUrl,
   createPreviewMuxAsset,
   createPublicPlaybackId,
   createSignedPlaybackId,
   getMuxAsset,
+  type ProxyResolution,
+  requestStaticRenditions,
   signPlaybackToken,
   signThumbnailToken,
 } from "./mux";
@@ -363,7 +366,10 @@ export const getUploadUrl = action({
     url: v.string(),
     uploadId: v.string(),
   }),
-  handler: async (ctx, args) => {
+  // Explicit return type: this handler now calls internal.videos.* (whose types
+  // are inferred), so without this annotation the action's type recurses through
+  // the api graph back into itself ("implicitly has type any"). See Convex docs.
+  handler: async (ctx, args): Promise<{ url: string; uploadId: string }> => {
     await requireVideoMemberAccess(ctx, args.videoId);
     const normalizedContentType = validateUploadRequestOrThrow({
       fileSize: args.fileSize,
@@ -372,7 +378,18 @@ export const getUploadUrl = action({
 
     const s3 = getS3Client();
     const ext = getExtensionFromKey(args.filename);
-    const key = `videos/${args.videoId}/${Date.now()}.${ext}`;
+    // Originals live under the project tree so the drive's full-res toggle can
+    // surface them (proxies sit alongside under proxies/). One copy, no
+    // duplication — Mux ingests via a signed URL by key, so the path is free to
+    // change. Fall back to the legacy videos/ path if we can't resolve the
+    // project, so an upload never breaks on a lookup miss.
+    const loc = await ctx.runQuery(internal.videos.getProxyMirrorContext, {
+      videoId: args.videoId,
+    });
+    const key =
+      loc?.teamSlug && loc?.projectId
+        ? `projects/${loc.teamSlug}/${loc.projectId}/originals/${args.videoId}/${Date.now()}.${ext}`
+        : `videos/${args.videoId}/${Date.now()}.${ext}`;
     const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
@@ -851,6 +868,335 @@ export const getSharedDownloadUrl = action({
       title: result.video.title,
       contentType: result.video.contentType,
     });
+  },
+});
+
+// All proxy resolutions Mux can generate. "highest" tracks the source (capped
+// by the asset's max tier); the rest are explicit downscales.
+const ALLOWED_PROXY_RESOLUTIONS: ProxyResolution[] = [
+  "highest", "2160p", "1440p", "1080p", "720p", "540p", "480p", "360p", "270p", "audio-only",
+];
+
+/**
+ * Kick off Mux static-rendition ("proxy") generation for a video. Member-gated
+ * because each rendition is a paid re-encode. Idempotent: skips resolutions that
+ * are already ready/preparing. Defaults to a single 720p — a solid offline edit
+ * proxy and the cheapest useful default. The webhook flips entries to ready.
+ * See plans/proxies-unified.md.
+ */
+export const requestProxies = action({
+  args: {
+    videoId: v.id("videos"),
+    resolutions: v.optional(v.array(v.string())),
+  },
+  returns: v.object({
+    requested: v.array(v.object({ name: v.string(), resolution: v.string() })),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ requested: Array<{ name: string; resolution: string }> }> => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    if (!isFeatureEnabled("muxIngest")) {
+      throw new Error("Mux isn't configured, so proxies can't be generated.");
+    }
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+    if (!video) throw new Error("Video not found");
+    if (video.status !== "ready") {
+      throw new Error("This video isn't ready for proxy generation yet.");
+    }
+    const assetId = getValueString(video, "muxAssetId");
+    if (!assetId) throw new Error("This item has no Mux asset to proxy.");
+
+    const requested = (args.resolutions?.length ? args.resolutions : ["720p"]).filter(
+      (r): r is ProxyResolution =>
+        (ALLOWED_PROXY_RESOLUTIONS as string[]).includes(r),
+    );
+    if (requested.length === 0) {
+      throw new Error("No valid proxy resolutions requested.");
+    }
+
+    // De-dupe against renditions already ready or in flight.
+    const existing = (video.staticRenditions ?? []) as Array<{
+      resolution: string;
+      status: string;
+    }>;
+    const inFlight = new Set(
+      existing
+        .filter((r) => r.status === "ready" || r.status === "preparing")
+        .map((r) => r.resolution),
+    );
+    const todo = requested.filter((r) => !inFlight.has(r));
+    if (todo.length === 0) return { requested: [] };
+
+    const created = await requestStaticRenditions(assetId, todo);
+    await ctx.runMutation(internal.videos.setStaticRenditionsRequested, {
+      videoId: args.videoId,
+      entries: created.map((c) => ({
+        name: c.name,
+        resolution: c.resolution,
+        ext: c.ext,
+      })),
+    });
+    return {
+      requested: created.map((c) => ({ name: c.name, resolution: c.resolution })),
+    };
+  },
+});
+
+/**
+ * Backfill proxies across an existing project: request a rendition for every
+ * ready video that has a Mux asset but no proxy yet. Member+ gated (it spends
+ * Mux re-encode money) and capped per run by the candidate query so one click
+ * can't queue an unbounded bill. Idempotent — re-running skips videos already
+ * ready/preparing. Default single 720p.
+ */
+export const backfillProxiesForProject = action({
+  args: {
+    projectId: v.id("projects"),
+    resolutions: v.optional(v.array(v.string())),
+  },
+  returns: v.object({ requested: v.number(), candidates: v.number() }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ requested: number; candidates: number }> => {
+    const project = (await ctx.runQuery(api.projects.get, {
+      projectId: args.projectId,
+    })) as { role?: string } | null;
+    if (!project || project.role === "viewer") {
+      throw new Error("Requires member role or higher");
+    }
+    if (!isFeatureEnabled("muxIngest")) {
+      throw new Error("Mux isn't configured, so proxies can't be generated.");
+    }
+    const resolutions = (
+      args.resolutions?.length ? args.resolutions : ["720p"]
+    ).filter((r): r is ProxyResolution =>
+      (ALLOWED_PROXY_RESOLUTIONS as string[]).includes(r),
+    );
+    if (resolutions.length === 0) {
+      throw new Error("No valid proxy resolutions requested.");
+    }
+
+    const candidates = await ctx.runQuery(
+      internal.videos.listProxyBackfillCandidates,
+      { projectId: args.projectId },
+    );
+    let requested = 0;
+    for (const candidate of candidates) {
+      try {
+        const created = await requestStaticRenditions(
+          candidate.muxAssetId,
+          resolutions,
+        );
+        await ctx.runMutation(internal.videos.setStaticRenditionsRequested, {
+          videoId: candidate.videoId,
+          entries: created.map((c) => ({
+            name: c.name,
+            resolution: c.resolution,
+            ext: c.ext,
+          })),
+        });
+        requested += 1;
+      } catch (err) {
+        // Don't let one bad asset abort the whole backfill.
+        console.error("backfillProxies: rendition request failed", {
+          videoId: candidate.videoId,
+          error: err,
+        });
+      }
+    }
+    return { requested, candidates: candidates.length };
+  },
+});
+
+/**
+ * Signed download URL for a ready Mux static-rendition proxy. Two entry paths,
+ * each reusing the SAME gates as the original-file download:
+ *  - dashboard:  { videoId }            → viewer access (like getDownloadUrl)
+ *  - share page: { grantToken, item? }  → allowDownload + paywall/grantPaidAt
+ * Shared downloads use a short-TTL signed Mux JWT when the asset has a signed
+ * playback id (paywalled videos must); otherwise the public id (non-paywalled).
+ */
+export const getProxyDownloadUrl = action({
+  args: {
+    videoId: v.optional(v.id("videos")),
+    grantToken: v.optional(v.string()),
+    itemVideoId: v.optional(v.id("videos")),
+    renditionName: v.string(),
+  },
+  returns: v.object({ url: v.string(), filename: v.string() }),
+  handler: async (ctx, args): Promise<{ url: string; filename: string }> => {
+    if (!args.renditionName) throw new Error("renditionName is required.");
+
+    type Rendition = {
+      name: string;
+      resolution: string;
+      status: string;
+      ext: string;
+      filesizeBytes?: number;
+    };
+    let title: string | undefined;
+    let videoId: Id<"videos">;
+    let publicPlaybackId: string | undefined;
+    let signedPlaybackId: string | undefined;
+    let renditions: Rendition[];
+    let useSigned = false;
+
+    if (args.grantToken) {
+      const result = await ctx.runQuery(api.videos.getByShareGrantForDownload, {
+        grantToken: args.grantToken,
+        itemVideoId: args.itemVideoId,
+      });
+      if (!result?.video) throw new Error("Video not found");
+      if (!result.allowDownload) {
+        throw new Error("Downloads are disabled for this shared link.");
+      }
+      if (result.paywall && !result.grantPaidAt) {
+        throw new Error("This download is gated by payment. Pay first to unlock.");
+      }
+      if (result.video.status !== "ready") {
+        throw new Error(getDownloadUnavailableMessage(result.video.status));
+      }
+      title = result.video.title;
+      videoId = result.video._id as Id<"videos">;
+      publicPlaybackId = getValueString(result.video, "muxPlaybackId") ?? undefined;
+      signedPlaybackId =
+        getValueString(result.video, "muxSignedPlaybackId") ?? undefined;
+      renditions = (result.video.staticRenditions ?? []) as Rendition[];
+      // Paywalled content must go through a signed (short-lived) URL.
+      if (result.paywall && !signedPlaybackId) {
+        throw new Error("Proxy isn't available for this protected video yet.");
+      }
+      useSigned = Boolean(signedPlaybackId);
+    } else if (args.videoId) {
+      const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+        videoId: args.videoId,
+      });
+      if (!video) throw new Error("Video not found");
+      if (video.status !== "ready") {
+        throw new Error(getDownloadUnavailableMessage(video.status));
+      }
+      title = video.title;
+      videoId = args.videoId;
+      publicPlaybackId = getValueString(video, "muxPlaybackId") ?? undefined;
+      signedPlaybackId = getValueString(video, "muxSignedPlaybackId") ?? undefined;
+      renditions = (video.staticRenditions ?? []) as Rendition[];
+      useSigned = false; // member/dashboard context — public id is fine
+    } else {
+      throw new Error("Provide videoId or grantToken.");
+    }
+
+    const rendition = renditions.find(
+      (r) => r.name === args.renditionName && r.status === "ready",
+    );
+    if (!rendition) {
+      throw new Error("That proxy isn't ready (or doesn't exist) for this video.");
+    }
+
+    const playbackId = useSigned
+      ? signedPlaybackId
+      : publicPlaybackId ?? signedPlaybackId;
+    if (!playbackId) {
+      throw new Error("No Mux playback id available for this video.");
+    }
+    const token =
+      useSigned && signedPlaybackId
+        ? await signPlaybackToken(signedPlaybackId, "1h")
+        : undefined;
+
+    await recordEgressBytes(ctx, videoId, rendition.filesizeBytes);
+    const base = sanitizeFilename(title ?? "video");
+    return {
+      url: buildMuxRenditionDownloadUrl(playbackId, rendition.name, token),
+      filename: `${base} (${rendition.resolution}).${rendition.ext}`,
+    };
+  },
+});
+
+// Largest proxy we'll buffer through a Convex action to mirror into R2. Bigger
+// renditions (GB-scale feature proxies) stay download-only here and should be
+// mirrored by the desktop app / a worker instead. See plans/proxies-unified.md.
+const PROXY_MIRROR_MAX_BYTES = 300 * 1024 * 1024;
+
+/**
+ * Drive add-on: copy a READY Mux static-rendition MP4 into R2 at the project
+ * proxy path so the mounted LucidLink-style drive serves it as a file. Scheduled
+ * from the `video.asset.static_rendition.ready` webhook. Download proxies work
+ * via Mux regardless of this — the mirror only feeds the drive. Idempotent
+ * (skips if already mirrored) and size-guarded (skips GB-scale buffers).
+ */
+export const mirrorRenditionToR2 = internalAction({
+  args: { videoId: v.id("videos"), name: v.string() },
+  returns: v.object({ mirrored: v.boolean(), reason: v.optional(v.string()) }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ mirrored: boolean; reason?: string }> => {
+    if (!isFeatureEnabled("objectStorage")) {
+      return { mirrored: false, reason: "no_storage" };
+    }
+    const cxt = await ctx.runQuery(internal.videos.getProxyMirrorContext, {
+      videoId: args.videoId,
+    });
+    if (!cxt) return { mirrored: false, reason: "no_context" };
+    if (!cxt.muxPlaybackId) return { mirrored: false, reason: "no_playback_id" };
+
+    const renditions = cxt.staticRenditions as Array<{
+      name: string;
+      status: string;
+      ext: string;
+      filesizeBytes?: number;
+      r2Key?: string;
+    }>;
+    const rendition = renditions.find((r) => r.name === args.name);
+    if (!rendition || rendition.status !== "ready") {
+      return { mirrored: false, reason: "not_ready" };
+    }
+    if (rendition.r2Key) return { mirrored: true, reason: "already" };
+
+    const size = rendition.filesizeBytes ?? 0;
+    if (size > PROXY_MIRROR_MAX_BYTES) {
+      console.warn("Skipping R2 proxy mirror — exceeds action buffer ceiling", {
+        videoId: args.videoId,
+        name: args.name,
+        size,
+      });
+      return { mirrored: false, reason: "too_large" };
+    }
+
+    // The main asset is public, so the rendition URL needs no token.
+    const srcUrl = buildMuxRenditionDownloadUrl(cxt.muxPlaybackId, args.name);
+    const resp = await fetch(srcUrl);
+    if (!resp.ok) return { mirrored: false, reason: `fetch_${resp.status}` };
+    const body = Buffer.from(await resp.arrayBuffer());
+
+    const key = `projects/${cxt.teamSlug}/${cxt.projectId}/proxies/${args.videoId}/${args.name}`;
+    const s3 = getS3Client();
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        Body: body,
+        ContentLength: body.byteLength,
+        ContentType: rendition.ext === "m4a" ? "audio/mp4" : "video/mp4",
+      }),
+    );
+    await ctx.runMutation(internal.videos.setStaticRenditionR2Key, {
+      videoId: args.videoId,
+      name: args.name,
+      r2Key: key,
+    });
+    console.log("Mirrored proxy to R2 for the drive", {
+      videoId: args.videoId,
+      name: args.name,
+      key,
+      bytes: body.byteLength,
+    });
+    return { mirrored: true };
   },
 });
 

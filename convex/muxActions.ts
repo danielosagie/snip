@@ -23,6 +23,12 @@ type MuxData = {
   errors?: Array<{ message?: string }>;
   error?: { message?: string };
   playback_ids?: Array<{ id?: string; policy?: string }>;
+  // Static-rendition (proxy) events: `data` is the rendition file; `id` here is
+  // the RENDITION id, so asset resolution must use `asset_id` / the event object.
+  name?: string;
+  resolution?: string;
+  ext?: string;
+  filesize?: string | number;
 };
 
 function summarizePlaybackIds(playbackIds: MuxData["playback_ids"]) {
@@ -138,9 +144,13 @@ export const processWebhook = internalAction({
       return { status: 401, message: "Invalid signature" };
     }
 
-    let event: { type?: string; data?: MuxData };
+    let event: { type?: string; data?: MuxData; object?: { id?: string; type?: string } };
     try {
-      event = JSON.parse(args.rawBody) as { type?: string; data?: MuxData };
+      event = JSON.parse(args.rawBody) as {
+        type?: string;
+        data?: MuxData;
+        object?: { id?: string; type?: string };
+      };
     } catch (error) {
       console.error("Mux webhook payload is not valid JSON", {
         rawBodyBytes: args.rawBody.length,
@@ -328,6 +338,78 @@ export const processWebhook = internalAction({
             videoId: resolved.videoId,
             assetId,
             trackId,
+          });
+          break;
+        }
+
+        case "video.asset.static_rendition.ready":
+        case "video.asset.static_rendition.errored": {
+          // For static-rendition events `data` is the rendition file (so
+          // `data.id` is the RENDITION id). The parent asset is `data.asset_id`
+          // or the event's top-level object id — resolve the video off that.
+          const renditionAssetId =
+            asString(data.asset_id) ?? asString(event.object?.id);
+          if (!renditionAssetId) {
+            console.error("Mux static_rendition event missing asset id", {
+              eventType,
+              ...eventSummary,
+            });
+            break;
+          }
+          const resolved = await resolveVideoIdFromMuxRefs(ctx, {
+            ...data,
+            asset_id: renditionAssetId,
+          });
+          // Proxies are only generated on the main asset, never the preview.
+          if (!resolved || resolved.isPreview) break;
+
+          const name = asString(data.name);
+          if (!name) {
+            console.error("Mux static_rendition event missing name", {
+              eventType,
+              ...eventSummary,
+            });
+            break;
+          }
+          const ready = eventType === "video.asset.static_rendition.ready";
+          const filesizeRaw = data.filesize;
+          const filesizeNum =
+            typeof filesizeRaw === "number"
+              ? filesizeRaw
+              : typeof filesizeRaw === "string" && filesizeRaw.length > 0
+                ? Number(filesizeRaw)
+                : undefined;
+          await ctx.runMutation(internal.videos.upsertStaticRendition, {
+            videoId: resolved.videoId,
+            name,
+            resolution:
+              asString(data.resolution) ?? name.replace(/\.(mp4|m4a)$/i, ""),
+            ext: asString(data.ext) ?? (name.endsWith(".m4a") ? "m4a" : "mp4"),
+            status: ready ? "ready" : "errored",
+            filesizeBytes:
+              filesizeNum !== undefined && Number.isFinite(filesizeNum)
+                ? filesizeNum
+                : undefined,
+            error: ready
+              ? undefined
+              : getErrorMessage(data) ??
+                "Mux failed to generate this proxy rendition.",
+          });
+          // Drive add-on: when ready, mirror the MP4 into R2 at
+          // projects/<team>/<projectId>/proxies/... so the mounted drive serves
+          // it. Download proxies work from Mux regardless. See plans/proxies-unified.md.
+          if (ready) {
+            await ctx.scheduler.runAfter(
+              0,
+              internal.videoActions.mirrorRenditionToR2,
+              { videoId: resolved.videoId, name },
+            );
+          }
+          console.log(`Static rendition ${ready ? "ready" : "errored"}`, {
+            eventType,
+            videoId: resolved.videoId,
+            assetId: renditionAssetId,
+            name,
           });
           break;
         }

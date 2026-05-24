@@ -29,6 +29,8 @@ export interface DownloadSheetItem {
   _id: string;
   title: string;
   fileSize: number | null;
+  /** Ready downloadable proxies (Mux static renditions) for this item. */
+  proxies?: Array<{ name: string; resolution: string }>;
 }
 
 interface Props {
@@ -57,6 +59,41 @@ export function ShareDownloadSheet({
   isPaying,
 }: Props) {
   const getDownloadUrl = useAction(api.videoActions.getSharedDownloadUrl);
+  const getProxyUrl = useAction(api.videoActions.getProxyDownloadUrl);
+
+  // Quality picker is built from the proxies that ACTUALLY exist across the
+  // items, so we never offer a resolution nothing has. "Original" is always
+  // available; per item, a missing proxy falls back to the original download.
+  const RES_LABEL: Record<string, string> = {
+    "2160p": "4K (2160p)",
+    "1440p": "1440p",
+    "1080p": "High (1080p)",
+    "720p": "Medium (720p)",
+    "540p": "540p",
+    "480p": "480p",
+    "360p": "Low (360p)",
+    "270p": "270p",
+    highest: "Highest",
+  };
+  const RES_ORDER = [
+    "highest", "2160p", "1440p", "1080p", "720p", "540p", "480p", "360p", "270p",
+  ];
+  const availableResolutions = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items) for (const p of it.proxies ?? []) set.add(p.resolution);
+    return RES_ORDER.filter((r) => set.has(r));
+  }, [items]);
+  const qualityOptions = useMemo(
+    () => [
+      { label: "Original", resolution: null as string | null },
+      ...availableResolutions.map((r) => ({
+        label: RES_LABEL[r] ?? r,
+        resolution: r as string | null,
+      })),
+    ],
+    [availableResolutions],
+  );
+  const [quality, setQuality] = useState<string>("Original");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
@@ -92,12 +129,27 @@ export function ShareDownloadSheet({
     setDownloading(true);
     setError(null);
     setProgress({ done: 0, total: ids.length });
+    const selectedRes =
+      qualityOptions.find((q) => q.label === quality)?.resolution ?? null;
     try {
       for (let i = 0; i < ids.length; i++) {
-        const res = await getDownloadUrl({
-          grantToken,
-          itemVideoId: ids[i] as Id<"videos">,
-        });
+        const id = ids[i];
+        const item = items.find((it) => it._id === id);
+        // Use the proxy if this item has the chosen resolution; otherwise fall
+        // back to the original so the download still succeeds.
+        const proxy = selectedRes
+          ? item?.proxies?.find((p) => p.resolution === selectedRes)
+          : undefined;
+        const res = proxy
+          ? await getProxyUrl({
+              grantToken,
+              itemVideoId: id as Id<"videos">,
+              renditionName: proxy.name,
+            })
+          : await getDownloadUrl({
+              grantToken,
+              itemVideoId: id as Id<"videos">,
+            });
         triggerDownload(res.url, res.filename);
         setProgress({ done: i + 1, total: ids.length });
         // Small gap so the browser doesn't suppress rapid sequential downloads.
@@ -123,6 +175,33 @@ export function ShareDownloadSheet({
             {totalSize > 0 ? ` · ${formatBytes(totalSize)}` : ""}
           </SheetDescription>
         </SheetHeader>
+
+        {/* Quality picker — only shown when proxies exist. Original = full file;
+            others = Mux proxy renditions (smaller, faster). Per item, a missing
+            proxy quietly falls back to the original. */}
+        {availableResolutions.length > 0 ? (
+          <div className="flex items-center gap-2 px-4 pt-3">
+            <label
+              htmlFor="download-quality"
+              className="text-xs font-bold uppercase tracking-widest text-[#888]"
+            >
+              Quality
+            </label>
+            <select
+              id="download-quality"
+              value={quality}
+              onChange={(e) => setQuality(e.target.value)}
+              disabled={downloadsDisabled || locked || downloading}
+              className="border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1 text-sm font-bold text-[#1a1a1a] disabled:opacity-50"
+            >
+              {qualityOptions.map((q) => (
+                <option key={q.label} value={q.label}>
+                  {q.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         {/* Paywall / disabled banners */}
         {locked ? (

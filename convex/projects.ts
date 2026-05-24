@@ -321,6 +321,40 @@ export const sendContractForSignature = mutation({
   },
 });
 
+/**
+ * Retire the legacy single-contract "signing": create a REAL signable contract
+ * in the multi-contract table from the embedded `project.contract`, and return
+ * its id so the UI can route into the court-grade signing editor (recipients,
+ * field placement, audit trail, certificate). Replaces the `signContractDemo`
+ * stamp + the `sendContractForSignature` no-op for the legacy surface.
+ */
+export const startSignableContract = mutation({
+  args: { projectId: v.id("projects") },
+  returns: v.id("contracts"),
+  handler: async (ctx, args): Promise<Id<"contracts">> => {
+    const { project, user } = await requireProjectAccess(
+      ctx,
+      args.projectId,
+      "member",
+    );
+    const legacy = project.contract;
+    const contractId = await ctx.db.insert("contracts", {
+      projectId: args.projectId,
+      teamId: project.teamId,
+      title: `${project.name} contract`,
+      kind: "sow",
+      contentHtml: legacy?.contentHtml ?? "",
+      clientName: legacy?.clientName,
+      clientEmail: legacy?.clientEmail,
+      status: "draft",
+      createdByClerkId: user.subject,
+      createdByName: identityName(user),
+      lastSavedAt: Date.now(),
+    });
+    return contractId;
+  },
+});
+
 export const signContractDemo = mutation({
   args: {
     projectId: v.id("projects"),

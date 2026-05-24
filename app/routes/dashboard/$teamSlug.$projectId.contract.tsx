@@ -126,6 +126,7 @@ function ContractFullPage() {
   const linkDocxFile = useMutation(api.projects.linkContractDocxFile);
   const getUploadUrl = useAction(api.contracts.getContractDocxUploadUrl);
   const resetCollabDoc = useMutation(api.contractDocs.resetDoc);
+  const snapshotVersion = useMutation(api.contractVersions.snapshot);
 
   // Does a server-side collab doc already exist for this project?
   //   undefined → still loading (don't seed yet)
@@ -228,6 +229,9 @@ function ContractFullPage() {
       : null;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const initRef = useRef(false);
+  // Body we last auto-snapshotted, so the 5-min timer only saves a version
+  // when the contract actually changed (no idle churn). Seeded on hydrate.
+  const lastSnapshotHtmlRef = useRef<string | null>(null);
 
   // Hydrate fields from existing contract once it loads.
   useEffect(() => {
@@ -246,7 +250,48 @@ function ContractFullPage() {
     setClientName(existing?.clientName ?? "");
     setClientEmail(existing?.clientEmail ?? "");
     setOriginalFilename(existing?.originalFilename ?? undefined);
+    // Baseline for the autosnapshot diff so we don't snapshot unchanged content.
+    lastSnapshotHtmlRef.current = existing?.contentHtml ?? null;
   }, [project, existing]);
+
+  // Google-Docs-style autosnapshot: every ~5 min, if the contract body changed
+  // since the last snapshot, save a labeled version. The debounced autosave
+  // above keeps contract.contentHtml current, so the snapshot mutation (which
+  // reads the server contract) captures the latest. Refs keep the latest values
+  // available without resetting the interval on every keystroke.
+  const snapshotStateRef = useRef({ existing, isSigned, contentHtml });
+  snapshotStateRef.current = { existing, isSigned, contentHtml };
+  useEffect(() => {
+    if (!projectId) return;
+    const FIVE_MIN = 5 * 60 * 1000;
+    const id = window.setInterval(() => {
+      const s = snapshotStateRef.current;
+      const html = s.existing?.contentHtml ?? s.contentHtml;
+      if (!html || html.trim().length === 0) return;
+      if (s.isSigned) return; // don't churn versions on a locked contract
+      if (lastSnapshotHtmlRef.current === html) return; // unchanged → skip
+      lastSnapshotHtmlRef.current = html;
+      void snapshotVersion({
+        projectId: projectId as Id<"projects">,
+        label: "Autosave",
+      }).catch((e) => console.error("auto-snapshot failed", e));
+    }, FIVE_MIN);
+    return () => window.clearInterval(id);
+  }, [projectId, snapshotVersion]);
+
+  // After a wizard (re)generation we bump `docEpoch` and reset the collab doc.
+  // The freshly generated body lands in `existing.contentHtml` a beat later
+  // (separate Convex subscription). Deterministically pull it into
+  // `contentHtml` once it actually arrives so the collab seed plants the real
+  // contract — not whatever the one-shot init effect captured first. Keyed on
+  // epoch + the server value so it can't fire on the initial (epoch 0) load.
+  useEffect(() => {
+    if (docEpoch === 0) return;
+    const html = existing?.contentHtml;
+    if (html && html.trim().length > 0) {
+      setContentHtml(html);
+    }
+  }, [docEpoch, existing?.contentHtml]);
 
   // Debounced autosave. Fires ~1.2s after the user stops typing.
   // MUST live above the early-return guards below or React will
@@ -360,15 +405,23 @@ function ContractFullPage() {
         projectName={project.name}
         onClose={() => {
           setWizardOpen(false);
+          // When there's no contract yet, `shouldShowWizard` stays true
+          // (`!existing`), so just toggling `wizardOpen` re-opens the wizard
+          // immediately — i.e. Exit appears broken. Leave the contract surface
+          // entirely in that case.
+          if (!existing) {
+            void navigate({ to: projectPath(teamSlug, projectId as Id<"projects">) });
+          }
         }}
         onComplete={() => {
-          // Re-hydrate fields from the freshly generated contract once
-          // it lands. The init guard is reset so the existing-contract
-          // useEffect can run a second time. Rebuild the collab doc so
-          // the regenerated clauses/contentHtml actually replace the old
-          // (or empty) editor body — not just the Sections rail.
+          // Rebuild the collab doc so the regenerated clauses/contentHtml
+          // replace the old (or empty) editor body. We do NOT poke initRef
+          // here — the epoch-keyed re-hydrate effect below deterministically
+          // pulls the freshly generated body into `contentHtml` once the
+          // project query reflects it, which is what the collab seed plants.
+          // (The old `initRef = false` raced the query and often seeded the
+          // default/empty body — the data-loss bug.)
           void regenerateCollabDoc();
-          initRef.current = false;
         }}
       />
     );
@@ -912,7 +965,15 @@ function ContractFullPage() {
                 `}</style>
                 <div className="snip-contract-canvas">
                   <ContractEditor
-                    contentHtml={contentHtml}
+                    // Seed source: prefer the server's generated body so the
+                    // collab seed can never plant the default/empty template
+                    // during the post-wizard state settle. In collab mode this
+                    // prop is ONLY used for seeding; live edits flow via onChange.
+                    contentHtml={
+                      existing?.contentHtml && existing.contentHtml.trim().length > 0
+                        ? existing.contentHtml
+                        : contentHtml
+                    }
                     onChange={onContentChange}
                     editable
                     ydoc={collabReady ? ydoc : null}
@@ -993,6 +1054,7 @@ function ContractFullPage() {
             <ContractVersionsPanel
               projectId={projectId as Id<"projects">}
               readOnly={false}
+              onRestored={() => void regenerateCollabDoc()}
             />
           </SidePanel>
         ) : null}
@@ -1011,6 +1073,7 @@ function ContractFullPage() {
           loiter at the bottom of the doc anymore. */}
       <ContractShareDialog
         projectId={projectId as Id<"projects">}
+        teamSlug={teamSlug}
         open={shareOpen}
         onOpenChange={setShareOpen}
         contractState={

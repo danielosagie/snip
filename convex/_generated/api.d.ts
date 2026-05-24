@@ -15,6 +15,7 @@ import type * as comments from "../comments.js";
 import type * as contractClauses from "../contractClauses.js";
 import type * as contractComments from "../contractComments.js";
 import type * as contractDocs from "../contractDocs.js";
+import type * as contractSigning from "../contractSigning.js";
 import type * as contractTemplates from "../contractTemplates.js";
 import type * as contractVersions from "../contractVersions.js";
 import type * as contracts from "../contracts.js";
@@ -75,6 +76,7 @@ declare const fullApi: ApiFromModules<{
   contractClauses: typeof contractClauses;
   contractComments: typeof contractComments;
   contractDocs: typeof contractDocs;
+  contractSigning: typeof contractSigning;
   contractTemplates: typeof contractTemplates;
   contractVersions: typeof contractVersions;
   contracts: typeof contracts;

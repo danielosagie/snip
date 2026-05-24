@@ -1,5 +1,13 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation, MutationCtx, QueryCtx } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  internalQuery,
+  MutationCtx,
+  QueryCtx,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { identityName, requireProjectAccess, requireUser } from "./auth";
 import { generateUniqueToken } from "./security";
@@ -25,6 +33,17 @@ import { generateUniqueToken } from "./security";
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 const SIGNING_TOKEN_LENGTH = 24;
+
+// SHA-256 hex of the frozen contract body — the tamper-evidence anchor. Uses
+// the Web Crypto API available in the Convex runtime; deterministic, so safe in
+// a mutation. Anyone can re-hash the stored body and compare to prove integrity.
+async function sha256Hex(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 async function appendAudit(
   ctx: MutationCtx,
@@ -437,9 +456,15 @@ export const sendForSignature = mutation({
     }
 
     const now = Date.now();
+    // Freeze the exact body the recipients will sign + hash it. This is the
+    // record they're bound to; the hash makes any later edit detectable.
+    const frozenContentHtml = contract.contentHtml;
+    const contentHash = await sha256Hex(frozenContentHtml);
     await ctx.db.patch(args.contractId, {
       status: "pending",
       sentForSignatureAt: now,
+      frozenContentHtml,
+      contentHash,
       // 30 days to sign by default.
       expiresAt: now + 30 * 24 * 60 * 60 * 1000,
     });
@@ -448,9 +473,13 @@ export const sendForSignature = mutation({
       action: "sent",
       actorName: identityName(user),
       actorEmail: typeof user.email === "string" ? user.email : undefined,
-      metadata: JSON.stringify({ recipientCount: recipients.length }),
+      metadata: JSON.stringify({
+        recipientCount: recipients.length,
+        contentHash,
+        hashAlgorithm: "SHA-256",
+      }),
     });
-    return { ok: true };
+    return { ok: true, contentHash };
   },
 });
 
@@ -474,7 +503,10 @@ export const voidContract = mutation({
 
 // ─── State machine: sign / decline (public, token-authed) ────────────
 
-export const recordSigningView = mutation({
+// Internal: only callable via the /contracts/sign-view HTTP action, which
+// injects the server-observed IP. Keeping it internal means a client can't
+// self-report (spoof) its IP — court-grade attribution.
+export const recordSigningView = internalMutation({
   args: {
     token: v.string(),
     ip: v.optional(v.string()),
@@ -504,11 +536,60 @@ export const recordSigningView = mutation({
   },
 });
 
-export const sign = mutation({
+// Issue a one-time email code for identity verification. Internal — called by
+// the /contracts/sign-otp HTTP action, which then emails the plaintext code.
+// Returns the code to the HTTP action (server-side only); we store only its
+// hash. Randomness is deterministic-per-execution in Convex, so this is safe in
+// a mutation.
+export const issueSignOtp = internalMutation({
+  args: { token: v.string() },
+  returns: v.union(
+    v.object({
+      code: v.string(),
+      email: v.string(),
+      name: v.string(),
+      contractTitle: v.string(),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    const recipient = await ctx.db
+      .query("contractRecipients")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .unique();
+    if (!recipient) return null;
+    if (recipient.status === "signed" || recipient.status === "declined") {
+      return null;
+    }
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpCodeHash = await sha256Hex(`${args.token}:${code}`);
+    await ctx.db.patch(recipient._id, {
+      otpCodeHash,
+      otpExpiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+    });
+    const contract = await ctx.db.get(recipient.contractId);
+    return {
+      code,
+      email: recipient.email,
+      name: recipient.name,
+      contractTitle: contract?.title ?? "your contract",
+    };
+  },
+});
+
+// Internal: only callable via the /contracts/sign HTTP action (server IP).
+export const sign = internalMutation({
   args: {
     token: v.string(),
     signatureDataUrl: v.optional(v.string()),
     typedSignatureName: v.optional(v.string()),
+    // ESIGN/UETA: the signer must affirmatively consent to do business
+    // electronically BEFORE the signature is binding. The sign page gates the
+    // button on this; we hard-require it server-side too.
+    consented: v.boolean(),
+    // Email OTP — required for identity verification only when one was issued
+    // for this recipient (requestSignOtp). Optional otherwise.
+    otpCode: v.optional(v.string()),
     fieldValues: v.optional(
       v.array(v.object({ fieldId: v.id("contractFields"), value: v.string() })),
     ),
@@ -530,6 +611,25 @@ export const sign = mutation({
     if (recipient.status === "declined") {
       throw new Error("This contract was declined.");
     }
+    if (!args.consented) {
+      throw new Error(
+        "You must consent to sign electronically before signing.",
+      );
+    }
+    // Identity verification: if an OTP was issued for this recipient, it must be
+    // presented + valid + unexpired before we accept the signature.
+    if (recipient.otpCodeHash) {
+      if (!args.otpCode) {
+        throw new Error("Enter the verification code emailed to you.");
+      }
+      if ((recipient.otpExpiresAt ?? 0) < Date.now()) {
+        throw new Error("Your verification code expired. Request a new one.");
+      }
+      const presentedHash = await sha256Hex(`${args.token}:${args.otpCode.trim()}`);
+      if (presentedHash !== recipient.otpCodeHash) {
+        throw new Error("That verification code is incorrect.");
+      }
+    }
     if (!args.signatureDataUrl && !args.typedSignatureName) {
       throw new Error("Either a drawn signature or a typed name is required.");
     }
@@ -544,10 +644,26 @@ export const sign = mutation({
     await ctx.db.patch(recipient._id, {
       status: "signed",
       signedAt: now,
+      consentedAt: now,
       signatureDataUrl: args.signatureDataUrl,
       typedSignatureName: args.typedSignatureName,
       signedIp: args.ip,
       signedUserAgent: args.userAgent,
+      // Burn the one-time code so it can't be reused.
+      otpCodeHash: undefined,
+      otpExpiresAt: undefined,
+    });
+    // Record consent as its own audit event (the ESIGN affirmative act),
+    // immediately before the signature event.
+    await appendAudit(ctx, {
+      contractId: recipient.contractId,
+      recipientId: recipient._id,
+      action: "consented",
+      actorName: recipient.name,
+      actorEmail: recipient.email,
+      ip: args.ip,
+      userAgent: args.userAgent,
+      metadata: JSON.stringify({ contentHash: contract.contentHash ?? null }),
     });
 
     // Persist any field values the signer filled in.
@@ -600,12 +716,19 @@ export const sign = mutation({
         contractId: recipient.contractId,
         action: "completed",
       });
+      // Render + store the self-contained signed package (HTML) in R2.
+      await ctx.scheduler.runAfter(
+        0,
+        internal.contractSigning.finalizeSignedPackage,
+        { contractId: recipient.contractId },
+      );
     }
     return { completed: signersDone && approversDone };
   },
 });
 
-export const decline = mutation({
+// Internal: only callable via the /contracts/sign-decline HTTP action (server IP).
+export const decline = internalMutation({
   args: {
     token: v.string(),
     reason: v.optional(v.string()),
@@ -641,6 +764,138 @@ export const decline = mutation({
       userAgent: args.userAgent,
       metadata: args.reason ? JSON.stringify({ reason: args.reason }) : undefined,
     });
+  },
+});
+
+// ─── Certificate of Completion (court-admissible evidence record) ────
+
+/**
+ * The defensible artifact for litigation: who signed, when (UTC), from what IP +
+ * user agent, by what method, with explicit ESIGN consent, against which
+ * document hash, plus the full timestamped audit trail. Member-gated read.
+ * `contentHash` lets anyone re-hash `frozenContentHtml` to prove the signed body
+ * was never altered. Render to PDF for the signed package (follow-up).
+ */
+export const getCertificate = query({
+  args: { contractId: v.id("contracts") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId);
+    const [recipients, audit] = await Promise.all([
+      ctx.db
+        .query("contractRecipients")
+        .withIndex("by_contract", (q) => q.eq("contractId", args.contractId))
+        .collect(),
+      ctx.db
+        .query("contractAuditEvents")
+        .withIndex("by_contract", (q) => q.eq("contractId", args.contractId))
+        .collect(),
+    ]);
+    recipients.sort((a, b) => a.order - b.order);
+    audit.sort((a, b) => a.createdAt - b.createdAt);
+    return {
+      contract: {
+        _id: contract._id,
+        title: contract.title,
+        status: contract.status,
+        sentForSignatureAt: contract.sentForSignatureAt ?? null,
+        completedAt: contract.completedAt ?? null,
+        contentHash: contract.contentHash ?? null,
+        hashAlgorithm: contract.contentHash ? ("SHA-256" as const) : null,
+        frozenContentHtml: contract.frozenContentHtml ?? null,
+      },
+      signers: recipients.map((r) => ({
+        name: r.name,
+        email: r.email,
+        role: r.role,
+        status: r.status,
+        viewedAt: r.viewedAt ?? null,
+        consentedAt: r.consentedAt ?? null,
+        signedAt: r.signedAt ?? null,
+        ip: r.signedIp ?? null,
+        userAgent: r.signedUserAgent ?? null,
+        signatureMethod: r.signatureDataUrl
+          ? ("drawn" as const)
+          : r.typedSignatureName
+            ? ("typed" as const)
+            : null,
+        typedSignatureName: r.typedSignatureName ?? null,
+      })),
+      auditTrail: audit.map((e) => ({
+        action: e.action,
+        actorName: e.actorName ?? null,
+        actorEmail: e.actorEmail ?? null,
+        ip: e.ip ?? null,
+        userAgent: e.userAgent ?? null,
+        at: e.createdAt,
+        metadata: e.metadata ?? null,
+      })),
+    };
+  },
+});
+
+// ─── Signed package (HTML to R2) ─────────────────────────────────────
+
+// Internal data feed for the finalize action (no auth — action-only). Returns
+// everything needed to render the self-contained signed package.
+export const getSignedPackageData = internalQuery({
+  args: { contractId: v.id("contracts") },
+  handler: async (ctx, args) => {
+    const contract = await ctx.db.get(args.contractId);
+    if (!contract) return null;
+    const [recipients, audit] = await Promise.all([
+      ctx.db
+        .query("contractRecipients")
+        .withIndex("by_contract", (q) => q.eq("contractId", args.contractId))
+        .collect(),
+      ctx.db
+        .query("contractAuditEvents")
+        .withIndex("by_contract", (q) => q.eq("contractId", args.contractId))
+        .collect(),
+    ]);
+    recipients.sort((a, b) => a.order - b.order);
+    audit.sort((a, b) => a.createdAt - b.createdAt);
+    return {
+      title: contract.title,
+      contentHash: contract.contentHash ?? null,
+      completedAt: contract.completedAt ?? null,
+      frozenContentHtml: contract.frozenContentHtml ?? contract.contentHtml,
+      signers: recipients.map((r) => ({
+        name: r.name,
+        email: r.email,
+        role: r.role,
+        status: r.status,
+        signedAt: r.signedAt ?? null,
+        consentedAt: r.consentedAt ?? null,
+        ip: r.signedIp ?? null,
+        userAgent: r.signedUserAgent ?? null,
+        typedSignatureName: r.typedSignatureName ?? null,
+        signatureDataUrl: r.signatureDataUrl ?? null,
+      })),
+      audit: audit.map((e) => ({
+        action: e.action,
+        actorName: e.actorName ?? null,
+        ip: e.ip ?? null,
+        at: e.createdAt,
+        metadata: e.metadata ?? null,
+      })),
+    };
+  },
+});
+
+export const setSignedPackageKey = internalMutation({
+  args: { contractId: v.id("contracts"), key: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.contractId, { signedPackageS3Key: args.key });
+  },
+});
+
+// Member-gated: resolve the signed package's R2 key for a download link.
+export const getSignedPackageKey = query({
+  args: { contractId: v.id("contracts") },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId);
+    return contract.signedPackageS3Key ?? null;
   },
 });
 

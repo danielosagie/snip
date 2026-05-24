@@ -1,5 +1,5 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { FunctionReturnType } from "convex/server";
@@ -27,6 +27,37 @@ export const Route = createFileRoute("/sign/$token")({
   component: SignPage,
 });
 
+// Signing posts to Convex HTTP actions (the `.convex.site` origin) so the audit
+// trail records the IP OUR server observed, not a browser-self-reported value.
+// The underlying mutations are internal — these endpoints are the only way in.
+const SIGN_API = (import.meta.env.VITE_CONVEX_URL as string | undefined)?.replace(
+  ".convex.cloud",
+  ".convex.site",
+);
+
+type SignApiResponse = {
+  ok: boolean;
+  error?: string;
+  sent?: boolean;
+  email?: string;
+  completed?: boolean;
+};
+
+async function postSign(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<SignApiResponse> {
+  if (!SIGN_API) throw new Error("Signing endpoint is not configured.");
+  const resp = await fetch(`${SIGN_API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await resp
+    .json()
+    .catch(() => ({ ok: false, error: "Network error." }))) as SignApiResponse;
+}
+
 /**
  * Public signing page. No Clerk auth — the URL token IS the auth.
  *
@@ -44,7 +75,6 @@ export const Route = createFileRoute("/sign/$token")({
 function SignPage() {
   const { token } = useParams({ from: "/sign/$token" });
   const data = useQuery(api.contractsTable.getByToken, { token });
-  const recordView = useMutation(api.contractsTable.recordSigningView);
 
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -55,21 +85,47 @@ function SignPage() {
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const padRef = useRef<SignaturePadHandle | null>(null);
 
-  const sign = useMutation(api.contractsTable.sign);
-  const decline = useMutation(api.contractsTable.decline);
+  // Email-OTP identity verification (optional tier). Once the signer requests a
+  // code, they must enter it to sign.
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
 
-  // Capture the viewed event on first load. Best-effort — the
-  // mutation no-ops if already viewed.
+  const recipientId = data?.recipient?._id;
+  const recipientStatus = data?.recipient?.status;
+  // Capture the viewed event on first load. Best-effort — server no-ops if
+  // already viewed; recorded with the server-observed IP.
   useEffect(() => {
-    if (!data || !data.recipient) return;
-    if (data.recipient.status !== "pending") return;
-    recordView({
-      token,
-      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-    }).catch(() => {
+    if (!recipientId || recipientStatus !== "pending") return;
+    void postSign("/contracts/sign-view", { token }).catch(() => {
       // Silent — the user-facing experience doesn't depend on this.
     });
-  }, [data?.recipient?._id, recordView, token]);
+  }, [recipientId, recipientStatus, token]);
+
+  const handleRequestOtp = async () => {
+    setOtpBusy(true);
+    setOtpError(null);
+    try {
+      const res = await postSign("/contracts/sign-otp", { token });
+      if (!res.ok) {
+        setOtpError(res.error ?? "Couldn't send a code.");
+        return;
+      }
+      setOtpSent(true);
+      setOtpSentTo(res.email ?? null);
+      if (res.sent === false) {
+        setOtpError(
+          "Email isn't configured on this deployment — ask the sender to verify you another way.",
+        );
+      }
+    } catch (e) {
+      setOtpError(e instanceof Error ? e.message : "Couldn't send a code.");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
 
   if (data === undefined) {
     return (
@@ -129,7 +185,11 @@ function SignPage() {
   });
 
   const canSubmit =
-    typedName.trim().length > 1 && agreed && allRequiredFilled && !submitting;
+    typedName.trim().length > 1 &&
+    agreed &&
+    allRequiredFilled &&
+    (!otpSent || otpCode.trim().length >= 4) &&
+    !submitting;
 
   const handleSign = async () => {
     if (!canSubmit) return;
@@ -142,13 +202,16 @@ function SignPage() {
           fieldId: fieldId as Id<"contractFields">,
           value,
         }));
-      await sign({
+      const res = await postSign("/contracts/sign", {
         token,
         typedSignatureName: typedName.trim(),
         signatureDataUrl: drawn,
+        // ESIGN consent — gated by the disclosure checkbox below.
+        consented: agreed,
+        otpCode: otpSent ? otpCode.trim() : undefined,
         fieldValues: fvPayload.length > 0 ? fvPayload : undefined,
-        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
       });
+      if (!res.ok) throw new Error(res.error ?? "Failed to sign.");
       setSubmitted(true);
     } catch (err) {
       console.error("sign failed", err);
@@ -161,11 +224,11 @@ function SignPage() {
   const handleDecline = async () => {
     if (!declineReason.trim()) return;
     try {
-      await decline({
+      const res = await postSign("/contracts/sign-decline", {
         token,
         reason: declineReason.trim(),
-        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
       });
+      if (!res.ok) throw new Error(res.error ?? "Failed to decline.");
       setSubmitted(true);
     } catch (err) {
       console.error("decline failed", err);
@@ -245,6 +308,48 @@ function SignPage() {
               <SignaturePad ref={padRef} />
             </div>
 
+            {/* Identity verification (email OTP) — strengthens attribution. */}
+            <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+                Verify your identity (recommended)
+              </div>
+              {!otpSent ? (
+                <button
+                  type="button"
+                  onClick={() => void handleRequestOtp()}
+                  disabled={otpBusy}
+                  className="inline-flex items-center gap-1.5 h-9 px-3 text-[11px] font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FFEDD5] disabled:opacity-50"
+                >
+                  {otpBusy ? "Sending…" : "Email me a code"}
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-[#1a1a1a]">
+                    Enter the 6-digit code sent to{" "}
+                    <span className="font-mono">{otpSentTo ?? "your email"}</span>.
+                  </p>
+                  <Input
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value)}
+                    placeholder="123456"
+                    inputMode="numeric"
+                    className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none font-mono tracking-[0.3em] max-w-[160px]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleRequestOtp()}
+                    disabled={otpBusy}
+                    className="text-[10px] font-mono uppercase tracking-wider text-[#888] underline"
+                  >
+                    Resend code
+                  </button>
+                </div>
+              )}
+              {otpError ? (
+                <p className="mt-2 text-xs text-[#dc2626]">{otpError}</p>
+              ) : null}
+            </div>
+
             <label className="flex items-start gap-2.5 cursor-pointer">
               <input
                 type="checkbox"
@@ -253,10 +358,14 @@ function SignPage() {
                 className="mt-1 h-4 w-4 accent-[#C2410C]"
               />
               <span className="text-sm text-[#1a1a1a]">
-                I have read the contract above and agree to be bound by its
-                terms. I understand my typed name and (optionally) drawn
-                signature are an electronic signature with the same legal
-                effect as a handwritten one.
+                I consent to sign this document electronically (E-SIGN Act /
+                UETA) and to receive related records electronically. I have read
+                the contract above and agree to be bound by its terms. I
+                understand my typed name and any drawn signature are an
+                electronic signature with the same legal effect as a handwritten
+                one, and that the time, my IP address, and this consent are
+                recorded. I may request a paper copy instead by contacting the
+                sender.
               </span>
             </label>
 

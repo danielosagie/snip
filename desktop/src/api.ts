@@ -19,6 +19,12 @@ export interface DesktopFeatureFlags {
   lanCache: { enabled: boolean; port: number };
   /** Filesystem-level ACLs / team folder permissions. */
   acls: { enabled: boolean };
+  /**
+   * Proxy mode (defaults ON, unlike the others). When on, the mount hides the
+   * heavy `originals/` subtrees so editors browse + stream the lightweight Mux
+   * proxies. Toggle off to expose full-res for conform/online.
+   */
+  proxy: { enabled: boolean };
 }
 
 export interface DesktopSettings {

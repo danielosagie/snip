@@ -29,6 +29,9 @@ export function MountView({ settings, client }: Props) {
   const [prereqs, setPrereqs] = useState<MountPrereqs | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proxyOn, setProxyOn] = useState(
+    settings.features.proxy?.enabled !== false,
+  );
   const logRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -79,6 +82,29 @@ export function MountView({ settings, client }: Props) {
 
   const handleOpenInFinder = async () => {
     if (mountPath) await api.shell.openFolder(mountPath);
+  };
+
+  // Flip proxy mode and, if currently mounted, remount so the new filter (which
+  // hides/shows `originals/`) takes effect. Optimistic; reverts on failure.
+  const handleToggleProxy = async (next: boolean) => {
+    setProxyOn(next);
+    setBusy(true);
+    setError(null);
+    try {
+      await api.settings.set({
+        ...settings,
+        features: { ...settings.features, proxy: { enabled: next } },
+      });
+      if (status === "mounted") {
+        await api.mount.stop();
+        await api.mount.start({ mountPath });
+      }
+    } catch (e) {
+      setProxyOn(!next);
+      setError(e instanceof Error ? e.message : "Couldn't change proxy mode.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -168,6 +194,39 @@ export function MountView({ settings, client }: Props) {
             {error || state?.lastError}
           </div>
         ) : null}
+      </section>
+
+      <section
+        style={{
+          border: "2px solid #1a1a1a",
+          background: "#e8e8e0",
+          padding: 14,
+          marginBottom: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>
+            Proxy mode {proxyOn ? "ON" : "OFF"}
+          </div>
+          <div
+            style={{ fontSize: 11, color: "#666", marginTop: 2, lineHeight: 1.5 }}
+          >
+            {proxyOn
+              ? "Streaming lightweight proxies — full-res originals hidden. Fast + cache-friendly for editing."
+              : "Showing full-res originals too — heavier, for conform / online."}
+            {status === "mounted" ? " Toggling remounts the drive." : ""}
+          </div>
+        </div>
+        <button
+          className={proxyOn ? "" : "primary"}
+          onClick={() => void handleToggleProxy(!proxyOn)}
+          disabled={busy}
+        >
+          {proxyOn ? "Switch to full-res" : "Switch to proxies"}
+        </button>
       </section>
 
       <section style={{ border: "2px solid #1a1a1a" }}>

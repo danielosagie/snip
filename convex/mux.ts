@@ -170,6 +170,76 @@ export async function createSignedPlaybackId(assetId: string) {
 }
 
 /**
+ * Static-rendition ("proxy") resolutions Mux can generate. `highest` follows the
+ * source resolution (capped by the asset's max tier); the rest are explicit.
+ */
+export type ProxyResolution =
+  | "highest"
+  | "2160p"
+  | "1440p"
+  | "1080p"
+  | "720p"
+  | "540p"
+  | "480p"
+  | "360p"
+  | "270p"
+  | "audio-only";
+
+/**
+ * Mux names a static rendition deterministically from its resolution, e.g.
+ * `720p` → `720p.mp4`, `audio-only` → `audio.m4a`. We derive it here so the
+ * "preparing" row and the download URL agree before the webhook lands.
+ */
+export function renditionNameForResolution(
+  resolution: ProxyResolution,
+): { name: string; ext: "mp4" | "m4a" } {
+  if (resolution === "audio-only") return { name: "audio.m4a", ext: "m4a" };
+  return { name: `${resolution}.mp4`, ext: "mp4" };
+}
+
+/**
+ * Request one MP4 static rendition per resolution for an existing asset. Each is
+ * an async re-encode (costs money) — callers should de-dupe against already
+ * requested/ready renditions. Returns the derived name/ext/resolution per entry.
+ * Idempotent-ish on Mux's side: re-requesting an existing resolution 409s, which
+ * we swallow so a retry doesn't fail the whole batch.
+ */
+export async function requestStaticRenditions(
+  assetId: string,
+  resolutions: ProxyResolution[],
+): Promise<Array<{ name: string; ext: "mp4" | "m4a"; resolution: ProxyResolution }>> {
+  const mux = getMuxClient();
+  const out: Array<{ name: string; ext: "mp4" | "m4a"; resolution: ProxyResolution }> = [];
+  for (const resolution of resolutions) {
+    const { name, ext } = renditionNameForResolution(resolution);
+    try {
+      await mux.video.assets.createStaticRendition(assetId, { resolution });
+    } catch (err) {
+      // Already-exists (409) is fine — we still track it. Rethrow anything else.
+      const status = (err as { status?: number })?.status;
+      if (status !== 409) throw err;
+    }
+    out.push({ name, ext, resolution });
+  }
+  return out;
+}
+
+/**
+ * Direct-download URL for a ready static rendition. `name` is the Mux file name
+ * (e.g. "720p.mp4"). Append a signed JWT (audience "video") for signed-policy
+ * playback ids; omit `token` for public ones.
+ */
+export function buildMuxRenditionDownloadUrl(
+  playbackId: string,
+  name: string,
+  token?: string,
+): string {
+  const url = new URL(`https://stream.mux.com/${playbackId}/${name}`);
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
+
+/**
  * Build a 360p preview URL — the manifest is forced down to the lowest
  * tier even though the asset includes higher renditions.
  */

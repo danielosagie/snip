@@ -256,6 +256,138 @@ http.route({
   }),
 });
 
+// ─── Public signing endpoints (token-authed, real server IP) ─────────────────
+//
+// The signing ceremony posts here instead of calling Convex mutations directly,
+// so the IP recorded in the audit trail is the one OUR server observed (not a
+// value the browser self-reports, which a signer could spoof). The underlying
+// mutations are internal — these endpoints are the only way in. CORS-open
+// because the signer is an external party on the public sign page.
+const SIGN_CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+function signerIp(request: Request): string | undefined {
+  return (
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    undefined
+  );
+}
+
+function signJson(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...SIGN_CORS },
+  });
+}
+
+const signPreflight = httpAction(
+  async () => new Response(null, { status: 204, headers: SIGN_CORS }),
+);
+for (const path of [
+  "/contracts/sign",
+  "/contracts/sign-view",
+  "/contracts/sign-decline",
+  "/contracts/sign-otp",
+]) {
+  http.route({ path, method: "OPTIONS", handler: signPreflight });
+}
+
+http.route({
+  path: "/contracts/sign-view",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = (await request.json().catch(() => ({}))) as { token?: string };
+    if (typeof body.token !== "string") return signJson({ ok: false, error: "token required" }, 400);
+    await ctx.runMutation(internal.contractsTable.recordSigningView, {
+      token: body.token,
+      ip: signerIp(request),
+      userAgent: request.headers.get("user-agent") ?? undefined,
+    });
+    return signJson({ ok: true });
+  }),
+});
+
+http.route({
+  path: "/contracts/sign-otp",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = (await request.json().catch(() => ({}))) as { token?: string };
+    if (typeof body.token !== "string") return signJson({ ok: false, error: "token required" }, 400);
+    const issued = await ctx.runMutation(internal.contractsTable.issueSignOtp, {
+      token: body.token,
+    });
+    if (!issued) return signJson({ ok: false, error: "Invalid or closed signing link." }, 400);
+    const { sent } = await ctx.runAction(internal.email.sendContractOtp, {
+      email: issued.email,
+      code: issued.code,
+      contractTitle: issued.contractTitle,
+    });
+    // Mask the address so the UI can say "sent to a•••@x.com" without leaking it.
+    const masked = issued.email.replace(/^(.).*(@.*)$/, "$1•••$2");
+    return signJson({ ok: true, sent, email: masked });
+  }),
+});
+
+http.route({
+  path: "/contracts/sign",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      token?: string;
+      typedSignatureName?: string;
+      signatureDataUrl?: string;
+      consented?: boolean;
+      otpCode?: string;
+      fieldValues?: Array<{ fieldId: string; value: string }>;
+    };
+    if (typeof body.token !== "string") return signJson({ ok: false, error: "token required" }, 400);
+    try {
+      const result = await ctx.runMutation(internal.contractsTable.sign, {
+        token: body.token,
+        typedSignatureName: body.typedSignatureName,
+        signatureDataUrl: body.signatureDataUrl,
+        consented: Boolean(body.consented),
+        otpCode: body.otpCode,
+        // Convex validates the id strings at the mutation boundary.
+        fieldValues: body.fieldValues as never,
+        ip: signerIp(request),
+        userAgent: request.headers.get("user-agent") ?? undefined,
+      });
+      return signJson({ ok: true, ...result });
+    } catch (e) {
+      return signJson({ ok: false, error: e instanceof Error ? e.message : "Failed to sign." }, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/contracts/sign-decline",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      token?: string;
+      reason?: string;
+    };
+    if (typeof body.token !== "string") return signJson({ ok: false, error: "token required" }, 400);
+    try {
+      await ctx.runMutation(internal.contractsTable.decline, {
+        token: body.token,
+        reason: body.reason,
+        ip: signerIp(request),
+        userAgent: request.headers.get("user-agent") ?? undefined,
+      });
+      return signJson({ ok: true });
+    } catch (e) {
+      return signJson({ ok: false, error: e instanceof Error ? e.message : "Failed to decline." }, 400);
+    }
+  }),
+});
+
 // Health check endpoint
 http.route({
   path: "/health",

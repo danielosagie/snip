@@ -120,6 +120,37 @@ export const sendTeamInvite = internalAction({
   },
 });
 
+/**
+ * One-time verification code for the signing ceremony (identity tier). The code
+ * is generated + hashed server-side in contractsTable.issueSignOtp; we only ever
+ * email the plaintext. Returns whether the email actually went out so the caller
+ * can tell the signer to check their inbox vs. surface a config problem.
+ */
+export const sendContractOtp = internalAction({
+  args: {
+    email: v.string(),
+    code: v.string(),
+    contractTitle: v.string(),
+  },
+  returns: v.object({ sent: v.boolean() }),
+  handler: async (_ctx, args): Promise<{ sent: boolean }> => {
+    const subject = `Your snip signing code: ${args.code}`;
+    const text =
+      `Your verification code to sign "${args.contractTitle}" is ${args.code}.\n\n` +
+      `It expires in 10 minutes. If you didn't request this, ignore this email.`;
+    const html = shell(
+      `<p style="margin:0 0 12px;">Use this code to verify your identity and sign ` +
+        `<strong>${args.contractTitle}</strong>:</p>` +
+        `<p style="margin:0 0 20px;font-family:monospace;font-size:32px;font-weight:700;` +
+        `letter-spacing:0.15em;color:#1a1a1a;">${args.code}</p>` +
+        `<p style="margin:0;color:#888;font-size:13px;">This code expires in 10 minutes. ` +
+        `If you didn't request it, you can ignore this email.</p>`,
+    );
+    const result = await sendViaResend({ to: args.email, subject, html, text });
+    return { sent: result.sent };
+  },
+});
+
 /** Shared guard for notification emails: resolve the absolute link or
  *  bail (no APP_URL → skip; the in-app activity is unaffected). */
 function linkOrSkip(path: string): string | null {

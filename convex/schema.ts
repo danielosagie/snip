@@ -236,6 +236,36 @@ export default defineSchema({
     // by the playback action to stall-detect a stuck "preparing" asset.
     muxPreviewAssetError: v.optional(v.string()),
     muxPreviewAssetUpdatedAt: v.optional(v.number()),
+    // Mux static renditions = downloadable MP4 "proxies" (modern replacement
+    // for mp4_support, which is "none" on our assets). Doubles as the edit
+    // proxy the LucidLink-style drive serves. Requested on-demand (each is a
+    // re-encode → costs money) via videoActions.requestProxies; populated by
+    // the `video.asset.static_rendition.ready|.errored` webhooks. Mirrors the
+    // muxPreviewAsset* pattern: one array entry per resolution. `name` is the
+    // Mux file name used in the URL (e.g. "720p.mp4"). See plans/proxies-unified.md.
+    staticRenditions: v.optional(
+      v.array(
+        v.object({
+          name: v.string(), // e.g. "720p.mp4" | "highest.mp4" | "audio.m4a"
+          resolution: v.string(), // e.g. "720p" | "1080p" | "highest" | "audio-only"
+          status: v.union(
+            v.literal("preparing"),
+            v.literal("ready"),
+            v.literal("errored"),
+            v.literal("skipped"),
+          ),
+          ext: v.string(), // "mp4" | "m4a"
+          filesizeBytes: v.optional(v.number()),
+          error: v.optional(v.string()),
+          // When the ready rendition has been mirrored into R2 for the
+          // LucidLink-style drive, this is its object key under
+          // projects/<teamSlug>/<projectId>/proxies/<videoId>/<name>. Absent =
+          // download-only (served from Mux); present = also on the drive.
+          r2Key: v.optional(v.string()),
+        }),
+      ),
+    ),
+    staticRenditionsUpdatedAt: v.optional(v.number()),
     watermarkOverlayKey: v.optional(v.string()),
     // Image-class items (jpg/png/webp/gif) skip Mux and get a sharp-rendered
     // watermarked low-res preview instead. Same gating semantics as the video
@@ -791,6 +821,18 @@ export default defineSchema({
     // Signing artefacts.
     signablePdfS3Key: v.optional(v.string()),
     signedPdfS3Key: v.optional(v.string()),
+    // Self-contained signed package (HTML: frozen body + signature blocks +
+    // Certificate of Completion) written to R2 on completion. Printable to PDF
+    // by anyone; carries the content hash so integrity is independently
+    // verifiable. True server-side PDF render is a follow-up (no renderer in
+    // the Convex runtime).
+    signedPackageS3Key: v.optional(v.string()),
+    // Court-admissibility: the exact body frozen at send time + its SHA-256.
+    // "Association with the record" + tamper-evidence (ESIGN/UETA) — what the
+    // signers agreed to, immutable, verifiable by re-hashing. See
+    // plans/court-signing.md.
+    frozenContentHtml: v.optional(v.string()),
+    contentHash: v.optional(v.string()),
     status: v.union(
       v.literal("draft"),
       v.literal("pending"),
@@ -845,6 +887,14 @@ export default defineSchema({
     typedSignatureName: v.optional(v.string()),
     signedIp: v.optional(v.string()),
     signedUserAgent: v.optional(v.string()),
+    // ESIGN consent to do business electronically — required before a
+    // signature is legally binding. Timestamp of the affirmative checkbox.
+    consentedAt: v.optional(v.number()),
+    // Email OTP identity verification. Hash = SHA-256(`${token}:${code}`); the
+    // plaintext code is only emailed, never stored. Cleared after a successful
+    // sign. When present, the sign mutation requires a matching, unexpired code.
+    otpCodeHash: v.optional(v.string()),
+    otpExpiresAt: v.optional(v.number()),
   })
     .index("by_contract", ["contractId"])
     .index("by_token", ["token"])
@@ -897,6 +947,7 @@ export default defineSchema({
       v.literal("created"),
       v.literal("sent"),
       v.literal("viewed"),
+      v.literal("consented"),
       v.literal("field_filled"),
       v.literal("signed"),
       v.literal("declined"),

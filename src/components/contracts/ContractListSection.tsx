@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { FileSignature, Plus } from "lucide-react";
+import { Check, FileSignature, Plus } from "lucide-react";
 
 interface ContractListSectionProps {
   projectId: Id<"projects">;
@@ -139,11 +139,16 @@ export function ContractListSection({
                       : STATUS_STYLES.draft,
                 )}
               >
-                {legacyContract.signedAt
-                  ? "signed"
-                  : legacyContract.sentForSignatureAt
-                    ? "sent"
-                    : "draft"}
+                {legacyContract.signedAt ? (
+                  <>
+                    <Check className="mr-0.5 h-2.5 w-2.5" strokeWidth={3} />
+                    signed
+                  </>
+                ) : legacyContract.sentForSignatureAt ? (
+                  "sent"
+                ) : (
+                  "draft"
+                )}
               </span>
             </Link>
           ) : null}
@@ -176,7 +181,14 @@ export function ContractListSection({
                     STATUS_STYLES[c.status] ?? STATUS_STYLES.draft,
                   )}
                 >
-                  {c.status}
+                  {c.status === "completed" ? (
+                    <>
+                      <Check className="mr-0.5 h-2.5 w-2.5" strokeWidth={3} />
+                      {c.status}
+                    </>
+                  ) : (
+                    c.status
+                  )}
                 </span>
               </Link>
             );
