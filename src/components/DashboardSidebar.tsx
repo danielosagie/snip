@@ -472,6 +472,16 @@ function DesktopAppOrDrive() {
     if (typeof window === "undefined" || !window.snipDesktop?.isDesktop || !window.api) return;
     setIsDesktop(true);
     void window.api.mount.status().then(setMount).catch(() => {});
+    // Rehydrate the expiry so the refresh timer resumes after a renderer
+    // reload (scoped creds persisted from a previous session).
+    void window.api.settings
+      .get()
+      .then((s) => {
+        const exp = (s.storage as { expiresAt?: number | null } | undefined)
+          ?.expiresAt;
+        if (typeof exp === "number") setCredExpiresAt(exp);
+      })
+      .catch(() => {});
     return window.api.mount.onStatus(setMount);
   }, []);
 

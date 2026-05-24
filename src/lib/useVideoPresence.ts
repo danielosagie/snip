@@ -23,15 +23,26 @@ function createClientId() {
 }
 
 function getOrCreateClientId() {
-  const existing =
-    window.localStorage.getItem(STORAGE_KEY_CLIENT_ID) ??
-    window.localStorage.getItem(LEGACY_STORAGE_KEY_CLIENT_ID);
+  // localStorage can throw when storage is blocked (private mode, strict
+  // cookie settings). Never let presence bootstrap crash over it.
+  let existing: string | null = null;
+  try {
+    existing =
+      window.localStorage.getItem(STORAGE_KEY_CLIENT_ID) ??
+      window.localStorage.getItem(LEGACY_STORAGE_KEY_CLIENT_ID);
+  } catch {
+    existing = null;
+  }
   if (existing && existing.trim().length > 0) {
     return existing;
   }
 
   const clientId = createClientId();
-  window.localStorage.setItem(STORAGE_KEY_CLIENT_ID, clientId);
+  try {
+    window.localStorage.setItem(STORAGE_KEY_CLIENT_ID, clientId);
+  } catch {
+    // Storage unavailable — an ephemeral per-session id is fine.
+  }
   return clientId;
 }
 

@@ -100,6 +100,14 @@ function readSharedCredentials(): StorageCredentials | null {
 }
 
 const SCOPED_TTL_SECONDS = 3600; // 1h — desktop re-vends before expiry.
+const MINT_TIMEOUT_MS = 10_000; // hard cap on the R2 cred-mint request.
+
+function isScopingConfigured(provider: Provider): boolean {
+  if (provider === "r2") {
+    return Boolean(process.env.R2_ACCOUNT_ID && process.env.R2_API_TOKEN);
+  }
+  return Boolean(process.env.STS_ROLE_ARN);
+}
 
 async function mintR2ScopedCredentials(
   prefixes: string[],
@@ -111,23 +119,37 @@ async function mintR2ScopedCredentials(
   if (!accountId || !apiToken || !parentAccessKeyId || !bucket) return null;
   if (prefixes.length === 0) return null;
 
-  const resp = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/temp-access-credentials`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "application/json",
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MINT_TIMEOUT_MS);
+  let resp: Response;
+  try {
+    resp = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/temp-access-credentials`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bucket,
+          parentAccessKeyId,
+          permission: "object-read-write",
+          ttlSeconds: SCOPED_TTL_SECONDS,
+          prefixes,
+        }),
+        signal: controller.signal,
       },
-      body: JSON.stringify({
-        bucket,
-        parentAccessKeyId,
-        permission: "object-read-write",
-        ttlSeconds: SCOPED_TTL_SECONDS,
-        prefixes,
-      }),
-    },
-  );
+    );
+  } catch (e) {
+    console.error(
+      "storageCredentials: R2 temp-cred request failed",
+      e instanceof Error ? e.message : e,
+    );
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!resp.ok) {
     const body = await resp.text().catch(() => "<unreadable>");
     console.error("storageCredentials: R2 temp-cred mint failed", {
@@ -249,6 +271,15 @@ export const getScopedStorageCredentials = action({
         ? await mintR2ScopedCredentials(scope.prefixes)
         : await mintStsScopedCredentials(scope.prefixes);
     if (scoped) return scoped;
+
+    // Fail closed: if scoping is configured for this provider but the
+    // mint failed (network, API error, timeout), do NOT silently hand
+    // back the shared long-lived key — that would defeat scoping.
+    if (isScopingConfigured(provider)) {
+      throw new Error(
+        "Failed to mint scoped storage credentials for the configured provider.",
+      );
+    }
 
     const shared = readSharedCredentials();
     if (!shared) throw new Error("Object storage is not configured.");

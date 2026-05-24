@@ -75,13 +75,16 @@ function encryptSecret(value) {
 
 function decryptSecret(value) {
   if (typeof value !== "string" || !value.startsWith(ENC_PREFIX)) return value;
-  if (!safeStorage.isEncryptionAvailable()) return "";
+  // On failure, return the encrypted blob unchanged rather than "" —
+  // otherwise the next saveSettings would re-encrypt the empty string
+  // and permanently destroy the recoverable payload.
+  if (!safeStorage.isEncryptionAvailable()) return value;
   try {
     return safeStorage.decryptString(
       Buffer.from(value.slice(ENC_PREFIX.length), "base64"),
     );
   } catch {
-    return "";
+    return value;
   }
 }
 
@@ -2481,12 +2484,12 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isOurApp(url)) {
       event.preventDefault();
-      void shell.openExternal(url);
+      if (isOpenableExternalUrl(url)) void shell.openExternal(url);
     }
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isOurApp(url)) return { action: "allow" };
-    void shell.openExternal(url);
+    if (isOpenableExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 

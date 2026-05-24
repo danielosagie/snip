@@ -8,6 +8,7 @@ import { Id } from "@convex/_generated/dataModel";
 import { Input } from "@/components/ui/input";
 import { SnipMark } from "@/components/SnipMark";
 import { cn } from "@/lib/utils";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { Check, X } from "lucide-react";
 
 type SignData = NonNullable<FunctionReturnType<typeof api.contractsTable.getByToken>>;
@@ -196,7 +197,9 @@ function SignPage() {
           <div
             className="prose prose-sm max-w-none text-[#1a1a1a]"
             dangerouslySetInnerHTML={{
-              __html: data.contract.contentHtml || "<p><em>(no body)</em></p>",
+              __html: data.contract.contentHtml
+                ? sanitizeHtml(data.contract.contentHtml)
+                : "<p><em>(no body)</em></p>",
             }}
           />
         </article>
