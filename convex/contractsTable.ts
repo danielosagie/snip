@@ -189,6 +189,7 @@ export const create = mutation({
       v.literal("release"),
       v.literal("custom"),
     ),
+    docType: v.optional(v.union(v.literal("contract"), v.literal("document"))),
     contentHtml: v.optional(v.string()),
   },
   returns: v.id("contracts"),
@@ -200,6 +201,7 @@ export const create = mutation({
       teamId: project.teamId,
       title: args.title,
       kind: args.kind,
+      docType: args.docType ?? "contract",
       contentHtml: args.contentHtml ?? "",
       status: "draft",
       createdByClerkId: user.subject,
@@ -223,6 +225,7 @@ export const update = mutation({
     contractId: v.id("contracts"),
     title: v.optional(v.string()),
     contentHtml: v.optional(v.string()),
+    docType: v.optional(v.union(v.literal("contract"), v.literal("document"))),
     priceCents: v.optional(v.number()),
     currency: v.optional(v.string()),
     deadline: v.optional(v.string()),
@@ -236,6 +239,7 @@ export const update = mutation({
     }
     const patch: Partial<Doc<"contracts">> = { lastSavedAt: Date.now() };
     if (args.title !== undefined) patch.title = args.title;
+    if (args.docType !== undefined) patch.docType = args.docType;
     if (args.contentHtml !== undefined) patch.contentHtml = args.contentHtml;
     if (args.priceCents !== undefined) patch.priceCents = args.priceCents;
     if (args.currency !== undefined) patch.currency = args.currency;

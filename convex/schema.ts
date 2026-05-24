@@ -773,6 +773,10 @@ export default defineSchema({
       v.literal("release"),
       v.literal("custom"),
     ),
+    // Unified editor mode. "contract" (default when absent) shows the signing
+    // surface (recipients, fields, send, audit, certificate). "document" is a
+    // plain doc — same editor, signing hidden. Toggleable in the editor header.
+    docType: v.optional(v.union(v.literal("contract"), v.literal("document"))),
     // Editable body (Tiptap HTML) + the wizard-generated clauses (same
     // shape as projects.contract.clauses).
     contentHtml: v.string(),

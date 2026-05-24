@@ -101,6 +101,7 @@ function ContractEditorPage() {
   const contractId = params.contractId as Id<"contracts">;
 
   const data = useQuery(api.contractsTable.get, { contractId });
+  const updateContract = useMutation(api.contractsTable.update);
   const [fieldsSheetOpen, setFieldsSheetOpen] = useState(false);
 
   if (data === undefined) {
@@ -117,6 +118,8 @@ function ContractEditorPage() {
       </div>
     );
   }
+
+  const isDocument = (data.contract.docType ?? "contract") === "document";
 
   return (
     <div className="h-full flex flex-col bg-[#f0f0e8]">
@@ -147,39 +150,82 @@ function ContractEditorPage() {
             </span>
           </div>
         </div>
+
+        {/* Contract ⇄ Document toggle — same editor, signing surface only shows
+            for contracts. Draft-only (signing state can't change after send). */}
+        <div className="flex items-center border-2 border-[#1a1a1a] flex-shrink-0">
+          {(["contract", "document"] as const).map((t) => {
+            const current = (data.contract.docType ?? "contract") === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                disabled={data.contract.status !== "draft" || current}
+                onClick={() =>
+                  void updateContract({ contractId, docType: t })
+                }
+                title={
+                  data.contract.status !== "draft"
+                    ? "Only drafts can switch type"
+                    : `Treat as ${t}`
+                }
+                className={cn(
+                  "h-8 px-3 text-[10px] font-bold uppercase tracking-wider transition-colors disabled:cursor-default",
+                  current
+                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50",
+                )}
+              >
+                {t}
+              </button>
+            );
+          })}
+        </div>
       </DashboardHeader>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+        <div
+          className={cn(
+            "max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 gap-6",
+            !isDocument && "lg:grid-cols-[1fr_320px]",
+          )}
+        >
           <ContractBody
             contract={data.contract}
-            onOpenFields={() => setFieldsSheetOpen(true)}
+            onOpenFields={
+              isDocument ? undefined : () => setFieldsSheetOpen(true)
+            }
           />
-          <div className="space-y-6">
-            <RecipientsPanel
-              contract={data.contract}
-              recipients={data.recipients}
-            />
-            <FieldsPanel
-              contract={data.contract}
-              recipients={data.recipients}
-              fields={data.fields}
-              onOpenPlacement={() => setFieldsSheetOpen(true)}
-            />
-            <AuditLogPanel audit={data.audit} />
-          </div>
+          {/* Signing surface — contracts only. Documents are just docs. */}
+          {!isDocument && (
+            <div className="space-y-6">
+              <RecipientsPanel
+                contract={data.contract}
+                recipients={data.recipients}
+              />
+              <FieldsPanel
+                contract={data.contract}
+                recipients={data.recipients}
+                fields={data.fields}
+                onOpenPlacement={() => setFieldsSheetOpen(true)}
+              />
+              <AuditLogPanel audit={data.audit} />
+            </div>
+          )}
         </div>
       </div>
 
-      <SignatureFieldsSheet
-        open={fieldsSheetOpen}
-        onOpenChange={setFieldsSheetOpen}
-        contractId={data.contract._id}
-        contentHtml={data.contract.contentHtml ?? ""}
-        recipients={data.recipients}
-        fields={data.fields}
-        isDraft={data.contract.status === "draft"}
-      />
+      {!isDocument && (
+        <SignatureFieldsSheet
+          open={fieldsSheetOpen}
+          onOpenChange={setFieldsSheetOpen}
+          contractId={data.contract._id}
+          contentHtml={data.contract.contentHtml ?? ""}
+          recipients={data.recipients}
+          fields={data.fields}
+          isDraft={data.contract.status === "draft"}
+        />
+      )}
     </div>
   );
 }
@@ -189,7 +235,8 @@ function ContractBody({
   onOpenFields,
 }: {
   contract: ContractDoc;
-  onOpenFields: () => void;
+  /** Omitted for plain documents — hides the toolbar's "Fields" button. */
+  onOpenFields?: () => void;
 }) {
   const update = useMutation(api.contractsTable.update);
   const [body, setBody] = useState<string>(contract.contentHtml ?? "");

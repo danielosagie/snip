@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { Check, FileSignature, Plus } from "lucide-react";
+import { Check, FileSignature, FileText, Plus } from "lucide-react";
 
 interface ContractListSectionProps {
   projectId: Id<"projects">;
@@ -153,17 +153,20 @@ export function ContractListSection({
             </Link>
           ) : null}
           {contracts.map((c) => {
-            const meta =
-              c.recipientCount > 0
+            const isDoc = c.docType === "document";
+            const meta = isDoc
+              ? "Document"
+              : c.recipientCount > 0
                 ? `${c.signedCount}/${c.recipientCount} signed`
                 : KIND_LABELS[c.kind] ?? c.kind;
+            const Icon = isDoc ? FileText : FileSignature;
             return (
               <Link
                 key={c._id}
                 to={contractPath(teamSlug, projectId, c._id)}
                 className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
               >
-                <FileSignature
+                <Icon
                   className="h-5 w-5 flex-shrink-0 text-[#888]"
                   strokeWidth={1.75}
                 />

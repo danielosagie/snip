@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
-import { Plus, Upload, FolderPlus, FileSignature } from "lucide-react";
+import { Plus, Upload, FolderPlus, FileSignature, FileText } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { contractPath } from "@/lib/routes";
@@ -61,22 +61,26 @@ export function ProjectAddButton({
     }
   };
 
-  const handleAddContract = async () => {
+  // Contracts and plain documents are the same editor (toggle inside); we just
+  // seed docType so contracts open with the signing surface and documents don't.
+  const handleAdd = async (docType: "contract" | "document") => {
     if (creatingContract) return;
-    const raw = prompt("Contract title", "Untitled contract");
+    const label = docType === "document" ? "document" : "contract";
+    const raw = prompt(`${label[0].toUpperCase()}${label.slice(1)} title`, `Untitled ${label}`);
     if (!raw) return;
     setCreatingContract(true);
     try {
       const contractId = await createContract({
         projectId,
-        title: raw.trim() || "Untitled contract",
-        kind: "sow",
+        title: raw.trim() || `Untitled ${label}`,
+        kind: docType === "document" ? "custom" : "sow",
+        docType,
         contentHtml: "",
       });
-      // Drop straight into the new contract's editor.
+      // Drop straight into the new editor.
       navigate({ to: contractPath(teamSlug, projectId, contractId) });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't create contract.");
+      alert(e instanceof Error ? e.message : `Couldn't create ${label}.`);
     } finally {
       setCreatingContract(false);
     }
@@ -106,11 +110,18 @@ export function ProjectAddButton({
           Add folder
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => void handleAddContract()}
+          onClick={() => void handleAdd("contract")}
           disabled={creatingContract}
         >
           <FileSignature className="mr-2 h-4 w-4" />
           Add contract
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => void handleAdd("document")}
+          disabled={creatingContract}
+        >
+          <FileText className="mr-2 h-4 w-4" />
+          Add document
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
