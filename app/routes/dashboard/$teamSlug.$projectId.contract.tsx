@@ -14,6 +14,7 @@ import { ContractFileMenubar } from "@/components/contracts/ContractFileMenubar"
 import { ContractCommentsPanel } from "@/components/contracts/ContractCommentsPanel";
 import { ContractVersionsPanel } from "@/components/contracts/ContractVersionsPanel";
 import { ContractShareDialog } from "@/components/contracts/ContractShareDialog";
+import { ContractToolbar } from "@/components/contracts/ContractToolbar";
 import type {
   ProjectType,
   WizardAnswers,
@@ -850,12 +851,11 @@ function ContractFullPage() {
             />
           ) : null}
 
-          {/* No persistent toolbar in Ghost mode — formatting comes
-              from the selection bubble that floats above your
-              cursor, and the block menu lives on the gutter "+"
-              affordance on empty lines. Set
-              `showAdvancedToolbar=true` if you ever want the full
-              toolbar back as an opt-in. */}
+          {/* Persistent formatting toolbar (font, size, bold/italic, headings,
+              lists, alignment, links). Binds to the lifted editor instance; the
+              selection bubble + gutter "+" still work alongside it. */}
+          <ContractToolbar editor={usableEditor} />
+
 
           {/* Scroll container — owns the scroll for the whole stack
               of pages so the floating page counter can sit relative
