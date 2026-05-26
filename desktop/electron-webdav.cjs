@@ -38,15 +38,6 @@ const DAV_HEADERS = {
   Allow: "OPTIONS, GET, HEAD, PROPFIND, PUT",
 };
 
-const MUX_VIDEO_TYPES = new Set([
-  "video/mp4",
-  "video/quicktime",
-  "video/x-matroska",
-  "video/webm",
-  "video/x-msvideo",
-  "video/mpeg",
-]);
-
 function xmlEscape(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -468,8 +459,6 @@ async function handlePut(req, res, segments, { convexCall, pushLog }) {
     // will reconcile. We still return 201 because the WebDAV PUT itself
     // succeeded and rclone retrying would re-upload the same bytes.
   }
-  // Hint to rclone that the resource was created.
-  void MUX_VIDEO_TYPES;
   res.writeHead(201, { "content-type": "text/plain" });
   res.end("created");
 }

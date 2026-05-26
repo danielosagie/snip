@@ -129,15 +129,20 @@ async function buildProjectVideoList(
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
     .collect();
   const live = videos.filter((v) => !v.deletedAt);
+  // Items are content-type agnostic — the `videos` table doubles as the
+  // generic file table (PDFs, images, audio, .ai, .psd, anything). The
+  // backend's markUploadComplete already routes non-video MIME types
+  // through markAsReadyAsFile, so the desktop drive just surfaces whatever
+  // landed.
   const rows = live.map((vd) => {
-    const ext = extractExt(vd.s3Key ?? undefined) ?? extractExt(vd.title) ?? "mp4";
-    const rawTitle = stripExt(vd.title, ext);
+    const ext = extractExt(vd.s3Key ?? undefined) ?? extractExt(vd.title);
+    const rawTitle = ext ? stripExt(vd.title, ext) : vd.title;
     return {
       _id: vd._id as string,
-      rawName: `${rawTitle}.${ext}`,
+      rawName: ext ? `${rawTitle}.${ext}` : rawTitle,
       video: vd,
       rawTitle,
-      ext,
+      ext: ext ?? "",
     };
   });
   const disambig = disambiguate(rows);
