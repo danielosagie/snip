@@ -6,6 +6,7 @@ import { action, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { isFeatureEnabled } from "./featureFlags";
+import { composePaywall } from "./payments";
 
 /**
  * Node-only side of payments. Lives here (and not in payments.ts) because
@@ -146,7 +147,15 @@ export const createCheckoutForGrant = action({
     if (lookup.grant.paidAt) {
       return { status: "alreadyPaid", url: null };
     }
-    if (!lookup.shareLink.paywall) {
+    // Compose the share-link paywall with the per-video paywall (same rule
+    // as getGrantUnlockState). A video priced by its owner gates the download
+    // even when the share link itself isn't paywalled — without this, the
+    // header "Pay $X" button would 404 with status: "noPaywall".
+    const composedPaywall = composePaywall(
+      lookup.shareLink.paywall,
+      lookup.shareLink.bundleId ? null : lookup.video.paywall,
+    );
+    if (!composedPaywall) {
       return { status: "noPaywall", url: null };
     }
     if (!lookup.team.stripeConnectAccountId) {
@@ -172,11 +181,10 @@ export const createCheckoutForGrant = action({
       };
     }
 
-    const paywall = lookup.shareLink.paywall;
-    const amountCents = paywall.priceCents;
-    const currency = paywall.currency;
+    const amountCents = composedPaywall.priceCents;
+    const currency = composedPaywall.currency;
     const productName =
-      paywall.description ??
+      composedPaywall.description ??
       (lookup.bundleName
         ? `Final delivery: ${lookup.bundleName}`
         : `Final delivery: ${lookup.video.title}`);

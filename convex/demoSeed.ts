@@ -417,7 +417,18 @@ export const simulatePaymentForGrant = mutation({
     if (grant.paidAt) return { status: "alreadyPaid" as const };
 
     const shareLink = await ctx.db.get(grant.shareLinkId);
-    if (!shareLink || !shareLink.paywall) {
+    if (!shareLink) return { status: "noPaywall" as const };
+    // Honor the composed paywall — a video-only paywall should still be
+    // simulatable in demo mode even when the share link itself is free.
+    // Bundles fall back to share-link paywall only (see composePaywall
+    // comment in payments.ts).
+    let videoPaywall: { priceCents: number; currency: string } | null = null;
+    if (shareLink.videoId) {
+      const video = await ctx.db.get(shareLink.videoId);
+      videoPaywall = video?.paywall ?? null;
+    }
+    const effective = shareLink.paywall ?? videoPaywall;
+    if (!effective) {
       return { status: "noPaywall" as const };
     }
 

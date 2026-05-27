@@ -30,6 +30,49 @@ const paymentStatusValidator = v.union(
   v.literal("failed"),
 );
 
+/**
+ * Compose the per-video paywall with a share-link's own paywall.
+ *
+ * Per the schema (videos.paywall, shareLinks.paywall): both can be set on the
+ * same delivery and "they compose with this one." Real-world: the video owner
+ * sets a base price ("this clip costs $40 to download"), the share link
+ * optionally layers an agency markup or client-specific override on top.
+ *
+ *  - share-link paywall only → use it (the historical behavior)
+ *  - video paywall only      → use it (this is the bug we're fixing)
+ *  - both, same currency     → sum priceCents into a single combined charge
+ *  - both, currency mismatch → fall back to the share-link paywall (the
+ *    more client-specific override) and warn — we never invent a third
+ *    currency or guess at FX.
+ *
+ * Returning `null` means "no paywall — the customer can download freely."
+ */
+export type ComposablePaywall = {
+  priceCents: number;
+  currency: string;
+  description?: string;
+};
+
+export function composePaywall(
+  shareLinkPaywall: ComposablePaywall | null | undefined,
+  videoPaywall: ComposablePaywall | null | undefined,
+): ComposablePaywall | null {
+  if (!shareLinkPaywall && !videoPaywall) return null;
+  if (!shareLinkPaywall) return videoPaywall ?? null;
+  if (!videoPaywall) return shareLinkPaywall;
+  if (shareLinkPaywall.currency !== videoPaywall.currency) {
+    console.warn(
+      `composePaywall: currency mismatch (${shareLinkPaywall.currency} vs ${videoPaywall.currency}) — falling back to share-link paywall.`,
+    );
+    return shareLinkPaywall;
+  }
+  return {
+    priceCents: shareLinkPaywall.priceCents + videoPaywall.priceCents,
+    currency: shareLinkPaywall.currency,
+    description: shareLinkPaywall.description ?? videoPaywall.description,
+  };
+}
+
 export const lookupGrantForCheckout = internalQuery({
   args: { grantToken: v.string() },
   handler: async (ctx, args) => {
@@ -334,18 +377,32 @@ export const getGrantUnlockState = query({
         canDownload: false,
       };
     }
+    // Compose the share-link paywall with the per-video paywall so a video
+    // priced by its owner still gates the download when shared via a link
+    // that itself isn't paywalled. See composePaywall above for the rules.
+    let videoPaywall: ComposablePaywall | null = null;
+    if (shareLink.videoId) {
+      const video = await ctx.db.get(shareLink.videoId);
+      videoPaywall = video?.paywall ?? null;
+    }
+    // Bundle links: a per-video paywall on any single item would be
+    // surprising at the bundle level (you'd pay for one clip and unlock the
+    // rest), so we deliberately only honor the share-link paywall for
+    // bundles. Per-video pricing for bundle deliveries can be designed later.
+    const composedPaywall = composePaywall(shareLink.paywall, videoPaywall);
+
     const identity = await ctx.auth.getUserIdentity();
     const isOwner =
       identity?.subject != null &&
       identity.subject === shareLink.createdByClerkId;
     const { role, canComment } = shareCapabilities(grant.role, shareLink);
     const paid = Boolean(grant.paidAt);
-    const paywalled = Boolean(shareLink.paywall);
+    const paywalled = Boolean(composedPaywall);
     return {
       valid: true,
       paid,
       expiresAt: grant.expiresAt,
-      paywall: shareLink.paywall ?? null,
+      paywall: composedPaywall,
       isOwner,
       role: isOwner ? "editor" : role,
       canComment: isOwner ? true : canComment,

@@ -8,6 +8,7 @@ import { resolveBundleVideos, resolveBundleFolders } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
 import { indexSearchable, removeSearchableForVideo } from "./search";
+import { composePaywall } from "./payments";
 import { api, internal } from "./_generated/api";
 import { prefEnabled, resolveUserEmail } from "./notifications";
 
@@ -531,11 +532,20 @@ export const getByShareGrantForDownload = query({
       return null;
     }
 
+    // Compose with the per-video paywall so the download gate in
+    // videoActions.getSharedDownloadUrl charges for a video that has its own
+    // price even when the share link itself is free. Bundles fall back to
+    // share-link paywall only — see composePaywall in payments.ts.
+    const composedPaywall = composePaywall(
+      resolved.shareLink.paywall,
+      resolved.shareLink.bundleId ? null : video.paywall,
+    );
+
     return {
       allowDownload: resolved.shareLink.allowDownload,
       grantExpiresAt: resolved.grant.expiresAt,
       grantPaidAt: resolved.grant.paidAt ?? null,
-      paywall: resolved.shareLink.paywall ?? null,
+      paywall: composedPaywall,
       video: {
         _id: video._id,
         title: video.title,
