@@ -1160,7 +1160,6 @@ export default function ProjectPage({
               <ContractListSection
                 projectId={project._id}
                 teamSlug={resolvedTeamSlug}
-                canEdit={canUpload}
               />
             )}
             <div className="px-6 pt-4 pb-6">
@@ -1385,7 +1384,6 @@ export default function ProjectPage({
               <ContractListSection
                 projectId={project._id}
                 teamSlug={resolvedTeamSlug}
-                canEdit={canUpload}
               />
             )}
             <div className="divide-y-2 divide-[#1a1a1a]">

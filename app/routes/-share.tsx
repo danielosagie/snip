@@ -113,6 +113,9 @@ export default function SharePage() {
   const [rightTab, setRightTab] = useState<"comments" | "info">("comments");
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const playerSectionRef = useRef<HTMLDivElement | null>(null);
+  const paywallSectionRef = useRef<HTMLDivElement | null>(null);
+  const paywallPulseTimerRef = useRef<number | null>(null);
+  const [paywallPulse, setPaywallPulse] = useState(false);
 
   // Live unlock-state subscription. Convex reactivity flips this from
   // paid:false to paid:true the instant the Stripe webhook fires, with no
@@ -520,27 +523,40 @@ export default function SharePage() {
     // Demo bypass: if Stripe isn't configured, simulate the payment on the
     // server (flip grant.paidAt directly). Lets you exercise the full
     // preview → paid swap without standing up Stripe.
-    const stripeConfigured = demoStatus?.stripeConfigured ?? false;
+    //
+    // Default to the real Stripe path while `demoStatus` is still loading —
+    // the server's `simulatePaymentForGrant` returns `stripeIsConfigured` on
+    // prod deployments and we used to silently swallow it, so a fast click
+    // before the query resolved produced no redirect.
+    const stripeConfigured = demoStatus?.stripeConfigured ?? true;
     if (!stripeConfigured) {
       try {
         const result = await simulatePayment({ grantToken });
         if (result.status === "ok" || result.status === "alreadyPaid") {
           setReloadTrigger((n) => n + 1);
-        } else if (result.status === "noPaywall") {
-          setCheckoutError("This link is not paywalled.");
-        } else if (result.status === "invalidGrant") {
-          setCheckoutError("Session expired. Please reload.");
-        } else if (result.status === "stripeIsConfigured") {
-          // Should not happen because we checked above, but fall through.
+          setIsCreatingCheckout(false);
+          return;
         }
+        if (result.status === "noPaywall") {
+          setCheckoutError("This link is not paywalled.");
+          setIsCreatingCheckout(false);
+          return;
+        }
+        if (result.status === "invalidGrant") {
+          setCheckoutError("Session expired. Please reload.");
+          setIsCreatingCheckout(false);
+          return;
+        }
+        // `stripeIsConfigured` — the deployment actually has Stripe wired
+        // up; fall through to the real checkout path below instead of
+        // silently bailing.
       } catch (err) {
         setCheckoutError(
           err instanceof Error ? err.message : "Demo payment failed.",
         );
-      } finally {
         setIsCreatingCheckout(false);
+        return;
       }
-      return;
     }
 
     try {
@@ -695,6 +711,29 @@ export default function SharePage() {
         });
       });
     }
+  }, []);
+
+  const surfacePaywall = useCallback(() => {
+    const node = paywallSectionRef.current;
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setPaywallPulse(true);
+    if (paywallPulseTimerRef.current !== null) {
+      window.clearTimeout(paywallPulseTimerRef.current);
+    }
+    paywallPulseTimerRef.current = window.setTimeout(() => {
+      setPaywallPulse(false);
+      paywallPulseTimerRef.current = null;
+    }, 1200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (paywallPulseTimerRef.current !== null) {
+        window.clearTimeout(paywallPulseTimerRef.current);
+      }
+    };
   }, []);
 
   const handleDownload = useCallback(async () => {
@@ -916,21 +955,33 @@ export default function SharePage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
-              isBundle ? setDownloadSheetOpen(true) : void handleDownload()
-            }
+            onClick={() => {
+              if (!isBundle && !downloadAllowed) {
+                surfacePaywall();
+                return;
+              }
+              if (isBundle) {
+                setDownloadSheetOpen(true);
+              } else {
+                void handleDownload();
+              }
+            }}
             disabled={
               !grantToken ||
-              (isBundle
-                ? bundleItems.length === 0
-                : isDownloading || !downloadAllowed)
+              (isBundle ? bundleItems.length === 0 : isDownloading)
             }
             title={
               !isBundle && !downloadAllowed ? "Pay to unlock download" : undefined
             }
           >
             <Download className="h-4 w-4" />
-            {isBundle ? "Download" : isDownloading ? "Preparing..." : "Download"}
+            {isBundle
+              ? "Download"
+              : !downloadAllowed && paywall
+                ? `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`
+                : isDownloading
+                  ? "Preparing..."
+                  : "Download"}
           </Button>
         </div>
       </header>
@@ -1064,8 +1115,13 @@ export default function SharePage() {
         ) : null}
 
         {paywall && !isPaid && !isOwner ? (
-          <section className="border-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8] p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+          <section
+            ref={paywallSectionRef}
+            className={`border-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8] p-4 sm:p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shadow-[4px_4px_0px_0px_#1a1a1a] scroll-mt-24 transition-transform ${
+              paywallPulse ? "scale-[1.02]" : ""
+            }`}
+          >
+            <div className="min-w-0">
               <div className="text-xs font-mono uppercase tracking-widest opacity-80">
                 {demoStatus && !demoStatus.stripeConfigured
                   ? "Demo mode — simulated payment"
@@ -1073,30 +1129,36 @@ export default function SharePage() {
                     ? "Preview rendering — you can pay now"
                     : "Preview only — paywalled delivery"}
               </div>
-              <div className="font-black text-2xl tracking-tight">
+              <div className="font-black text-2xl sm:text-3xl tracking-tight break-words">
                 {formatPrice(paywall.priceCents, paywall.currency)} to unlock full
                 quality
               </div>
               {paywall.description ? (
-                <div className="text-sm opacity-90 mt-1">{paywall.description}</div>
+                <div className="text-sm opacity-90 mt-1 break-words">
+                  {paywall.description}
+                </div>
               ) : null}
             </div>
-            <div className="flex flex-col items-stretch sm:items-end gap-2">
+            <div className="flex flex-col gap-2 w-full sm:w-auto sm:items-end sm:shrink-0">
               <Button
                 onClick={() => void handlePay()}
-                disabled={isCreatingCheckout || !grantToken}
-                className="bg-[#f0f0e8] text-[#1a1a1a] hover:bg-white"
+                disabled={
+                  isCreatingCheckout || !grantToken || demoStatus === undefined
+                }
+                className="bg-[#f0f0e8] text-[#1a1a1a] hover:bg-white w-full sm:w-auto border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] hover:shadow-[2px_2px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px] transition-all font-black uppercase tracking-wide"
               >
-                {isCreatingCheckout
-                  ? demoStatus && !demoStatus.stripeConfigured
-                    ? "Unlocking…"
-                    : "Opening checkout…"
-                  : demoStatus && !demoStatus.stripeConfigured
-                    ? `Simulate paying ${formatPrice(paywall.priceCents, paywall.currency)}`
-                    : `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`}
+                {demoStatus === undefined
+                  ? "Loading…"
+                  : isCreatingCheckout
+                    ? demoStatus && !demoStatus.stripeConfigured
+                      ? "Unlocking…"
+                      : "Opening checkout…"
+                    : demoStatus && !demoStatus.stripeConfigured
+                      ? `Simulate paying ${formatPrice(paywall.priceCents, paywall.currency)}`
+                      : `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`}
               </Button>
               {checkoutError ? (
-                <div className="text-xs text-[#ffd1d1] max-w-xs text-right">
+                <div className="text-xs text-[#ffd1d1] text-left sm:text-right sm:max-w-xs break-words">
                   {checkoutError}
                 </div>
               ) : null}

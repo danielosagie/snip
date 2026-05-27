@@ -24,6 +24,7 @@ import type * as crons from "../crons.js";
 import type * as demoSeed from "../demoSeed.js";
 import type * as desktopAcls from "../desktopAcls.js";
 import type * as desktopAuth from "../desktopAuth.js";
+import type * as desktopBrowse from "../desktopBrowse.js";
 import type * as desktopPresence from "../desktopPresence.js";
 import type * as email from "../email.js";
 import type * as featureFlags from "../featureFlags.js";
@@ -87,6 +88,7 @@ declare const fullApi: ApiFromModules<{
   demoSeed: typeof demoSeed;
   desktopAcls: typeof desktopAcls;
   desktopAuth: typeof desktopAuth;
+  desktopBrowse: typeof desktopBrowse;
   desktopPresence: typeof desktopPresence;
   email: typeof email;
   featureFlags: typeof featureFlags;

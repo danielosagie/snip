@@ -1161,6 +1161,8 @@ let mountState = {
   log: [],
 };
 let mountChild = null;
+let webdavServer = null;
+const { start: startWebdavServer } = require("./electron-webdav.cjs");
 
 // Track the last status we emitted so we only kick the feature
 // reconciler on actual transitions (mounted ↔ unmounted), not on every
@@ -1397,23 +1399,40 @@ async function startMount({ mountPath } = {}) {
     throw e;
   }
 
+  // The desktop now mounts a local WebDAV server (electron-webdav.cjs) that
+  // serves team/project/video names from Convex instead of raw S3 keys, and
+  // handles drag-and-drop uploads by streaming through to S3 + registering
+  // each file as a Convex `videos` row. Boot it before configuring rclone so
+  // we know the port to point the remote at.
+  try {
+    if (webdavServer) {
+      await webdavServer.stop().catch(() => {});
+      webdavServer = null;
+    }
+    webdavServer = await startWebdavServer({ convexCall, pushLog });
+  } catch (e) {
+    mountState.status = "error";
+    mountState.lastError =
+      "Couldn't start local WebDAV server — " +
+      (e instanceof Error ? e.message : String(e));
+    pushLog(mountState.lastError);
+    emitMountStatus();
+    throw e;
+  }
+
   // Env-based rclone config. No file is written; rclone reads
-  // RCLONE_CONFIG_<NAME>_<FIELD> at runtime. We use the remote name
-  // "videoinfra" inline below.
+  // RCLONE_CONFIG_<NAME>_<FIELD> at runtime. We point it at the WebDAV
+  // server above; the remote name "videoinfra" is reused so existing logs
+  // and Settings copy don't churn.
   const env = {
     ...process.env,
-    RCLONE_CONFIG_VIDEOINFRA_TYPE: "s3",
-    RCLONE_CONFIG_VIDEOINFRA_PROVIDER: s.provider === "r2" ? "Cloudflare" : "Other",
-    RCLONE_CONFIG_VIDEOINFRA_ACCESS_KEY_ID: s.accessKeyId,
-    RCLONE_CONFIG_VIDEOINFRA_SECRET_ACCESS_KEY: s.secretAccessKey,
-    RCLONE_CONFIG_VIDEOINFRA_ENDPOINT: s.endpoint,
-    RCLONE_CONFIG_VIDEOINFRA_REGION: s.region || "auto",
-    RCLONE_CONFIG_VIDEOINFRA_ACL: "private",
-    // Scoped (temporary) credentials carry a session token; the legacy
-    // long-lived key does not. rclone reads this at mount start.
-    ...(s.sessionToken
-      ? { RCLONE_CONFIG_VIDEOINFRA_SESSION_TOKEN: s.sessionToken }
-      : {}),
+    RCLONE_CONFIG_VIDEOINFRA_TYPE: "webdav",
+    RCLONE_CONFIG_VIDEOINFRA_URL: `http://127.0.0.1:${webdavServer.port}/webdav`,
+    // rclone supports "other" / "owncloud" / "nextcloud" — "other" disables
+    // server-specific quirks. The server we built speaks vanilla WebDAV.
+    RCLONE_CONFIG_VIDEOINFRA_VENDOR: "other",
+    // Localhost only, no auth at this hop. The desktop process holds the
+    // Convex bearer token and applies it on each outbound API call.
   };
 
   // ── Optional: layer in LAN-peer caches as the first upstreams ──
@@ -1427,8 +1446,14 @@ async function startMount({ mountPath } = {}) {
   //
   // We use first-found read policy + epff (existing-path-first-
   // found) for creates so new files always land on S3.
-  let mountTarget = `videoinfra:${s.bucket}/projects`;
-  if (settings.features?.lanCache?.enabled) {
+  // WebDAV root is the server's mountpoint — no bucket path needed since the
+  // server already projects team/project/video as the directory tree.
+  let mountTarget = `videoinfra:`;
+  // LAN cache union was built around the old raw-S3 mount where peers served
+  // `bucket/projects/...` over HTTP. The WebDAV remote uses a different path
+  // scheme (team/project/video), so cross-machine HTTP peering needs to be
+  // re-thought before re-enabling. For now we skip it when WebDAV is active.
+  if (false && settings.features?.lanCache?.enabled) {
     // Wait briefly for mDNS to populate peers — this is a no-op if
     // the LAN cache loop was already running and has peers ready.
     await waitForLanCachePeers(3_000);
@@ -1477,15 +1502,12 @@ async function startMount({ mountPath } = {}) {
   //     fail-CLOSED to deny-all if the rule fetch fails.
   let filterFromArgs = [];
   const filterLines = [];
-  const proxyMode = settings.features?.proxy?.enabled !== false; // default on
-  if (proxyMode) {
-    // Path is relative to the mount root (the bucket's `projects/`), so a clip's
-    // originals live at `/<team>/<project>/originals/**`.
-    filterLines.push("- /**/originals/**");
-    pushLog(
-      "Proxy mode ON — hiding originals/ (full-res). Toggle off to expose full-res.",
-    );
-  }
+  // Proxy-mode filter no longer applies under the WebDAV mount: the server
+  // projects each video as a single file (no separate `originals/` subtree),
+  // and the proxy/original swap will happen via a per-video request param
+  // once the proxy pipeline is ported. Keeping the flag wired so the setting
+  // round-trips, but skipping the filter rule.
+
   if (settings.features?.acls?.enabled) {
     try {
       const rules = await convexCall(
@@ -1565,6 +1587,25 @@ async function startMount({ mountPath } = {}) {
     "-vv",
   ];
 
+  // Friendly Finder label. Pulled from the user's first team if one is
+  // visible; falls back to "snip" so the drive never shows up as a cryptic
+  // rclone remote name. macOS truncates very long labels in the sidebar, so
+  // we cap to a comfortable width.
+  try {
+    const teams = await convexCall(
+      "query",
+      "desktopBrowse:listTeamsForDesktop",
+      {},
+    );
+    const teamName =
+      Array.isArray(teams) && teams[0]?.name ? String(teams[0].name) : "snip";
+    const volname = teamName.length > 24 ? teamName.slice(0, 23) + "…" : teamName;
+    args.push("--volname", `${volname} — snip`);
+  } catch (err) {
+    pushLog(`webdav: couldn't fetch team name for --volname: ${err.message}`);
+    args.push("--volname", "snip");
+  }
+
   try {
     mountChild = spawn(rclonePath, args, { env });
   } catch (e) {
@@ -1605,12 +1646,22 @@ async function startMount({ mountPath } = {}) {
     mountState.lastError =
       code !== 0 && code !== null ? `rclone exited (code ${code})` : null;
     mountChild = null;
+    if (webdavServer) {
+      const s = webdavServer;
+      webdavServer = null;
+      void s.stop().catch(() => {});
+    }
     emitMountStatus();
   });
   mountChild.on("error", (err) => {
     mountState.status = "error";
     mountState.lastError = err.message;
     mountChild = null;
+    if (webdavServer) {
+      const s = webdavServer;
+      webdavServer = null;
+      void s.stop().catch(() => {});
+    }
     emitMountStatus();
   });
 
