@@ -1,7 +1,9 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { requireUser } from "./auth";
 import { getTeamStorageUsedBytes } from "./billingHelpers";
+import type { Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 /**
  * Account-level (workspace) billing.
@@ -40,8 +42,12 @@ export const TIERS = {
     plan: "free",
     label: "Free",
     baseCents: 0,
+    // Free seats can't be billed, so overage is meaningless here —
+    // the cap is enforced as a hard block at invite time instead.
     perSeatCents: 0,
-    includedSeats: 3,
+    // Owner + 1 collaborator. "Free gets 1 invitee" so an existing
+    // owner can pull in one trusted teammate before having to pay.
+    includedSeats: 2,
     storageBytes: 20 * GIBIBYTE, // 20 GB — enough to kick the tires
     currency: "usd",
     features: [...COMMON_FEATURES],
@@ -115,8 +121,10 @@ function normalizePlanKey(plan: string | undefined | null): TierKey {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
+type BillingCtx = QueryCtx | MutationCtx;
+
 async function computeSeatCount(
-  ctx: { db: any },
+  ctx: BillingCtx,
   ownerClerkId: string,
 ): Promise<number> {
   // Find every team the owner belongs to, then collapse the union of
@@ -124,14 +132,14 @@ async function computeSeatCount(
   // someone who's in two of the owner's teams.
   const ownerMemberships = await ctx.db
     .query("teamMembers")
-    .withIndex("by_user", (q: any) => q.eq("userClerkId", ownerClerkId))
+    .withIndex("by_user", (q) => q.eq("userClerkId", ownerClerkId))
     .collect();
 
   const distinctCollaborators = new Set<string>();
   for (const m of ownerMemberships) {
     const teamMembers = await ctx.db
       .query("teamMembers")
-      .withIndex("by_team", (q: any) => q.eq("teamId", m.teamId))
+      .withIndex("by_team", (q) => q.eq("teamId", m.teamId))
       .collect();
     for (const member of teamMembers) {
       distinctCollaborators.add(member.userClerkId);
@@ -140,6 +148,191 @@ async function computeSeatCount(
   // The owner themselves counts as a seat — they're using a license.
   distinctCollaborators.add(ownerClerkId);
   return distinctCollaborators.size;
+}
+
+/**
+ * Distinct collaborator count across teams the owner *owns* (not
+ * teams they were invited to). This is the right number for the
+ * free-tier hard cap and for billing — the owner's plan covers their
+ * own teams, but they shouldn't be charged for seats in teams owned
+ * by other people.
+ *
+ * Pending invites count as +1 each because they'll become seats on
+ * accept. Without that, a free-tier owner could blast out invites in
+ * parallel and bypass the cap.
+ */
+async function computeOwnedWorkspaceSeats(
+  ctx: BillingCtx,
+  ownerClerkId: string,
+): Promise<{ seats: number; pendingInvites: number }> {
+  const ownedTeams = await ctx.db
+    .query("teams")
+    .withIndex("by_owner", (q) => q.eq("ownerClerkId", ownerClerkId))
+    .collect();
+
+  const distinct = new Set<string>();
+  distinct.add(ownerClerkId);
+  let pendingInvites = 0;
+  const now = Date.now();
+
+  for (const team of ownedTeams) {
+    const members = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_team", (q) => q.eq("teamId", team._id))
+      .collect();
+    for (const m of members) distinct.add(m.userClerkId);
+
+    const invites = await ctx.db
+      .query("teamInvites")
+      .withIndex("by_team", (q) => q.eq("teamId", team._id))
+      .collect();
+    for (const i of invites) {
+      if (i.expiresAt > now) pendingInvites++;
+    }
+  }
+
+  return { seats: distinct.size, pendingInvites };
+}
+
+/**
+ * Resolves the effective tier for the user who owns the given team —
+ * `"free"` when no active workspaceSubscriptions row exists, otherwise
+ * the row's plan key (normalized for legacy values).
+ */
+async function getTeamOwnerTier(
+  ctx: BillingCtx,
+  teamId: Id<"teams">,
+): Promise<{ ownerClerkId: string; tierKey: TierKey }> {
+  const team = await ctx.db.get(teamId);
+  if (!team) {
+    throw new Error("Team not found");
+  }
+  const sub = await ctx.db
+    .query("workspaceSubscriptions")
+    .withIndex("by_owner", (q) => q.eq("ownerClerkId", team.ownerClerkId))
+    .unique();
+  const isLive = sub?.status === "active" || sub?.status === "trialing";
+  const tierKey: TierKey = sub && isLive ? normalizePlanKey(sub.plan) : "free";
+  return { ownerClerkId: team.ownerClerkId, tierKey };
+}
+
+/**
+ * Throws a typed ConvexError if adding a seat to `teamId` would
+ * exceed the team owner's plan's hard cap. Paid tiers (basic/pro/
+ * enterprise) have no hard cap — overage is billed at the per-seat
+ * rate via `monthlyTotalCents` in `getMySubscription`.
+ *
+ * Use at invite-send time and again at invite-accept time. The
+ * accept-time check matters because multiple invites can be sent
+ * before any are accepted; only enforcing at send leaves a race.
+ */
+export async function assertCanAddWorkspaceSeat(
+  ctx: BillingCtx,
+  teamId: Id<"teams">,
+) {
+  const { ownerClerkId, tierKey } = await getTeamOwnerTier(ctx, teamId);
+  // Paid tiers allow overage seats at $5/mo each.
+  if (tierKey !== "free") return;
+
+  const { seats, pendingInvites } = await computeOwnedWorkspaceSeats(
+    ctx,
+    ownerClerkId,
+  );
+  const tier = TIERS.free;
+  const used = seats + pendingInvites;
+
+  if (used >= tier.includedSeats) {
+    throw new ConvexError({
+      code: "seat_limit_exceeded",
+      plan: tierKey,
+      seats,
+      pendingInvites,
+      includedSeats: tier.includedSeats,
+      message: `Free workspaces are capped at ${tier.includedSeats} seats. Upgrade in Billing & usage to invite more people.`,
+    });
+  }
+}
+
+/**
+ * Auto-prune seats when a workspace drops to the free tier. Called
+ * from the webhook sync and the demo-mode cancel mutation when a
+ * paid subscription becomes inactive. Removes the most recently
+ * added non-owner members across the owner's owned teams until the
+ * total collaborator count fits the free-tier cap.
+ *
+ * Pending invites also get cleaned — otherwise they'd accept into a
+ * over-cap workspace and immediately bounce on the assert. Folder
+ * permission rows for kicked members are not touched (cheap to
+ * re-grant on re-invite; safer than over-deleting).
+ */
+async function pruneSeatsToFreeCap(
+  ctx: MutationCtx,
+  ownerClerkId: string,
+): Promise<void> {
+  const cap = TIERS.free.includedSeats;
+
+  const ownedTeams = await ctx.db
+    .query("teams")
+    .withIndex("by_owner", (q) => q.eq("ownerClerkId", ownerClerkId))
+    .collect();
+  if (ownedTeams.length === 0) return;
+
+  // Cancel every pending invite — none of them are going to fit, and
+  // leaving them around just produces "you're at the cap" failures
+  // on accept.
+  for (const team of ownedTeams) {
+    const invites = await ctx.db
+      .query("teamInvites")
+      .withIndex("by_team", (q) => q.eq("teamId", team._id))
+      .collect();
+    for (const invite of invites) {
+      await ctx.db.delete(invite._id);
+    }
+  }
+
+  // Collect every non-owner membership row across the owner's owned
+  // teams. Then build the set of distinct users we want to keep,
+  // oldest-first up to the cap. A user who appears in two of the
+  // owner's teams counts as ONE seat — so once they're in the keep
+  // set, every row of theirs stays.
+  type Membership = {
+    _id: Id<"teamMembers">;
+    _creationTime: number;
+    userClerkId: string;
+  };
+  const memberships: Membership[] = [];
+  for (const team of ownedTeams) {
+    const teamMembers = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_team", (q) => q.eq("teamId", team._id))
+      .collect();
+    for (const m of teamMembers) {
+      if (m.userClerkId === ownerClerkId) continue;
+      memberships.push({
+        _id: m._id,
+        _creationTime: m._creationTime,
+        userClerkId: m.userClerkId,
+      });
+    }
+  }
+
+  // Pick the oldest membership per distinct user. Walk in ascending
+  // creation order so the earliest-joined collaborators win the seats.
+  memberships.sort((a, b) => a._creationTime - b._creationTime);
+  const keepUsers = new Set<string>();
+  keepUsers.add(ownerClerkId);
+  for (const m of memberships) {
+    if (keepUsers.size >= cap) break;
+    keepUsers.add(m.userClerkId);
+  }
+
+  // Drop every membership row belonging to a user who didn't make
+  // the keep-set. Users in the keep-set retain ALL their rows.
+  for (const m of memberships) {
+    if (!keepUsers.has(m.userClerkId)) {
+      await ctx.db.delete(m._id);
+    }
+  }
 }
 
 function monthlyTotalCents(args: {
@@ -285,6 +478,59 @@ export const getTier = query({
 });
 
 /**
+ * Seat usage + cap for a specific team, resolved against the team
+ * owner's workspace subscription. Drives the invite dialog's "X of Y
+ * seats used" indicator and the disable-when-full state.
+ *
+ *   • `seatsUsed`     — distinct collaborators across the owner's
+ *                       owned teams (including the owner themselves).
+ *   • `pendingInvites`— active outstanding invites the same owner has
+ *                       sent across their teams.
+ *   • `includedSeats` — the tier's included seat count.
+ *   • `hardCapped`    — true on free tier when seatsUsed + pendingInvites
+ *                       has reached includedSeats. Paid tiers never
+ *                       hard-cap; they bill overage at perSeatCents.
+ *   • `perSeatCents`  — the per-seat overage rate (0 on free since
+ *                       overage isn't allowed).
+ */
+export const getTeamSeatUsage = query({
+  args: { teamId: v.id("teams") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    plan: TierKey;
+    label: string;
+    seatsUsed: number;
+    pendingInvites: number;
+    includedSeats: number;
+    perSeatCents: number;
+    hardCapped: boolean;
+  } | null> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const team = await ctx.db.get(args.teamId);
+    if (!team) return null;
+    const { tierKey } = await getTeamOwnerTier(ctx, args.teamId);
+    const { seats, pendingInvites } = await computeOwnedWorkspaceSeats(
+      ctx,
+      team.ownerClerkId,
+    );
+    const tier = TIERS[tierKey];
+    return {
+      plan: tierKey,
+      label: tier.label,
+      seatsUsed: seats,
+      pendingInvites,
+      includedSeats: tier.includedSeats,
+      perSeatCents: tier.perSeatCents,
+      hardCapped:
+        tierKey === "free" && seats + pendingInvites >= tier.includedSeats,
+    };
+  },
+});
+
+/**
  * Storage usage + limit for the caller's default team. Used by the
  * sidebar progress bar and the Billing & usage page. Returns null for
  * unauthenticated callers / users with no team (the bar hides itself).
@@ -391,8 +637,11 @@ export const simulateActivate = mutation({
 });
 
 /**
- * Demo-mode cancel: flips status to "canceled". Real flow would call
- * Stripe `subscriptions.update({ cancel_at_period_end: true })`.
+ * Demo-mode cancel: flips status to "canceled" and prunes any
+ * over-cap collaborators (the workspace is now effectively free
+ * tier). Real Stripe cancellations land via the webhook in
+ * `syncWorkspaceSubscriptionFromWebhook`, which calls the same
+ * prune.
  */
 export const simulateCancel = mutation({
   args: {},
@@ -407,6 +656,10 @@ export const simulateCancel = mutation({
       status: "canceled",
       canceledAt: Date.now(),
     });
+    // Workspace is now effectively free tier — trim collaborators
+    // back to the free cap so the next invite isn't immediately
+    // blocked.
+    await pruneSeatsToFreeCap(ctx, user.subject);
   },
 });
 
@@ -541,20 +794,30 @@ export const syncWorkspaceSubscriptionFromWebhook = internalMutation({
             ? (existing.canceledAt ?? Date.now())
             : undefined,
       });
-      return;
+    } else {
+      await ctx.db.insert("workspaceSubscriptions", {
+        ownerClerkId: args.ownerClerkId as string,
+        plan: tier.plan,
+        status: statusUnion,
+        baseCents: tier.baseCents,
+        perSeatCents: tier.perSeatCents,
+        includedSeats: tier.includedSeats,
+        currency: tier.currency,
+        currentPeriodEnd: args.currentPeriodEnd,
+        stripeCustomerId: args.stripeCustomerId,
+        stripeSubscriptionId: args.stripeSubscriptionId,
+      });
     }
 
-    await ctx.db.insert("workspaceSubscriptions", {
-      ownerClerkId: args.ownerClerkId as string,
-      plan: tier.plan,
-      status: statusUnion,
-      baseCents: tier.baseCents,
-      perSeatCents: tier.perSeatCents,
-      includedSeats: tier.includedSeats,
-      currency: tier.currency,
-      currentPeriodEnd: args.currentPeriodEnd,
-      stripeCustomerId: args.stripeCustomerId,
-      stripeSubscriptionId: args.stripeSubscriptionId,
-    });
+    // If the new effective tier is free (sub canceled, status "none",
+    // etc.), trim collaborators back to the free cap so the workspace
+    // doesn't sit over its limit. Paid → paid transitions don't need
+    // pruning since paid tiers allow overage.
+    const owner = args.ownerClerkId ?? existing?.ownerClerkId;
+    const effectivelyFree =
+      statusUnion === "canceled" || statusUnion === "none";
+    if (owner && effectivelyFree) {
+      await pruneSeatsToFreeCap(ctx, owner);
+    }
   },
 });

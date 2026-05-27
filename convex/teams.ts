@@ -8,6 +8,7 @@ import {
 import { Id } from "./_generated/dataModel";
 import { getUser, identityAvatarUrl, identityEmail, identityName, requireUser, requireTeamAccess } from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
+import { assertCanAddWorkspaceSeat } from "./workspaceBilling";
 import { internal } from "./_generated/api";
 import { resolveUserEmail } from "./notifications";
 
@@ -259,6 +260,12 @@ export const inviteMember = mutation({
       await ctx.db.delete(existingInvite._id);
     }
 
+    // Seat cap. On free tier, blocks once owner + 1 invitee is
+    // reached (including any other pending invites the owner has
+    // out across their teams). Paid tiers pass through — overage
+    // seats are billed at $5/mo via the per-seat rate.
+    await assertCanAddWorkspaceSeat(ctx, args.teamId);
+
     const token = generateToken();
     const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -357,6 +364,14 @@ export const acceptInvite = mutation({
     if (existingMembership) {
       throw new Error("You are already a member of this team");
     }
+
+    // Final seat-cap enforcement. Acceptance is the moment a seat is
+    // actually consumed, and the inviter's tier may have dropped
+    // since the invite was sent (subscription canceled, downgrade,
+    // etc.). Pending invites are counted at invite-send time too,
+    // so this catches racing accepts when multiple invites were sent
+    // simultaneously to a free workspace.
+    await assertCanAddWorkspaceSeat(ctx, invite.teamId);
 
     await ctx.db.insert("teamMembers", {
       teamId: invite.teamId,
