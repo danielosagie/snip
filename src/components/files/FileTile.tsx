@@ -19,6 +19,7 @@ import {
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
 import { fileTypeFromContent, formatBytes } from "@/lib/fileTypes";
+import { FloatingImagePreview } from "@/components/FloatingImagePreview";
 
 /**
  * Google-Drive-style tile for non-video files in the project grid.
@@ -140,17 +141,7 @@ export function FileTile({
 
         {/* Hover-enlarge preview for images/gifs — a floating, uncropped
             (object-contain) view of the file that follows the cursor. */}
-        {hoverPos && thumbnailSrc ? (
-          <div
-            className="fixed z-[80] pointer-events-none border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[6px_6px_0px_0px_var(--shadow-color)] p-1"
-            style={{
-              left: Math.min(hoverPos.x + 18, window.innerWidth - 380),
-              top: Math.min(hoverPos.y + 18, window.innerHeight - 380),
-            }}
-          >
-            <img src={thumbnailSrc} alt={title} className="block max-w-[360px] max-h-[360px] object-contain" />
-          </div>
-        ) : null}
+        <FloatingImagePreview src={thumbnailSrc} alt={title} pos={hoverPos} />
 
         {/* Top-left file-type chip — mirrors Drive's red "PDF" badge */}
         <div
@@ -318,17 +309,7 @@ export function FileListRow({
           <Icon className="h-5 w-5" style={{ color: meta.iconColor }} strokeWidth={1.5} />
         )}
       </div>
-      {hoverPos && thumbnailSrc ? (
-        <div
-          className="fixed z-[80] pointer-events-none border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[6px_6px_0px_0px_var(--shadow-color)] p-1"
-          style={{
-            left: Math.min(hoverPos.x + 18, window.innerWidth - 380),
-            top: Math.min(hoverPos.y + 18, window.innerHeight - 380),
-          }}
-        >
-          <img src={thumbnailSrc} alt={title} className="block max-w-[360px] max-h-[360px] object-contain" />
-        </div>
-      ) : null}
+      <FloatingImagePreview src={thumbnailSrc} alt={title} pos={hoverPos} />
       <div className="flex-1 min-w-0">
         <div className="font-bold text-sm text-[#1a1a1a] truncate">{title}</div>
         <div className="text-[11px] text-[#888] font-mono">

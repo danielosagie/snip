@@ -22,6 +22,7 @@ import {
   Tags,
 } from "lucide-react";
 import { FileTile, FileListRow } from "@/components/files/FileTile";
+import { FloatingImagePreview } from "@/components/FloatingImagePreview";
 import {
   ContextMenu,
   type ContextMenuEntry,
@@ -812,6 +813,18 @@ export default function ProjectPage({
     [selectedVideoIds],
   );
 
+  // Hover-preview state for video cards in both the grid and list
+  // views. Shared parent state because each card lives inside a
+  // `.map()` — putting per-card useState here would violate rules of
+  // hooks. Storing only the hovered card's src + cursor position is
+  // enough to drive the floating preview.
+  const [videoHover, setVideoHover] = useState<{
+    videoId: Id<"videos">;
+    src: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   // {_id, title} for the selected videos — needed by the bulk rename preview.
   const selectedRenameItems = useMemo(
     () =>
@@ -867,6 +880,15 @@ export default function ProjectPage({
 
   return (
     <div className="h-full flex flex-col">
+      {/* Cursor-following video thumbnail preview. Rendered at the
+          page root so a single preview node serves both the grid and
+          the list view — per-card useState would violate rules of
+          hooks inside the `.map()` below. */}
+      <FloatingImagePreview
+        src={videoHover?.src ?? null}
+        alt="Video preview"
+        pos={videoHover ? { x: videoHover.x, y: videoHover.y } : null}
+      />
       {/* Floating selection toolbar — surfaces only when the user has
           multi-selected items. Drives the ad-hoc bundle share flow. */}
       {selectedVideoIds.size > 0 ? (
@@ -1245,7 +1267,31 @@ export default function ProjectPage({
                       })
                     }
                   >
-                    <div className="relative aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all">
+                    <div
+                      className="relative aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all"
+                      onMouseEnter={(e) =>
+                        thumbnailSrc &&
+                        setVideoHover({
+                          videoId: video._id,
+                          src: thumbnailSrc,
+                          x: e.clientX,
+                          y: e.clientY,
+                        })
+                      }
+                      onMouseMove={(e) =>
+                        thumbnailSrc &&
+                        setVideoHover((prev) =>
+                          prev?.videoId === video._id
+                            ? { ...prev, x: e.clientX, y: e.clientY }
+                            : prev,
+                        )
+                      }
+                      onMouseLeave={() =>
+                        setVideoHover((prev) =>
+                          prev?.videoId === video._id ? null : prev,
+                        )
+                      }
+                    >
                       {thumbnailSrc ? (
                         <img
                           src={thumbnailSrc}
@@ -1457,7 +1503,31 @@ export default function ProjectPage({
                   }
                 >
                   {/* Thumbnail */}
-                  <div className="relative w-44 aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shrink-0 shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all">
+                  <div
+                    className="relative w-44 aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shrink-0 shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all"
+                    onMouseEnter={(e) =>
+                      thumbnailSrc &&
+                      setVideoHover({
+                        videoId: video._id,
+                        src: thumbnailSrc,
+                        x: e.clientX,
+                        y: e.clientY,
+                      })
+                    }
+                    onMouseMove={(e) =>
+                      thumbnailSrc &&
+                      setVideoHover((prev) =>
+                        prev?.videoId === video._id
+                          ? { ...prev, x: e.clientX, y: e.clientY }
+                          : prev,
+                      )
+                    }
+                    onMouseLeave={() =>
+                      setVideoHover((prev) =>
+                        prev?.videoId === video._id ? null : prev,
+                      )
+                    }
+                  >
                     {thumbnailSrc ? (
                       <img
                         src={thumbnailSrc}
