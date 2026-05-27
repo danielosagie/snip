@@ -2,11 +2,26 @@ import { Link } from "@tanstack/react-router";
 import { UserButton } from "@clerk/tanstack-react-start";
 import { Moon, PanelLeft, PanelLeftClose, Sun } from "lucide-react";
 import { useTheme } from "@/components/theme/ThemeToggle";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useConvex } from "convex/react";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmDashboardIndex } from "../../app/routes/dashboard/-index.data";
 import { useSidebarState } from "@/lib/sidebarContext";
+
+/**
+ * True when the renderer is running inside the snip Desktop Electron
+ * shell. The shell exposes `window.snipDesktop` via the preload
+ * bridge; browsers don't, so this cleanly toggles the desktop-only
+ * UI affordances (traffic-light spacer, draggable chrome).
+ */
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsDesktop(Boolean(window.snipDesktop?.isDesktop));
+  }, []);
+  return isDesktop;
+}
 
 function ThemeToggleButton() {
   const { theme, toggleTheme, mounted } = useTheme();
@@ -49,17 +64,37 @@ export function DashboardHeader({
 }) {
   const convex = useConvex();
   const { collapsed, toggle } = useSidebarState();
+  const isDesktop = useIsDesktop();
   const prewarmHomeIntentHandlers = useRoutePrewarmIntent(() =>
     prewarmDashboardIndex(convex),
   );
 
+  // Notion/Shade-style chrome: the OS title bar is gone inside
+  // Electron (titleBarStyle: "hiddenInset"/"hidden"), so we reserve
+  // ~80px on the left for the macOS traffic lights or for the
+  // Windows WCO overlay. Empty header background gets `app-region:
+  // drag` so users can still grab it to move the window; interactive
+  // controls inside opt back out with `no-drag` (see button styles
+  // below).
+  const trafficLightSpacerClass = isDesktop ? "pl-[80px]" : "px-4 sm:px-6";
+  const dragRegionStyle = isDesktop
+    ? ({ WebkitAppRegion: "drag" } as React.CSSProperties)
+    : undefined;
+  const noDragStyle = isDesktop
+    ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties)
+    : undefined;
+
   return (
-    <header className="flex-shrink-0 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] grid grid-cols-[1fr_auto] sm:grid-cols-[auto_1fr_auto] items-center px-4 sm:px-6">
+    <header
+      className={`flex-shrink-0 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] grid grid-cols-[1fr_auto] sm:grid-cols-[auto_1fr_auto] items-center ${trafficLightSpacerClass}`}
+      style={dragRegionStyle}
+    >
       {/* Breadcrumb + sidebar toggle */}
       <div className="flex items-center text-xl font-black tracking-tighter text-[#1a1a1a] min-w-0 h-11 sm:h-14">
         <button
           type="button"
           onClick={toggle}
+          style={noDragStyle}
           className="hidden md:inline-flex items-center justify-center w-8 h-8 mr-2 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] flex-shrink-0"
           title={collapsed ? "Open sidebar" : "Close sidebar"}
           aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
@@ -75,6 +110,7 @@ export function DashboardHeader({
             <Link
               to="/dashboard"
               preload="intent"
+              style={noDragStyle}
               className="hover:text-[#FF6600] transition-colors mr-2 flex-shrink-0"
               {...prewarmHomeIntentHandlers}
             >
@@ -89,13 +125,14 @@ export function DashboardHeader({
                   <Link
                     to={path.href}
                     preload="intent"
+                    style={noDragStyle}
                     className="hover:text-[#FF6600] transition-colors truncate mr-2"
                     {...path.prewarmIntentHandlers}
                   >
                     {path.label}
                   </Link>
                 ) : (
-                  <div className="truncate flex items-center gap-3">
+                  <div style={noDragStyle} className="truncate flex items-center gap-3">
                     {path.label}
                   </div>
                 )}
@@ -109,7 +146,10 @@ export function DashboardHeader({
       {/* User controls — pinned top-right. On desktop these live in the
           sidebar footer, but we keep them on mobile + when the sidebar
           is collapsed for quick reach. */}
-      <div className="row-start-1 col-start-2 sm:col-start-3 flex items-center gap-4 pl-4 border-l-2 border-[#1a1a1a]/10 h-8 md:hidden">
+      <div
+        style={noDragStyle}
+        className="row-start-1 col-start-2 sm:col-start-3 flex items-center gap-4 pl-4 border-l-2 border-[#1a1a1a]/10 h-8 md:hidden"
+      >
         <ThemeToggleButton />
         <UserButton
           appearance={{
@@ -133,7 +173,10 @@ export function DashboardHeader({
 
       {/* Children — second row on mobile, middle column on desktop */}
       {children && (
-        <div className="col-span-full pb-2 sm:pb-0 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 sm:gap-3 sm:justify-end sm:h-14 sm:pl-4 min-w-0">
+        <div
+          style={noDragStyle}
+          className="col-span-full pb-2 sm:pb-0 sm:col-span-1 sm:col-start-2 sm:row-start-1 flex items-center gap-2 sm:gap-3 sm:justify-end sm:h-14 sm:pl-4 min-w-0"
+        >
           {children}
         </div>
       )}

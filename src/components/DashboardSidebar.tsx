@@ -598,21 +598,9 @@ function DesktopAppOrDrive() {
       {shownError ? (
         <p className="text-[10px] leading-snug text-[#b91c1c]">{shownError}</p>
       ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          if (
-            window.confirm(
-              "Uninstall snip Desktop? This removes the app and its local data (the drive unmounts; macFUSE stays installed). Your cloud files are not affected.",
-            )
-          ) {
-            void window.api?.app.uninstall();
-          }
-        }}
-        className="text-[10px] text-[#888] hover:text-[#b91c1c] underline self-center"
-      >
-        Uninstall snip Desktop
-      </button>
+      {/* "Uninstall snip Desktop" moved to the native app menu
+          (macOS: snip → Uninstall snip…, Windows/Linux: Help →
+          Uninstall snip…) to match platform conventions. */}
     </div>
   );
 }

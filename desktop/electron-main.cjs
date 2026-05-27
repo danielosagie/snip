@@ -1,7 +1,7 @@
 // Electron main process. Plain CJS so it runs without a build step.
 // Talks to the renderer (React UI in src/) via IPC.
 
-const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, shell, dialog, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
@@ -2428,7 +2428,7 @@ ipcMain.handle("app:version", async () => app.getVersion());
 // the provisioned rclone, caches), move the app bundle to the Trash, and quit.
 // macFUSE is left installed — it's a shared system component the user may rely
 // on elsewhere and can remove separately.
-ipcMain.handle("app:uninstall", async () => {
+async function performUninstall() {
   try {
     if (mountChild) {
       await umountPath(mountState.mountPath);
@@ -2471,7 +2471,9 @@ ipcMain.handle("app:uninstall", async () => {
   // Quit after a beat so the IPC reply lands first.
   setTimeout(() => app.exit(0), 600);
   return { ok: true, trashed };
-});
+}
+
+ipcMain.handle("app:uninstall", performUninstall);
 
 // Snapshot read so the renderer can render the current state on mount — the
 // first background check may finish before Settings is ever opened, and
@@ -2514,12 +2516,30 @@ ipcMain.handle("update:install", async () => {
 // ---- Window management -------------------------------------------------------
 
 function createWindow() {
+  // Notion/Shade-style chrome: kill the OS title bar so the traffic
+  // lights float over the app's own top chrome. The web app reserves
+  // ~80px on the left of its DashboardHeader for the traffic-light
+  // cluster when running inside Electron (detected via
+  // `window.snipDesktop?.isDesktop`). On Windows we use the WCO
+  // overlay with matching dimensions so the controls still appear.
+  const titleBar =
+    process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 14, y: 14 } }
+      : process.platform === "win32"
+        ? {
+            titleBarStyle: "hidden",
+            titleBarOverlay: {
+              color: "#f0f0e8",
+              symbolColor: "#1a1a1a",
+              height: 44,
+            },
+          }
+        : {};
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    // Standard macOS title bar so the traffic lights live in their own bar and
-    // never overlap the web app's header (the web UI isn't ours to re-pad).
-    titleBarStyle: "default",
+    ...titleBar,
     backgroundColor: "#f0f0e8",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -2600,10 +2620,126 @@ function maybeMoveToApplications() {
   return false;
 }
 
+// ---- Application menu --------------------------------------------------------
+//
+// Native top-of-screen menu. Hosts the "Uninstall snip…" affordance —
+// previously a small link inside the web sidebar, which is the wrong place
+// on macOS / Windows (every other app puts uninstall in the app menu).
+// Confirmation uses the native dialog so it matches platform conventions.
+
+async function confirmAndUninstall() {
+  const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined;
+  const choice = dialog.showMessageBoxSync(win, {
+    type: "warning",
+    buttons: ["Cancel", "Uninstall"],
+    defaultId: 0,
+    cancelId: 0,
+    message: "Uninstall snip Desktop?",
+    detail:
+      "This removes the app and its local data (the drive unmounts; macFUSE stays installed). Your cloud files are not affected.",
+  });
+  if (choice !== 1) return;
+  // Reuse the same path the IPC handler uses so the unmount + cleanup
+  // + Trash logic stays single-sourced.
+  await performUninstall();
+}
+
+function buildApplicationMenu() {
+  const isMac = process.platform === "darwin";
+  const appName = app.name || "snip";
+
+  const uninstallItem = {
+    label: `Uninstall ${appName}…`,
+    click: () => {
+      // The handler is async but click() doesn't await — fire and forget;
+      // the dialog blocks until the user picks a button.
+      void confirmAndUninstall();
+    },
+  };
+
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: appName,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              uninstallItem,
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: "File",
+      submenu: [isMac ? { role: "close" } : { role: "quit" }],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        ...(isMac
+          ? [{ type: "separator" }, { role: "front" }]
+          : [{ role: "close" }]),
+      ],
+    },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "snip on GitHub",
+          click: () => shell.openExternal("https://github.com/danielosagie/snip"),
+        },
+        // On Windows / Linux the app menu doesn't exist, so the uninstall
+        // affordance lives under Help instead.
+        ...(isMac ? [] : [{ type: "separator" }, uninstallItem]),
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 app.whenReady().then(() => {
   // If we relocate + relaunch from /Applications, stop here; the new instance
   // boots fresh.
   if (maybeMoveToApplications()) return;
+  buildApplicationMenu();
   createWindow();
   // Only run the updater in packaged (signed) builds — dev has no release feed.
   if (app.isPackaged) setupAutoUpdater();
