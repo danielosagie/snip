@@ -13,7 +13,6 @@ import {
   resolvePlanFromStripePriceId,
   TEAM_PLAN_MONTHLY_PRICE_USD,
   TEAM_PLAN_STORAGE_LIMIT_BYTES,
-  type TeamPlan,
 } from "./billingHelpers";
 
 // IMPORTANT: pass an explicit fallback so the component's `_apiKey` field is
@@ -35,12 +34,24 @@ function getStripe(): Stripe {
 }
 
 const TEAM_TRIAL_DAYS = 7;
-const PLAN_RANK = {
+// Plan ordering for upgrade gating in `updateTeamSubscriptionPlan`.
+// Free isn't reachable from that path (it requires an existing Stripe
+// subscription), so it isn't ranked here.
+const PLAN_RANK: Record<"basic" | "pro", number> = {
   basic: 0,
   pro: 1,
-} as const satisfies Record<TeamPlan, number>;
+};
 
+// Validator for plans the legacy per-team checkout accepts. Free isn't
+// purchasable, so this stays at basic|pro. Return-shape validators that
+// include the resolved plan use `teamPlanReturnValidator` (which adds
+// "free" since `getTeamBilling` returns the effective tier).
 const teamPlanValidator = v.union(v.literal("basic"), v.literal("pro"));
+const teamPlanReturnValidator = v.union(
+  v.literal("free"),
+  v.literal("basic"),
+  v.literal("pro"),
+);
 const teamRoleValidator = v.union(
   v.literal("owner"),
   v.literal("admin"),
@@ -195,7 +206,7 @@ export const updateTeamSubscriptionPlan = action({
   handler: async (
     ctx,
     args,
-  ): Promise<{ plan: TeamPlan; subscriptionStatus: string }> => {
+  ): Promise<{ plan: "basic" | "pro"; subscriptionStatus: string }> => {
     const team = await ctx.runQuery(api.teams.get, { teamId: args.teamId });
 
     if (!team) {
@@ -235,6 +246,15 @@ export const updateTeamSubscriptionPlan = action({
       resolvePlanFromStripePriceId(currentItem.price.id) ??
       resolvePlanFromStripePriceId(existingSubscription?.priceId) ??
       normalizeStoredTeamPlan(team.plan);
+
+    // currentPlan can resolve to "free" if the Stripe sub has a price
+    // we don't recognize and the team row is also stale — surface as
+    // an inconsistency rather than letting the rank check explode.
+    if (currentPlan === "free") {
+      throw new Error(
+        "Couldn't resolve the current plan from Stripe. Use the billing portal to manage this subscription.",
+      );
+    }
 
     if (args.plan === currentPlan) {
       throw new Error(`This team is already on ${args.plan}.`);
@@ -301,7 +321,7 @@ export const getTeamBilling = query({
     teamId: v.id("teams"),
   },
   returns: v.object({
-    plan: teamPlanValidator,
+    plan: teamPlanReturnValidator,
     monthlyPriceUsd: v.number(),
     storageLimitBytes: v.number(),
     storageUsedBytes: v.number(),

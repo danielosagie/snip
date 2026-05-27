@@ -5,9 +5,9 @@ import PricingPage from "./-pricing";
 export const Route = createFileRoute("/pricing")({
   head: () =>
     seoHead({
-      title: "Pricing — $25/month, unlimited seats",
+      title: "Pricing — Free up to 20 GB, then $20 or $50/month",
       description:
-        "snip pricing is simple. $25/month for unlimited seats, projects, and clients. $50/month if you need more storage. No per-user fees.",
+        "snip is free up to 20 GB. Basic at $20/month gets you 2 TB. Pro at $50/month gets you 5 TB. Unlimited seats, projects, and clients on every plan.",
       path: "/pricing",
       ogImage: "/og/pricing.png",
     }),

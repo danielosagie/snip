@@ -1,19 +1,32 @@
+import { ConvexError } from "convex/values";
 import { components } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx } from "./_generated/server";
 
-export type TeamPlan = "basic" | "pro";
+/**
+ * Plan keys. Three tiers post-collapse:
+ *   • `free`  — no Stripe subscription required (20 GB)
+ *   • `basic` — $20/mo, 2 TB
+ *   • `pro`   — $50/mo, 5 TB
+ *
+ * The canonical tier table lives in `convex/workspaceBilling.ts`
+ * (TIERS). The constants below mirror that for callers that still
+ * need a plain map. Keep them in sync if you change TIERS.
+ */
+export type TeamPlan = "free" | "basic" | "pro";
 
 const GIBIBYTE = 1024 ** 3;
 
 export const TEAM_PLAN_MONTHLY_PRICE_USD: Record<TeamPlan, number> = {
-  basic: 5,
-  pro: 25,
+  free: 0,
+  basic: 20,
+  pro: 50,
 };
 
 export const TEAM_PLAN_STORAGE_LIMIT_BYTES: Record<TeamPlan, number> = {
-  basic: 100 * GIBIBYTE,
-  pro: 1024 * GIBIBYTE,
+  free: 20 * GIBIBYTE,
+  basic: 2 * 1024 * GIBIBYTE,
+  pro: 5 * 1024 * GIBIBYTE,
 };
 
 function hasText(value: string | undefined | null): value is string {
@@ -21,8 +34,14 @@ function hasText(value: string | undefined | null): value is string {
 }
 
 export function normalizeStoredTeamPlan(plan: string): TeamPlan {
+  // Pre-collapse data: "team" was the old top tier (now Pro), and
+  // workspaceBilling.ts briefly used "studio" for the entry paid tier
+  // (now Basic). Map both to the current keys so old rows don't
+  // resolve to free by accident.
   if (plan === "pro" || plan === "team") return "pro";
-  return "basic";
+  if (plan === "basic" || plan === "studio") return "basic";
+  if (plan === "free") return "free";
+  return "free";
 }
 
 export function resolvePlanFromStripePriceId(
@@ -39,6 +58,9 @@ export function resolvePlanFromStripePriceId(
 }
 
 export function getStripePriceIdForPlan(plan: TeamPlan): string {
+  if (plan === "free") {
+    throw new Error("Free plan has no Stripe price ID — no checkout needed.");
+  }
   const variableName =
     plan === "basic" ? "STRIPE_PRICE_BASIC_MONTHLY" : "STRIPE_PRICE_PRO_MONTHLY";
   const value = process.env[variableName];
@@ -75,11 +97,22 @@ export async function getTeamSubscriptionState(
   }
 
   const subscription = await getTeamSubscriptionByOrgId(ctx, teamId);
-  const subscriptionPlan = resolvePlanFromStripePriceId(subscription?.priceId);
-  const plan = subscriptionPlan ?? normalizeStoredTeamPlan(team.plan);
   const hasActiveSubscription = hasActiveTeamSubscriptionStatus(
     subscription?.status,
   );
+
+  // When the subscription isn't live, treat the team as free-tier
+  // for quota/limit purposes. The Stripe component may still hold
+  // a stale priceId from a past sub — ignore it unless the status
+  // is active/trialing/past_due.
+  let plan: TeamPlan;
+  if (hasActiveSubscription) {
+    plan =
+      resolvePlanFromStripePriceId(subscription?.priceId) ??
+      normalizeStoredTeamPlan(team.plan);
+  } else {
+    plan = "free";
+  }
 
   return { team, subscription, plan, hasActiveSubscription };
 }
@@ -127,16 +160,18 @@ function isBillingEnforced(): boolean {
 }
 
 /**
- * Active subscription gate, post-workspace-billing.
+ * Effective subscription state for quota purposes.
  *
- * Order of checks:
- *   1. Stripe not configured → demo mode, never enforce.
- *   2. Team owner has an active workspace subscription → pass.
- *      (Workspace subs replaced per-team subs; one Stripe customer
- *      covers every team the owner runs.)
- *   3. Legacy per-team subscription still active → pass.
- *      (Keeps existing customers from breaking during the migration.)
- *   4. Otherwise → throw.
+ * Never throws. Resolves the team's plan in this order:
+ *   1. Workspace-level subscription on the team owner — preferred,
+ *      since one Stripe customer covers all of the owner's teams.
+ *   2. Legacy per-team Stripe subscription (component-backed).
+ *   3. Otherwise → free tier (20 GB).
+ *
+ * The function used to throw when no subscription existed, which forced
+ * users into Stripe before they could create their first project. That
+ * gate is gone: free tier is real and enforced via the storage quota
+ * check below.
  */
 export async function assertTeamHasActiveSubscription(
   ctx: BillingCtx,
@@ -147,7 +182,6 @@ export async function assertTeamHasActiveSubscription(
     return state;
   }
 
-  // Workspace-level subscription check (preferred).
   const team = state.team;
   if (team?.ownerClerkId) {
     const workspaceSub = await ctx.db
@@ -159,21 +193,26 @@ export async function assertTeamHasActiveSubscription(
       (workspaceSub.status === "active" ||
         workspaceSub.status === "trialing")
     ) {
-      return state;
+      const plan = normalizeStoredTeamPlan(workspaceSub.plan);
+      return { ...state, plan, hasActiveSubscription: true };
     }
   }
 
-  // Legacy per-team subscription path (only triggers for accounts that
-  // signed up before workspace billing landed).
   if (state.hasActiveSubscription) {
     return state;
   }
 
-  throw new Error(
-    "No active workspace subscription. Pick a plan in Billing & usage to keep creating projects and uploading.",
-  );
+  // No active sub anywhere. Free tier; quota check downstream will
+  // decide whether the next upload fits.
+  return { ...state, plan: "free" as const, hasActiveSubscription: false };
 }
 
+/**
+ * Throws a typed `ConvexError` when the next upload would push the
+ * team past its plan's storage limit. The payload is structured so the
+ * client can render a friendly upgrade prompt instead of the raw error
+ * string.
+ */
 export async function assertTeamCanStoreBytes(
   ctx: BillingCtx,
   teamId: Id<"teams">,
@@ -182,15 +221,22 @@ export async function assertTeamCanStoreBytes(
   const state = await assertTeamHasActiveSubscription(ctx, teamId);
   const storageUsedBytes = await getTeamStorageUsedBytes(ctx, teamId);
   const storageLimitBytes = TEAM_PLAN_STORAGE_LIMIT_BYTES[state.plan];
-  const requestedBytes = Number.isFinite(incomingBytes) ? Math.max(0, incomingBytes) : 0;
+  const requestedBytes = Number.isFinite(incomingBytes)
+    ? Math.max(0, incomingBytes)
+    : 0;
 
   if (
     isBillingEnforced() &&
     storageUsedBytes + requestedBytes > storageLimitBytes
   ) {
-    throw new Error(
-      `Storage limit reached for the ${state.plan} plan. Upgrade to continue uploading.`,
-    );
+    throw new ConvexError({
+      code: "storage_quota_exceeded",
+      plan: state.plan,
+      usedBytes: storageUsedBytes,
+      limitBytes: storageLimitBytes,
+      requestedBytes,
+      message: `Storage limit reached on the ${state.plan} plan. Upgrade in Billing & usage to keep uploading.`,
+    });
   }
 
   return {

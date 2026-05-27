@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
+import { StorageUsageBar } from "@/components/StorageUsageBar";
 
 export const Route = createFileRoute("/dashboard/billing")({
   head: () =>
@@ -148,11 +149,15 @@ function BillingRoute() {
                     : "Choose a plan"}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {(tiers ?? []).map((tier) => {
+                  {(tiers ?? [])
+                    .filter((t) => t.plan !== "enterprise")
+                    .map((tier) => {
                     const isCurrent =
-                      (subscription.status === "active" ||
-                        subscription.status === "trialing") &&
-                      subscription.plan === tier.plan;
+                      tier.plan === "free"
+                        ? subscription.plan === "free"
+                        : (subscription.status === "active" ||
+                            subscription.status === "trialing") &&
+                          subscription.plan === tier.plan;
                     return (
                       <TierCard
                         key={tier.plan}
@@ -202,12 +207,14 @@ function BillingRoute() {
                     <strong>Demo mode.</strong> No Stripe keys are
                     configured, so activation is simulated locally — no
                     card is charged. Set STRIPE_SECRET_KEY +
-                    STRIPE_PRICE_WORKSPACE_STUDIO +
-                    STRIPE_PRICE_WORKSPACE_PRO in Convex to enable real
+                    STRIPE_PRICE_BASIC_MONTHLY +
+                    STRIPE_PRICE_PRO_MONTHLY in Convex to enable real
                     Checkout.
                   </div>
                 </div>
               ) : null}
+
+              <StorageUsageBar variant="full" />
 
               <SeatBreakdown
                 seatCount={subscription.seatCount}
@@ -341,7 +348,7 @@ function TierCard({
       </ul>
       <Button
         onClick={onActivate}
-        disabled={isCurrent || disabled}
+        disabled={isCurrent || disabled || plan === "free"}
         variant={isCurrent ? "outline" : "default"}
         className={cn(
           "mt-auto",
@@ -353,9 +360,11 @@ function TierCard({
         <CreditCard className="h-4 w-4 mr-1.5" />
         {isCurrent
           ? "Current plan"
-          : busy
-            ? "Activating…"
-            : "Switch to this plan"}
+          : plan === "free"
+            ? "Default plan"
+            : busy
+              ? "Activating…"
+              : "Switch to this plan"}
       </Button>
     </div>
   );

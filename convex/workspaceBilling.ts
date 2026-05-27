@@ -1,13 +1,14 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { requireUser } from "./auth";
+import { getTeamStorageUsedBytes } from "./billingHelpers";
 
 /**
  * Account-level (workspace) billing.
  *
- * Pricing model: flat monthly base fee + per-seat overage.
- *   $19 / month base
- *   + $7 / additional seat beyond `includedSeats` (default 3)
+ * Pricing model: flat monthly base fee + per-seat overage. All flat
+ * tiers unlock the entire feature set; the difference is included
+ * seats + storage cap.
  *
  * A "seat" is a distinct collaborator across every team the owner
  * participates in — i.e. `count(distinct teamMembers.userClerkId)`
@@ -21,14 +22,6 @@ import { requireUser } from "./auth";
  */
 
 // ─── Tiers ──────────────────────────────────────────────────────────────
-//
-// Two flat tiers. Both unlock the *entire* feature set — the
-// difference is only how many seats are included and how much
-// storage you get. This matches the user-mental-model of "pay more
-// = make space for more collaborators and more footage" rather than
-// "pay more = unlock a hidden feature."
-//
-// Per-seat overage is the same on both so the comparison is trivial.
 
 const GIBIBYTE = 1024 ** 3;
 
@@ -43,13 +36,23 @@ const COMMON_FEATURES = [
 ] as const;
 
 export const TIERS = {
-  studio: {
-    plan: "studio",
-    label: "Studio",
-    baseCents: 2500, // $25/mo
+  free: {
+    plan: "free",
+    label: "Free",
+    baseCents: 0,
+    perSeatCents: 0,
+    includedSeats: 3,
+    storageBytes: 20 * GIBIBYTE, // 20 GB — enough to kick the tires
+    currency: "usd",
+    features: [...COMMON_FEATURES],
+  },
+  basic: {
+    plan: "basic",
+    label: "Basic",
+    baseCents: 2000, // $20/mo
     perSeatCents: 500, // $5/seat overage
     includedSeats: 3,
-    storageBytes: 100 * GIBIBYTE, // 100 GB
+    storageBytes: 2 * 1024 * GIBIBYTE, // 2 TB
     currency: "usd",
     features: [...COMMON_FEATURES],
   },
@@ -59,19 +62,20 @@ export const TIERS = {
     baseCents: 5000, // $50/mo
     perSeatCents: 500, // $5/seat overage
     includedSeats: 8,
-    storageBytes: 1024 * GIBIBYTE, // 1 TB
+    storageBytes: 5 * 1024 * GIBIBYTE, // 5 TB
     currency: "usd",
     features: [...COMMON_FEATURES, "Priority support"],
   },
   // Pay-as-you-go tier for enterprise customers. Zero base, everything
   // metered: storage by GB-month, egress by GB, seats by month, and
   // transcription by 1k-minute blocks. Reported to Stripe via the Meter
-  // Events API by the daily cron in convex/crons.ts.
+  // Events API by the daily cron in convex/crons.ts. Hidden from the
+  // public pricing page; reach out for access.
   enterprise: {
     plan: "enterprise",
     label: "Enterprise",
     baseCents: 0,
-    perSeatCents: 500, // $5 / seat (no included seats)
+    perSeatCents: 500,
     includedSeats: 0,
     storageBytes: Number.MAX_SAFE_INTEGER,
     currency: "usd",
@@ -83,10 +87,10 @@ export const TIERS = {
       "Volume discount on request",
     ],
     meters: {
-      storageGbMonthCents: 5, // $0.05 / GB-month stored
-      egressGbCents: 10, // $0.10 / GB downloaded
-      perSeatCents: 500, // $5 / seat / month
-      transcriptionPer1kMinCents: 100, // $1.00 / 1000 transcribed minutes
+      storageGbMonthCents: 5,
+      egressGbCents: 10,
+      perSeatCents: 500,
+      transcriptionPer1kMinCents: 100,
     },
   },
 } as const;
@@ -95,7 +99,19 @@ export const ENTERPRISE_PLAN_KEY = "enterprise" as const;
 
 export type TierKey = keyof typeof TIERS;
 
-const DEFAULT_TIER = TIERS.studio;
+const DEFAULT_TIER = TIERS.free;
+
+// Back-compat: the old TIERS table used the key "studio" for the
+// $25/100GB tier. Map any stale "studio" plan values to "basic" so
+// existing workspaceSubscriptions rows resolve to the new entry
+// paid tier without a hard migration.
+function normalizePlanKey(plan: string | undefined | null): TierKey {
+  if (plan === "free" || plan === "basic" || plan === "pro" || plan === "enterprise") {
+    return plan;
+  }
+  if (plan === "studio") return "basic";
+  return "free";
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -158,19 +174,38 @@ export const getMySubscription = query({
 
     const seatCount = await computeSeatCount(ctx, ownerClerkId);
 
-    const effective = sub ?? {
-      ownerClerkId,
-      plan: DEFAULT_TIER.plan,
-      status: "none" as const,
-      baseCents: DEFAULT_TIER.baseCents,
-      perSeatCents: DEFAULT_TIER.perSeatCents,
-      includedSeats: DEFAULT_TIER.includedSeats,
-      currency: DEFAULT_TIER.currency,
-      currentPeriodEnd: undefined,
-      stripeCustomerId: undefined,
-      stripeSubscriptionId: undefined,
-      canceledAt: undefined,
-    };
+    // Normalize the stored plan key — legacy rows still say "studio".
+    // When a sub exists but isn't active/trialing, treat the user as
+    // free-tier so quotas (20 GB) kick in rather than the formerly-paid
+    // limits.
+    const normalizedKey = normalizePlanKey(sub?.plan);
+    const isLive = sub?.status === "active" || sub?.status === "trialing";
+    const effectiveKey: TierKey = sub && isLive ? normalizedKey : "free";
+    const effectiveTier = TIERS[effectiveKey];
+
+    const effective = sub
+      ? {
+          ...sub,
+          plan: effectiveKey,
+          baseCents: isLive ? sub.baseCents : 0,
+          perSeatCents: isLive ? sub.perSeatCents : 0,
+          includedSeats: isLive
+            ? sub.includedSeats
+            : effectiveTier.includedSeats,
+        }
+      : {
+          ownerClerkId,
+          plan: DEFAULT_TIER.plan,
+          status: "none" as const,
+          baseCents: DEFAULT_TIER.baseCents,
+          perSeatCents: DEFAULT_TIER.perSeatCents,
+          includedSeats: DEFAULT_TIER.includedSeats,
+          currency: DEFAULT_TIER.currency,
+          currentPeriodEnd: undefined,
+          stripeCustomerId: undefined,
+          stripeSubscriptionId: undefined,
+          canceledAt: undefined,
+        };
 
     const monthlyCents = monthlyTotalCents({
       baseCents: effective.baseCents,
@@ -235,8 +270,7 @@ export const listTiers = query({
 export const getTier = query({
   args: { plan: v.optional(v.string()) },
   handler: async (_ctx, args) => {
-    const key = (args.plan ?? "studio") as TierKey;
-    const tier = TIERS[key] ?? DEFAULT_TIER;
+    const tier = TIERS[normalizePlanKey(args.plan)];
     return {
       plan: tier.plan,
       label: tier.label,
@@ -247,6 +281,59 @@ export const getTier = query({
       currency: tier.currency,
       features: [...tier.features],
     };
+  },
+});
+
+/**
+ * Storage usage + limit for the caller's default team. Used by the
+ * sidebar progress bar and the Billing & usage page. Returns null for
+ * unauthenticated callers / users with no team (the bar hides itself).
+ */
+export const getMyStorageUsage = query({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{
+    usedBytes: number;
+    limitBytes: number;
+    plan: TierKey;
+    label: string;
+    percent: number;
+  } | null> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    // Resolve the user's effective tier from their workspace
+    // subscription. No row / non-live status = free tier (20 GB).
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
+      .unique();
+    const isLive = sub?.status === "active" || sub?.status === "trialing";
+    const key: TierKey =
+      sub && isLive ? normalizePlanKey(sub.plan) : "free";
+    const tier = TIERS[key];
+
+    // Usage is summed across every team the user belongs to —
+    // that's what the user perceives as "their" storage even though
+    // the rows live under different team scopes.
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", identity.subject))
+      .collect();
+
+    let usedBytes = 0;
+    for (const m of memberships) {
+      usedBytes += await getTeamStorageUsedBytes(ctx, m.teamId);
+    }
+
+    const limitBytes = tier.storageBytes;
+    const percent =
+      limitBytes > 0
+        ? Math.min(100, Math.round((usedBytes / limitBytes) * 100))
+        : 0;
+
+    return { usedBytes, limitBytes, plan: key, label: tier.label, percent };
   },
 });
 
@@ -262,8 +349,13 @@ export const simulateActivate = mutation({
   args: { plan: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const tier =
-      TIERS[(args.plan ?? "studio") as TierKey] ?? DEFAULT_TIER;
+    const key = normalizePlanKey(args.plan);
+    // Free is just "have no row"; reject the no-op rather than write
+    // a $0 active subscription that confuses every downstream check.
+    if (key === "free") {
+      throw new Error("Pick a paid plan to activate.");
+    }
+    const tier = TIERS[key];
     const existing = await ctx.db
       .query("workspaceSubscriptions")
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
@@ -331,7 +423,11 @@ export const recordPendingCheckout = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const tier = TIERS[(args.plan ?? "studio") as TierKey] ?? DEFAULT_TIER;
+    const key = normalizePlanKey(args.plan);
+    if (key === "free") {
+      throw new Error("Pick a paid plan to start checkout.");
+    }
+    const tier = TIERS[key];
     const existing = await ctx.db
       .query("workspaceSubscriptions")
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
@@ -357,6 +453,108 @@ export const recordPendingCheckout = mutation({
       includedSeats: tier.includedSeats,
       currency: tier.currency,
       stripeCustomerId: args.stripeCustomerId,
+    });
+  },
+});
+
+/**
+ * Webhook entry point: reconciles a workspaceSubscriptions row from a
+ * Stripe subscription event. Resolves the owner from
+ * `subscription.metadata.ownerClerkId` (set when checkout was created
+ * in `workspaceBillingActions.createCheckout`). Returns silently if
+ * the metadata is missing — those events belong to the legacy
+ * per-team flow, handled by `billing.syncTeamSubscriptionFromWebhook`.
+ */
+export const syncWorkspaceSubscriptionFromWebhook = internalMutation({
+  args: {
+    ownerClerkId: v.optional(v.string()),
+    stripeCustomerId: v.optional(v.string()),
+    stripeSubscriptionId: v.string(),
+    stripePriceId: v.optional(v.string()),
+    plan: v.optional(v.string()),
+    status: v.string(),
+    currentPeriodEnd: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    // Locate the row. Prefer the explicit owner clerk id from metadata;
+    // fall back to a lookup by Stripe customer id / subscription id so
+    // we still sync if metadata wasn't set on the original sub (e.g.
+    // imported from the Stripe dashboard).
+    let existing = args.ownerClerkId
+      ? await ctx.db
+          .query("workspaceSubscriptions")
+          .withIndex("by_owner", (q) =>
+            q.eq("ownerClerkId", args.ownerClerkId as string),
+          )
+          .unique()
+      : null;
+
+    if (!existing && args.stripeSubscriptionId) {
+      existing = await ctx.db
+        .query("workspaceSubscriptions")
+        .withIndex("by_stripe_subscription", (q) =>
+          q.eq("stripeSubscriptionId", args.stripeSubscriptionId),
+        )
+        .unique();
+    }
+    if (!existing && args.stripeCustomerId) {
+      existing = await ctx.db
+        .query("workspaceSubscriptions")
+        .withIndex("by_stripe_customer", (q) =>
+          q.eq("stripeCustomerId", args.stripeCustomerId),
+        )
+        .unique();
+    }
+
+    // No row + no owner clerk id → can't safely insert (we'd be
+    // creating an orphan). Skip; this event almost certainly belongs
+    // to the legacy per-team flow.
+    if (!existing && !args.ownerClerkId) {
+      return;
+    }
+
+    const tier = TIERS[normalizePlanKey(args.plan ?? existing?.plan)];
+    const statusUnion = (
+      ["none", "trialing", "active", "past_due", "canceled"] as const
+    ).includes(args.status as never)
+      ? (args.status as
+          | "none"
+          | "trialing"
+          | "active"
+          | "past_due"
+          | "canceled")
+      : ("canceled" as const);
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        status: statusUnion,
+        plan: tier.plan,
+        baseCents: tier.baseCents,
+        perSeatCents: tier.perSeatCents,
+        includedSeats: tier.includedSeats,
+        currency: tier.currency,
+        currentPeriodEnd: args.currentPeriodEnd ?? existing.currentPeriodEnd,
+        stripeCustomerId: args.stripeCustomerId ?? existing.stripeCustomerId,
+        stripeSubscriptionId: args.stripeSubscriptionId,
+        canceledAt:
+          statusUnion === "canceled"
+            ? (existing.canceledAt ?? Date.now())
+            : undefined,
+      });
+      return;
+    }
+
+    await ctx.db.insert("workspaceSubscriptions", {
+      ownerClerkId: args.ownerClerkId as string,
+      plan: tier.plan,
+      status: statusUnion,
+      baseCents: tier.baseCents,
+      perSeatCents: tier.perSeatCents,
+      includedSeats: tier.includedSeats,
+      currency: tier.currency,
+      currentPeriodEnd: args.currentPeriodEnd,
+      stripeCustomerId: args.stripeCustomerId,
+      stripeSubscriptionId: args.stripeSubscriptionId,
     });
   },
 });
