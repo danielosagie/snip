@@ -248,6 +248,22 @@ export const getScopedStorageCredentials = action({
       });
     }
 
+    // Drive is a paid-tier feature. Free workspaces can review in
+    // the browser; the local FUSE mount is one of the upgrade
+    // triggers. (Basic + Pro both get it — gating Basic→Pro is a
+    // future option once we measure how much Basic relies on it.)
+    const tier = await ctx.runQuery(
+      internal.workspaceBilling.getCallerTier,
+      {},
+    );
+    if (tier === "free") {
+      throw new ConvexError({
+        code: "drive_requires_upgrade",
+        message:
+          "The local cloud drive is a paid feature. Upgrade to Basic to enable it.",
+      });
+    }
+
     const provider = detectProvider();
     if (!provider) throw new Error("Object storage is not configured.");
 

@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
 import { StorageUsageBar } from "@/components/StorageUsageBar";
+import { EnterpriseUpsellBanner } from "@/components/EnterpriseUpsellBanner";
 
 export const Route = createFileRoute("/dashboard/billing")({
   head: () =>
@@ -213,6 +214,10 @@ function BillingRoute() {
                   </div>
                 </div>
               ) : null}
+
+              <div className="mt-8">
+                <EnterpriseUpsellBanner />
+              </div>
 
               <StorageUsageBar variant="full" />
 

@@ -477,6 +477,9 @@ function friendlyDriveError(e: unknown): string {
   if (data?.code === "no_workspace") {
     return "Create a workspace to enable the drive.";
   }
+  if (data?.code === "drive_requires_upgrade") {
+    return "Upgrade to Basic to enable the local drive.";
+  }
   return e instanceof Error ? e.message : "Couldn't enable the drive.";
 }
 

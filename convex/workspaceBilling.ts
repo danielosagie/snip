@@ -636,6 +636,25 @@ export const getMyEncodingUsage = query({
 });
 
 /**
+ * Internal: resolves the caller's workspace tier. Used by gates that
+ * need to check the tier of the signed-in user (e.g. desktop drive
+ * access). Returns "free" when no live subscription exists.
+ */
+export const getCallerTier = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<TierKey> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return "free";
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
+      .unique();
+    const live = sub?.status === "active" || sub?.status === "trialing";
+    return sub && live ? normalizePlanKey(sub.plan) : "free";
+  },
+});
+
+/**
  * Internal: resolves a project's owning workspace tier. Used by the
  * lazy-encode decision in `videoActions.shouldDeferEncoding` — the
  * tier dictates whether we should skip Mux ingest at upload time.
@@ -888,6 +907,7 @@ export const recordPendingCheckout = mutation({
   args: {
     plan: v.string(),
     stripeCustomerId: v.optional(v.string()),
+    cadence: v.optional(v.union(v.literal("monthly"), v.literal("annual"))),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -896,6 +916,7 @@ export const recordPendingCheckout = mutation({
       throw new Error("Pick a paid plan to start checkout.");
     }
     const tier = TIERS[key];
+    const cadence = args.cadence ?? "monthly";
     const existing = await ctx.db
       .query("workspaceSubscriptions")
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
@@ -908,6 +929,7 @@ export const recordPendingCheckout = mutation({
         perSeatCents: tier.perSeatCents,
         includedSeats: tier.includedSeats,
         currency: tier.currency,
+        billingCadence: cadence,
         stripeCustomerId: args.stripeCustomerId ?? existing.stripeCustomerId,
       });
       return;
@@ -920,6 +942,7 @@ export const recordPendingCheckout = mutation({
       perSeatCents: tier.perSeatCents,
       includedSeats: tier.includedSeats,
       currency: tier.currency,
+      billingCadence: cadence,
       stripeCustomerId: args.stripeCustomerId,
     });
   },
