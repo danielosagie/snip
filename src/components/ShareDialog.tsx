@@ -82,11 +82,11 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   });
   const [createError, setCreateError] = useState<string | null>(null);
 
-  // Paywall always usable in the dialog. In production it routes through
-  // real Stripe Checkout; in demo mode the share page's Pay button calls
-  // simulatePaymentForGrant. We surface a small badge if any of the
-  // production-grade services are missing so the user knows what mode
-  // they're in.
+  // Paywall is always usable in the dialog. We surface a small badge when
+  // the deployment is missing any of the integrations a paywalled link
+  // actually needs (Stripe Connect, Stripe webhooks, Mux signed playback,
+  // watermark pipeline) — clicking Pay on the share page in that state
+  // returns a "Payments aren't configured on this deployment" error.
   const paywallProductionReady = featureStatus?.paywallReady ?? false;
 
   const handleCreateLink = async () => {

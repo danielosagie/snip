@@ -1,4 +1,4 @@
-import { useConvex, useMutation, useQuery } from "convex/react";
+import { useConvex } from "convex/react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -9,14 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Plus,
-  Folder,
-  Sparkles,
-  Trash2,
-  Briefcase,
-  AlertCircle,
-} from "lucide-react";
+import { Plus, Folder, Briefcase } from "lucide-react";
 import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
 import { cn } from "@/lib/utils";
@@ -25,7 +18,6 @@ import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmProject } from "./-project.data";
 import { useDashboardIndexData } from "./-index.data";
 import { Id } from "@convex/_generated/dataModel";
-import { api } from "@convex/_generated/api";
 import { DashboardHeader } from "@/components/DashboardHeader";
 
 export const Route = createFileRoute("/dashboard/")({
@@ -96,17 +88,7 @@ export default function DashboardPage() {
   const navigate = useNavigate({});
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createTeamOpen, setCreateTeamOpen] = useState(false);
-  const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
-  const seedDemoData = useMutation(api.demoSeed.seedDemoData);
-  const clearDemoData = useMutation(api.demoSeed.clearDemoData);
-  const [seeding, setSeeding] = useState(false);
-  const [clearing, setClearing] = useState(false);
-
   const isLoading = teams === undefined;
-  // Only show demo affordances on dev builds. `import.meta.env.DEV` is
-  // injected by Vite — true on `bun dev`, false on production builds.
-  const isDev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
-  const showDemoControls = isDev && demoStatus?.enabled === true;
 
   // Flatten teams → projects so the user just sees a single grid.
   // Teams are still a concept in the data model (for billing,
@@ -127,35 +109,6 @@ export default function DashboardPage() {
   // dialog (since you need a team to hold a project under the
   // current schema).
   const defaultTeam = teams?.[0];
-
-  const handleSeed = async () => {
-    setSeeding(true);
-    try {
-      const result = await seedDemoData({});
-      navigate({ to: projectPath(result.teamSlug, result.projectId) });
-    } catch (e) {
-      console.error("seed failed", e);
-    } finally {
-      setSeeding(false);
-    }
-  };
-
-  const handleClear = async () => {
-    if (
-      !confirm(
-        "Delete the Demo Studio workspace and everything inside it? Your real teams are untouched.",
-      )
-    )
-      return;
-    setClearing(true);
-    try {
-      await clearDemoData({});
-    } catch (e) {
-      console.error("clear failed", e);
-    } finally {
-      setClearing(false);
-    }
-  };
 
   const handleNewProject = () => {
     if (defaultTeam) {
@@ -182,22 +135,11 @@ export default function DashboardPage() {
                 invited from the team page.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-2">
+            <CardContent>
               <Button className="w-full" onClick={() => setCreateTeamOpen(true)}>
                 <Plus className="mr-1.5 h-4 w-4" />
                 Create workspace
               </Button>
-              {showDemoControls ? (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => void handleSeed()}
-                  disabled={seeding}
-                >
-                  <Sparkles className="mr-1.5 h-4 w-4" />
-                  {seeding ? "Seeding…" : "Or: load demo data"}
-                </Button>
-              ) : null}
             </CardContent>
           </Card>
         </div>
@@ -213,27 +155,6 @@ export default function DashboardPage() {
     <div className="h-full flex flex-col">
       <DashboardHeader>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {showDemoControls ? (
-            <>
-              <Button
-                variant="outline"
-                onClick={() => void handleClear()}
-                disabled={clearing || seeding}
-                title="Wipe seeded demo data"
-              >
-                <Trash2 className="mr-1.5 h-4 w-4" />
-                {clearing ? "Clearing…" : "Clear demo"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void handleSeed()}
-                disabled={seeding || clearing}
-              >
-                <Sparkles className="mr-1.5 h-4 w-4" />
-                {seeding ? "Seeding…" : "Seed demo data"}
-              </Button>
-            </>
-          ) : null}
           <Button onClick={handleNewProject}>
             <Plus className="mr-1.5 h-4 w-4" />
             New project
@@ -293,17 +214,6 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-
-        {showDemoControls ? (
-          <div className="max-w-2xl text-xs text-[#888] font-mono flex items-start gap-2 border-2 border-dashed border-[#1a1a1a] p-3">
-            <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-            <div>
-              Demo controls are visible because Stripe + Mux + Storage are
-              all unset and this is a <strong>dev</strong> build. Production
-              hides them entirely.
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <CreateTeamDialog

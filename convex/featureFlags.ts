@@ -63,14 +63,6 @@ export const FEATURES = {
     hasAll("MUX_TOKEN_ID", "MUX_TOKEN_SECRET") &&
     (hasAll("RAILWAY_ACCESS_KEY_ID", "RAILWAY_SECRET_ACCESS_KEY") ||
       hasAll("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")),
-
-  /** Demo mode — opt-in escape hatch that lets us return unsigned playback
-   * URLs on paywalled grants for screenshots, seeded demos, and unit
-   * fixtures. Must be set explicitly so a prod deployment with missing
-   * MUX_SIGNING_KEY/MUX_PRIVATE_KEY doesn't *silently* serve full-res to
-   * unpaid viewers. Refuse paywalled grants when neither this flag nor
-   * `muxSignedPlayback` is true. */
-  demoMode: () => has("DEMO_MODE"),
 } as const;
 
 export type FeatureKey = keyof typeof FEATURES;
@@ -106,7 +98,6 @@ export const getFeatureStatus = query({
     watermarkPipeline: v.boolean(),
     paywallReady: v.boolean(),
     desktopSyncReady: v.boolean(),
-    demoMode: v.boolean(),
   }),
   handler: async () => {
     const stripeBilling = FEATURES.stripeBilling();
@@ -118,7 +109,6 @@ export const getFeatureStatus = query({
     const objectStorage = FEATURES.objectStorage();
     const usingR2 = FEATURES.usingR2();
     const watermarkPipeline = FEATURES.watermarkPipeline();
-    const demoMode = FEATURES.demoMode();
 
     // "Paywall ready" = client can complete a payment AND we can gate the file.
     const paywallReady =
@@ -139,7 +129,6 @@ export const getFeatureStatus = query({
       watermarkPipeline,
       paywallReady,
       desktopSyncReady,
-      demoMode,
     };
   },
 });

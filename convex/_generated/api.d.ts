@@ -21,7 +21,6 @@ import type * as contractVersions from "../contractVersions.js";
 import type * as contracts from "../contracts.js";
 import type * as contractsTable from "../contractsTable.js";
 import type * as crons from "../crons.js";
-import type * as demoSeed from "../demoSeed.js";
 import type * as desktopAcls from "../desktopAcls.js";
 import type * as desktopAuth from "../desktopAuth.js";
 import type * as desktopBrowse from "../desktopBrowse.js";
@@ -85,7 +84,6 @@ declare const fullApi: ApiFromModules<{
   contracts: typeof contracts;
   contractsTable: typeof contractsTable;
   crons: typeof crons;
-  demoSeed: typeof demoSeed;
   desktopAcls: typeof desktopAcls;
   desktopAuth: typeof desktopAuth;
   desktopBrowse: typeof desktopBrowse;

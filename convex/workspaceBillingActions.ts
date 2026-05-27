@@ -6,18 +6,16 @@ import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 
 /**
- * Node-only side of workspace billing — Stripe Checkout creation.
- * Lives here (and not in workspaceBilling.ts) because the Stripe SDK
- * needs the node runtime. The mutation that records the pending
- * checkout state stays in workspaceBilling.ts so it can run in the
+ * Node-only side of workspace billing — Stripe Checkout creation +
+ * subscription cancel. Lives here (and not in workspaceBilling.ts) because
+ * the Stripe SDK needs the node runtime. The mutation that records the
+ * pending checkout state stays in workspaceBilling.ts so it can run in the
  * V8 isolate.
  *
- * Returns one of:
- *   • { kind: "redirect", url } when Stripe is fully configured →
- *     the client redirects to that URL.
- *   • { kind: "simulate", reason } when Stripe keys / prices are
- *     missing → the client falls back to `simulateActivate` and
- *     surfaces the reason so the operator knows what to set.
+ * Real-Stripe only — if the deployment is missing STRIPE_SECRET_KEY or one
+ * of STRIPE_PRICE_WORKSPACE_{STUDIO,PRO} the action throws a clear error
+ * and the UI surfaces it. There's no demo/simulate fallback anymore; see
+ * the inline error messages for what to set.
  */
 
 const STUDIO_PRICE_ENV = "STRIPE_PRICE_WORKSPACE_STUDIO";
@@ -32,10 +30,7 @@ export const createCheckout = action({
   handler: async (
     ctx,
     args,
-  ): Promise<
-    | { kind: "redirect"; url: string }
-    | { kind: "simulate"; reason: string }
-  > => {
+  ): Promise<{ url: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated.");
@@ -51,17 +46,14 @@ export const createCheckout = action({
     const priceId = process.env[priceEnvName];
 
     if (!stripeSecret || stripeSecret.trim().length === 0) {
-      return {
-        kind: "simulate",
-        reason:
-          "STRIPE_SECRET_KEY is not set on this Convex deployment. Activation will run in demo mode.",
-      };
+      throw new Error(
+        "STRIPE_SECRET_KEY is not set on this Convex deployment. Set it to enable workspace checkout.",
+      );
     }
     if (!priceId || priceId.trim().length === 0) {
-      return {
-        kind: "simulate",
-        reason: `${priceEnvName} is not set on Convex. Set it to the Stripe price ID for the ${args.plan === "studio" ? "Studio" : "Pro"} plan to enable real checkout.`,
-      };
+      throw new Error(
+        `${priceEnvName} is not set on Convex. Set it to the Stripe price ID for the ${args.plan === "studio" ? "Studio" : "Pro"} plan to enable real checkout.`,
+      );
     }
 
     const stripe = new Stripe(stripeSecret);
@@ -96,6 +88,37 @@ export const createCheckout = action({
         : undefined,
     });
 
-    return { kind: "redirect", url: session.url };
+    return { url: session.url };
+  },
+});
+
+/**
+ * Cancel the signed-in user's workspace subscription at the end of the
+ * current billing period. Calls Stripe directly; the subscription stays
+ * "active" until the period ends, then Stripe fires
+ * customer.subscription.deleted and the webhook syncs the row.
+ */
+export const cancelSubscription = action({
+  args: {},
+  handler: async (ctx): Promise<{ status: "ok" | "noSubscription" }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated.");
+    }
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecret || stripeSecret.trim().length === 0) {
+      throw new Error(
+        "STRIPE_SECRET_KEY is not set on this Convex deployment.",
+      );
+    }
+    const sub = await ctx.runQuery(api.workspaceBilling.getMySubscription, {});
+    if (!sub || !sub.stripeSubscriptionId) {
+      return { status: "noSubscription" };
+    }
+    const stripe = new Stripe(stripeSecret);
+    await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+      cancel_at_period_end: true,
+    });
+    return { status: "ok" };
   },
 });

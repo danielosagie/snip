@@ -16,6 +16,18 @@ function getSubscriptionOrgId(subscription: Stripe.Subscription): string | undef
   return typeof orgId === "string" && orgId.length > 0 ? orgId : undefined;
 }
 
+function stripeSubscriptionPeriodEnd(
+  subscription: Stripe.Subscription,
+): number | undefined {
+  const sub = subscription as unknown as {
+    current_period_end?: number;
+    items?: { data?: Array<{ current_period_end?: number }> };
+  };
+  const fromItems = sub.items?.data?.[0]?.current_period_end;
+  const value = sub.current_period_end ?? fromItems;
+  return typeof value === "number" ? value * 1000 : undefined;
+}
+
 function deriveConnectStatusFromAccount(
   account: Stripe.Account,
 ): "pending" | "active" | "restricted" {
@@ -32,51 +44,63 @@ function deriveConnectStatusFromAccount(
   return "pending";
 }
 
+async function syncSubscription(
+  ctx: Parameters<Parameters<typeof registerRoutes>[2]["events"]["customer.subscription.created"]>[0],
+  subscription: Stripe.Subscription,
+) {
+  // Team-level billing (teams.plan, teams.stripeSubscriptionId).
+  await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
+    orgId: getSubscriptionOrgId(subscription),
+    stripeCustomerId:
+      typeof subscription.customer === "string"
+        ? subscription.customer
+        : undefined,
+    stripeSubscriptionId: subscription.id,
+    stripePriceId: getSubscriptionPriceId(subscription),
+    status: subscription.status,
+  });
+  // Workspace-level billing (workspaceSubscriptions). createCheckout in
+  // convex/workspaceBillingActions.ts stamps ownerClerkId + plan onto the
+  // subscription metadata so we can find the right row here. Without this
+  // call the row stays at "trialing" forever even after a successful
+  // Stripe payment, which is the bug that previously forced the
+  // simulateActivate workaround.
+  const meta = (subscription.metadata ?? {}) as Record<string, string>;
+  const ownerClerkId = meta.ownerClerkId;
+  const plan = meta.plan;
+  if (ownerClerkId && plan) {
+    await ctx.runMutation(
+      internal.workspaceBilling.syncWorkspaceSubscriptionFromWebhook,
+      {
+        ownerClerkId,
+        plan,
+        status: subscription.status,
+        stripeCustomerId:
+          typeof subscription.customer === "string"
+            ? subscription.customer
+            : undefined,
+        stripeSubscriptionId: subscription.id,
+        // Stripe API 2025+ moved period boundaries onto the subscription
+        // items level. Read both shapes so we keep working across SDK
+        // versions; the runtime value is present in either case.
+        currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
+        canceledAt: subscription.canceled_at
+          ? subscription.canceled_at * 1000
+          : undefined,
+      },
+    );
+  }
+}
+
 registerRoutes(http, components.stripe, {
   webhookPath: "/stripe/webhook",
   events: {
-    "customer.subscription.created": async (
-      ctx,
-      event: Stripe.Event & { type: "customer.subscription.created" },
-    ) => {
-      const subscription = event.data.object as Stripe.Subscription;
-      await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
-        orgId: getSubscriptionOrgId(subscription),
-        stripeCustomerId:
-          typeof subscription.customer === "string" ? subscription.customer : undefined,
-        stripeSubscriptionId: subscription.id,
-        stripePriceId: getSubscriptionPriceId(subscription),
-        status: subscription.status,
-      });
-    },
-    "customer.subscription.updated": async (
-      ctx,
-      event: Stripe.Event & { type: "customer.subscription.updated" },
-    ) => {
-      const subscription = event.data.object as Stripe.Subscription;
-      await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
-        orgId: getSubscriptionOrgId(subscription),
-        stripeCustomerId:
-          typeof subscription.customer === "string" ? subscription.customer : undefined,
-        stripeSubscriptionId: subscription.id,
-        stripePriceId: getSubscriptionPriceId(subscription),
-        status: subscription.status,
-      });
-    },
-    "customer.subscription.deleted": async (
-      ctx,
-      event: Stripe.Event & { type: "customer.subscription.deleted" },
-    ) => {
-      const subscription = event.data.object as Stripe.Subscription;
-      await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
-        orgId: getSubscriptionOrgId(subscription),
-        stripeCustomerId:
-          typeof subscription.customer === "string" ? subscription.customer : undefined,
-        stripeSubscriptionId: subscription.id,
-        stripePriceId: getSubscriptionPriceId(subscription),
-        status: subscription.status,
-      });
-    },
+    "customer.subscription.created": async (ctx, event) =>
+      syncSubscription(ctx, event.data.object as Stripe.Subscription),
+    "customer.subscription.updated": async (ctx, event) =>
+      syncSubscription(ctx, event.data.object as Stripe.Subscription),
+    "customer.subscription.deleted": async (ctx, event) =>
+      syncSubscription(ctx, event.data.object as Stripe.Subscription),
     // Stripe Connect — agency's Connect account state changes.
     "account.updated": async (
       ctx,

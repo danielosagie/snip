@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -49,30 +49,30 @@ export const Route = createFileRoute("/dashboard/billing")({
  * action here.
  *
  * The CTA flips between "Activate" (no subscription yet),
- * "Subscribed" (active), or "Reactivate" (canceled). In demo mode
- * the buttons hit simulate* mutations; real Stripe Checkout swaps in
- * later.
+ * "Subscribed" (active), or "Reactivate" (canceled). Activate always
+ * routes through real Stripe Checkout; if the deployment is missing
+ * STRIPE_SECRET_KEY or STRIPE_PRICE_WORKSPACE_{STUDIO,PRO} the action
+ * throws and we surface the message inline.
  */
 function BillingRoute() {
   const subscription = useQuery(api.workspaceBilling.getMySubscription, {});
   const tiers = useQuery(api.workspaceBilling.listTiers, {});
-  const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
-  const simulateActivate = useMutation(api.workspaceBilling.simulateActivate);
-  const cancel = useMutation(api.workspaceBilling.simulateCancel);
   const createCheckout = useAction(
     api.workspaceBillingActions.createCheckout,
   );
+  const cancelSubscription = useAction(
+    api.workspaceBillingActions.cancelSubscription,
+  );
   const [busy, setBusy] = useState<string | null>(null);
-  const [activationNote, setActivationNote] = useState<string | null>(null);
+  const [activationError, setActivationError] = useState<string | null>(null);
 
   const isLoading = subscription === undefined;
   const isAuthed = subscription !== null;
 
   const handleActivate = async (plan: string) => {
     setBusy(`activate:${plan}`);
-    setActivationNote(null);
+    setActivationError(null);
     try {
-      // Ask the server: real Stripe Checkout, or demo simulate?
       const origin =
         typeof window !== "undefined" ? window.location.origin : "";
       const result = await createCheckout({
@@ -80,16 +80,13 @@ function BillingRoute() {
         successUrl: `${origin}/dashboard/billing?checkout=success`,
         cancelUrl: `${origin}/dashboard/billing?checkout=cancel`,
       });
-      if (result.kind === "redirect") {
-        if (typeof window !== "undefined") {
-          window.location.assign(result.url);
-        }
-        return;
+      if (typeof window !== "undefined") {
+        window.location.assign(result.url);
       }
-      // Fallback path — Stripe isn't fully configured. Activate
-      // locally so the user can still test the rest of the app.
-      await simulateActivate({ plan });
-      setActivationNote(result.reason);
+    } catch (e) {
+      setActivationError(
+        e instanceof Error ? e.message : "Could not start checkout.",
+      );
     } finally {
       setBusy(null);
     }
@@ -99,8 +96,13 @@ function BillingRoute() {
       return;
     }
     setBusy("cancel");
+    setActivationError(null);
     try {
-      await cancel({});
+      await cancelSubscription({});
+    } catch (e) {
+      setActivationError(
+        e instanceof Error ? e.message : "Could not cancel subscription.",
+      );
     } finally {
       setBusy(null);
     }
@@ -188,24 +190,10 @@ function BillingRoute() {
                 )}
               </div>
 
-              {activationNote ? (
-                <div className="mt-4 inline-flex items-start gap-2 border-2 border-[#b45309] bg-[#fdf6e3] px-3 py-2 text-xs max-w-2xl">
-                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0 text-[#b45309]" />
-                  <div>
-                    <strong>Activated in demo mode.</strong> {activationNote}
-                  </div>
-                </div>
-              ) : demoStatus?.enabled ? (
-                <div className="mt-4 inline-flex items-start gap-2 border-2 border-[#1a1a1a] bg-[#e8e8e0] px-3 py-2 text-xs">
-                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <strong>Demo mode.</strong> No Stripe keys are
-                    configured, so activation is simulated locally — no
-                    card is charged. Set STRIPE_SECRET_KEY +
-                    STRIPE_PRICE_WORKSPACE_STUDIO +
-                    STRIPE_PRICE_WORKSPACE_PRO in Convex to enable real
-                    Checkout.
-                  </div>
+              {activationError ? (
+                <div className="mt-4 inline-flex items-start gap-2 border-2 border-[#dc2626] bg-[#fef2f2] px-3 py-2 text-xs max-w-2xl">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0 text-[#dc2626]" />
+                  <div>{activationError}</div>
                 </div>
               ) : null}
 

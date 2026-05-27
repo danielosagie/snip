@@ -850,16 +850,6 @@ export const getSharedDownloadUrl = action({
 
     const key = getValueString(result.video, "s3Key");
     if (!key) {
-      // Demo-mode fallback: seeded videos have no real upload. Hand the
-      // client a public sample MP4 so they can exercise the download UX
-      // end-to-end. Only when object storage isn't configured — a
-      // misconfigured prod with missing s3Key still errors loudly.
-      if (!isFeatureEnabled("objectStorage")) {
-        return {
-          url: "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
-          filename: `${(result.video.title ?? "demo").replace(/[^a-zA-Z0-9._-]+/g, "_")}.mp4`,
-        };
-      }
       throw new Error("Original bucket file not found for this video");
     }
 
@@ -1605,26 +1595,14 @@ export const getSharedPaywalledPlayback = action({
     const paid = Boolean(grant.paidAt) || viewAsOwner;
     const TTL_SECONDS = 300; // 5 minutes — refreshed via heartbeat.
 
-    // Demo bypass: paywall set but no signed-playback keys. Fall back to
-    // the public playback URL so the share page is testable end-to-end.
-    // This is GATED behind explicit DEMO_MODE so a misconfigured prod
-    // deployment (missing MUX_SIGNING_KEY/MUX_PRIVATE_KEY) can't silently
-    // serve full-res to unpaid viewers — refuse loudly instead.
+    // Paywalled playback requires JWT-signed URLs so unpaid viewers can't
+    // simply curl the public playback id. If the deployment hasn't set the
+    // Mux signing keys, refuse loudly rather than degrading to unsigned —
+    // there's no demo-mode escape hatch anymore.
     if (!isFeatureEnabled("muxSignedPlayback")) {
-      if (!isFeatureEnabled("demoMode")) {
-        throw new Error(
-          "Paywalled playback requires Mux signed playback keys. Set MUX_SIGNING_KEY + MUX_PRIVATE_KEY, or set DEMO_MODE=1 to allow unsigned previews.",
-        );
-      }
-      const playbackId = video.muxPlaybackId;
-      return {
-        mode: paid ? ("full" as const) : ("preview" as const),
-        url: buildMuxPlaybackUrl(playbackId),
-        posterUrl: buildMuxThumbnailUrl(playbackId),
-        tokenExpiresAt: null,
-        paywall: shareLink.paywall,
-        previewError: null,
-      };
+      throw new Error(
+        "Paywalled playback requires Mux signed playback keys. Set MUX_SIGNING_KEY (or MUX_SIGNING_KEY_ID) and MUX_PRIVATE_KEY (or MUX_SIGNING_PRIVATE_KEY) on this Convex deployment.",
+      );
     }
 
     if (paid) {

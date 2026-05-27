@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { requireUser } from "./auth";
 
 /**
@@ -253,72 +253,6 @@ export const getTier = query({
 // ─── Mutations ───────────────────────────────────────────────────────────
 
 /**
- * Demo-mode activation: flips the user's subscription to "active" on
- * the default tier without going through Stripe. The real
- * Stripe-Checkout path lands in a follow-up; this mirrors the
- * `simulatePayment*` pattern already used elsewhere in demo mode.
- */
-export const simulateActivate = mutation({
-  args: { plan: v.optional(v.string()) },
-  handler: async (ctx, args) => {
-    const user = await requireUser(ctx);
-    const tier =
-      TIERS[(args.plan ?? "studio") as TierKey] ?? DEFAULT_TIER;
-    const existing = await ctx.db
-      .query("workspaceSubscriptions")
-      .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
-      .unique();
-
-    const periodEnd = Date.now() + 30 * 24 * 60 * 60 * 1000;
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        status: "active",
-        plan: tier.plan,
-        baseCents: tier.baseCents,
-        perSeatCents: tier.perSeatCents,
-        includedSeats: tier.includedSeats,
-        currency: tier.currency,
-        currentPeriodEnd: periodEnd,
-        canceledAt: undefined,
-      });
-      return existing._id;
-    }
-
-    return await ctx.db.insert("workspaceSubscriptions", {
-      ownerClerkId: user.subject,
-      plan: tier.plan,
-      status: "active",
-      baseCents: tier.baseCents,
-      perSeatCents: tier.perSeatCents,
-      includedSeats: tier.includedSeats,
-      currency: tier.currency,
-      currentPeriodEnd: periodEnd,
-    });
-  },
-});
-
-/**
- * Demo-mode cancel: flips status to "canceled". Real flow would call
- * Stripe `subscriptions.update({ cancel_at_period_end: true })`.
- */
-export const simulateCancel = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const user = await requireUser(ctx);
-    const existing = await ctx.db
-      .query("workspaceSubscriptions")
-      .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
-      .unique();
-    if (!existing) return;
-    await ctx.db.patch(existing._id, {
-      status: "canceled",
-      canceledAt: Date.now(),
-    });
-  },
-});
-
-/**
  * Mutation called by the workspaceBillingActions checkout flow right
  * before redirecting the user to Stripe. Plants a "trialing" row with
  * the Stripe customer id so the UI shows pending status immediately;
@@ -360,3 +294,81 @@ export const recordPendingCheckout = mutation({
     });
   },
 });
+
+/**
+ * Webhook-driven sync for workspace subscriptions. Called from
+ * convex/http.ts when Stripe fires customer.subscription.{created,updated,
+ * deleted}. The createCheckout action stamps `ownerClerkId` and `plan` on
+ * the subscription metadata; this mutation reads it back to find the right
+ * workspaceSubscriptions row and flips status + period boundary in lockstep
+ * with what Stripe believes.
+ *
+ * If no matching row exists (someone cancelled the checkout halfway and the
+ * pending row never landed), we no-op — the user will see no subscription
+ * in the dashboard, which is correct.
+ */
+export const syncWorkspaceSubscriptionFromWebhook = internalMutation({
+  args: {
+    ownerClerkId: v.string(),
+    plan: v.string(),
+    status: v.string(),
+    stripeCustomerId: v.optional(v.string()),
+    stripeSubscriptionId: v.optional(v.string()),
+    currentPeriodEnd: v.optional(v.number()),
+    canceledAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const tier =
+      TIERS[(args.plan ?? "studio") as TierKey] ?? DEFAULT_TIER;
+    const mapped = mapStripeStatus(args.status);
+    const existing = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", args.ownerClerkId))
+      .unique();
+
+    const patch = {
+      plan: tier.plan,
+      status: mapped,
+      baseCents: tier.baseCents,
+      perSeatCents: tier.perSeatCents,
+      includedSeats: tier.includedSeats,
+      currency: tier.currency,
+      stripeCustomerId: args.stripeCustomerId ?? existing?.stripeCustomerId,
+      stripeSubscriptionId:
+        args.stripeSubscriptionId ?? existing?.stripeSubscriptionId,
+      currentPeriodEnd: args.currentPeriodEnd ?? existing?.currentPeriodEnd,
+      canceledAt:
+        mapped === "canceled"
+          ? (args.canceledAt ?? Date.now())
+          : undefined,
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, patch);
+      return;
+    }
+    await ctx.db.insert("workspaceSubscriptions", {
+      ownerClerkId: args.ownerClerkId,
+      ...patch,
+    });
+  },
+});
+
+function mapStripeStatus(
+  status: string,
+): "none" | "trialing" | "active" | "past_due" | "canceled" {
+  switch (status) {
+    case "trialing":
+      return "trialing";
+    case "active":
+      return "active";
+    case "past_due":
+    case "unpaid":
+      return "past_due";
+    case "canceled":
+    case "incomplete_expired":
+      return "canceled";
+    default:
+      return "trialing";
+  }
+}

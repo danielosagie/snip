@@ -42,8 +42,8 @@ function formatPrice(cents: number, currency: string): string {
  *     to attach / clear a price. They can also download the original.
  *
  *   - External viewer (no team membership): a "Download — $X" button that
- *     either pays (Stripe Checkout, or simulated in demo mode) or
- *     downloads immediately if they've already paid for this video.
+ *     redirects to Stripe Checkout, or downloads immediately if they've
+ *     already paid for this video.
  */
 export function VideoPaywallControl({
   videoId,
@@ -51,15 +51,12 @@ export function VideoPaywallControl({
   isDownloading,
 }: Props) {
   const unlock = useQuery(api.videos.getVideoUnlockState, { videoId });
-  const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
   const setPaywall = useMutation(api.videos.setPaywall);
-  const simulatePayment = useMutation(api.demoSeed.simulatePaymentForVideo);
   const createCheckout = useAction(api.paymentsActions.createCheckoutForVideo);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [busy, setBusy] = useState<null | "pay" | "edit">(null);
   const [error, setError] = useState<string | null>(null);
-  const [emailPrompt, setEmailPrompt] = useState("");
 
   const paywall = unlock?.paywall ?? null;
   const paid = unlock?.paid ?? false;
@@ -143,33 +140,12 @@ export function VideoPaywallControl({
   }
 
   // Paywalled and locked — the Canva moment.
-  const stripeReady = demoStatus?.stripeConfigured ?? false;
   const handlePay = async () => {
     setError(null);
     setBusy("pay");
     try {
-      if (!stripeReady) {
-        const result = await simulatePayment({
-          videoId,
-          clientEmail: emailPrompt.trim() || undefined,
-        });
-        if (
-          result.status !== "ok" &&
-          result.status !== "alreadyPaid"
-        ) {
-          setError(
-            result.status === "noPaywall"
-              ? "Paywall was just cleared — retry."
-              : result.status === "videoNotFound"
-                ? "Video not found."
-                : "Payment simulation failed.",
-          );
-        }
-        return;
-      }
       const session = await createCheckout({
         videoId,
-        clientEmail: emailPrompt.trim() || undefined,
         successUrl: `${window.location.href}?paid=1`,
         cancelUrl: window.location.href,
       });
@@ -206,20 +182,7 @@ export function VideoPaywallControl({
             ? "Opening checkout…"
             : `Download — ${priceLabel}`}
         </Button>
-        {!stripeReady ? (
-          <span className="text-[10px] uppercase tracking-widest text-[#888] font-mono">
-            demo
-          </span>
-        ) : null}
       </div>
-      {!stripeReady ? (
-        <Input
-          placeholder="your email (optional, for receipt)"
-          value={emailPrompt}
-          onChange={(e) => setEmailPrompt(e.target.value)}
-          className="w-64 text-xs h-7"
-        />
-      ) : null}
       {paywall.description ? (
         <div className="text-xs text-[#888] max-w-[280px] text-right">
           {paywall.description}

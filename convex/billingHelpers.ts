@@ -130,7 +130,9 @@ function isBillingEnforced(): boolean {
  * Active subscription gate, post-workspace-billing.
  *
  * Order of checks:
- *   1. Stripe not configured → demo mode, never enforce.
+ *   1. Stripe not configured on this deployment → don't enforce. Lets a
+ *      fresh fork run end-to-end while the operator is still wiring keys;
+ *      once STRIPE_SECRET_KEY is set the gate becomes load-bearing.
  *   2. Team owner has an active workspace subscription → pass.
  *      (Workspace subs replaced per-team subs; one Stripe customer
  *      covers every team the owner runs.)
