@@ -1,5 +1,10 @@
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { requireUser } from "./auth";
 import { getTeamStorageUsedBytes } from "./billingHelpers";
 import type { Id } from "./_generated/dataModel";
@@ -527,6 +532,23 @@ export const getTeamSeatUsage = query({
       hardCapped:
         tierKey === "free" && seats + pendingInvites >= tier.includedSeats,
     };
+  },
+});
+
+/**
+ * Internal: resolves a project's owning workspace tier. Used by the
+ * lazy-encode decision in `videoActions.shouldDeferEncoding` — the
+ * tier dictates whether we should skip Mux ingest at upload time.
+ * Returns "free" when no live subscription exists so the defer rule
+ * naturally lands on the cheapest tier.
+ */
+export const getProjectOwnerTier = internalQuery({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args): Promise<TierKey> => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project) return "free";
+    const { tierKey } = await getTeamOwnerTier(ctx, project.teamId);
+    return tierKey;
   },
 });
 

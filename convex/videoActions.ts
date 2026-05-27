@@ -517,20 +517,31 @@ export const markUploadComplete = action({
       });
 
       if (isMuxVideoType(normalizedContentType, video.s3Key)) {
-        // Video path — kick off Mux ingest as before.
-        await ctx.runMutation(internal.videos.markAsProcessing, {
-          videoId: args.videoId,
-        });
-
-        const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
-          expiresIn: 60 * 60 * 24,
-        });
-        const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
-        if (asset.id) {
-          await ctx.runMutation(internal.videos.setMuxAssetReference, {
+        // Lazy encoding: when enabled, skip Mux ingest and hold the
+        // video in `encodingDeferred` state. The first watch triggers
+        // `requestEncoding`, which kicks off the normal pipeline.
+        // Cuts COGS on the long tail of footage that's uploaded but
+        // never played (very common on free-tier review workflows).
+        if (await shouldDeferEncoding(ctx, video.projectId)) {
+          await ctx.runMutation(internal.videos.markAsEncodingDeferred, {
             videoId: args.videoId,
-            muxAssetId: asset.id,
           });
+        } else {
+          // Video path — kick off Mux ingest as before.
+          await ctx.runMutation(internal.videos.markAsProcessing, {
+            videoId: args.videoId,
+          });
+
+          const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+            expiresIn: 60 * 60 * 24,
+          });
+          const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
+          if (asset.id) {
+            await ctx.runMutation(internal.videos.setMuxAssetReference, {
+              videoId: args.videoId,
+              muxAssetId: asset.id,
+            });
+          }
         }
       } else {
         // Non-video path — file lives in object storage, no Mux processing.
@@ -2161,5 +2172,104 @@ export const ensurePreviewAssetForShareLink = action({
     }
 
     return { status: "ok" as const };
+  },
+});
+
+// ─── Lazy encoding ───────────────────────────────────────────────────────────
+//
+// We defer Mux ingest on upload when the workspace tier qualifies — the
+// "long tail of unwatched footage" is a real COGS line and the encoding
+// cost is wasted for clips no one ever opens. The first watch triggers
+// `requestEncoding` below, which runs the normal pipeline.
+//
+// Decision is driven by env: LAZY_ENCODE_DEFAULT={never|free|always}.
+//   never   — default; existing behavior, encode on upload.
+//   free    — defer for free-tier workspaces only.
+//   always  — defer everywhere (use during a Cloudflare Stream cutover,
+//             since Stream's storage is so cheap that delaying encode
+//             is essentially free).
+
+async function shouldDeferEncoding(
+  ctx: ActionCtx,
+  projectId: Id<"projects">,
+): Promise<boolean> {
+  const mode = (process.env.LAZY_ENCODE_DEFAULT ?? "never")
+    .trim()
+    .toLowerCase();
+  if (mode === "never" || mode === "off" || mode === "false" || mode === "") {
+    return false;
+  }
+  if (mode === "always" || mode === "all" || mode === "true") {
+    return true;
+  }
+  if (mode !== "free") return false;
+  const tier = await ctx.runQuery(
+    internal.workspaceBilling.getProjectOwnerTier,
+    { projectId },
+  );
+  return tier === "free";
+}
+
+/**
+ * Public surface the video player calls when it loads a video that
+ * has `encodingDeferred: true` and no `muxPlaybackId` yet. Kicks off
+ * the same Mux ingest path the upload flow would have, transitioning
+ * the row to "processing". Idempotent.
+ */
+export const requestEncoding = action({
+  args: { videoId: v.id("videos") },
+  returns: v.object({
+    status: v.union(
+      v.literal("encoding_started"),
+      v.literal("already_encoding"),
+      v.literal("already_ready"),
+      v.literal("not_a_video"),
+    ),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status:
+      | "encoding_started"
+      | "already_encoding"
+      | "already_ready"
+      | "not_a_video";
+  }> => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+    if (!video) throw new Error("Video not found");
+
+    if (video.muxPlaybackId || video.status === "ready") {
+      return { status: "already_ready" };
+    }
+    if (!video.encodingDeferred) {
+      return { status: "already_encoding" };
+    }
+    if (!video.s3Key) {
+      return { status: "not_a_video" };
+    }
+    if (
+      !isMuxVideoType(video.contentType ?? "application/octet-stream", video.s3Key)
+    ) {
+      return { status: "not_a_video" };
+    }
+
+    await ctx.runMutation(internal.videos.markAsProcessing, {
+      videoId: args.videoId,
+    });
+    const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+      expiresIn: 60 * 60 * 24,
+    });
+    const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
+    if (asset.id) {
+      await ctx.runMutation(internal.videos.setMuxAssetReference, {
+        videoId: args.videoId,
+        muxAssetId: asset.id,
+      });
+    }
+    return { status: "encoding_started" };
   },
 });

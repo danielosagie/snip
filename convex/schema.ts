@@ -222,6 +222,14 @@ export default defineSchema({
     ),
     /** Cloudflare Stream uid — used as both asset id and playback id. */
     streamUid: v.optional(v.string()),
+    /**
+     * When true, the video was uploaded but Mux ingest was skipped.
+     * Lazy encoding: cuts COGS for the long tail of footage no one
+     * ever plays. The video player triggers `requestEncoding` on
+     * mount, which clears this flag and kicks off the normal Mux
+     * pipeline. See `shouldDeferEncoding` in videoActions.ts.
+     */
+    encodingDeferred: v.optional(v.boolean()),
     muxAssetStatus: v.optional(
       v.union(
         v.literal("preparing"),

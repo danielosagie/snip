@@ -1248,6 +1248,31 @@ export const markAsProcessing = internalMutation({
       status: "processing",
       muxAssetStatus: "preparing",
       uploadError: undefined,
+      // Clear the lazy-encode flag if it was set — encoding has begun.
+      encodingDeferred: undefined,
+    });
+  },
+});
+
+/**
+ * Lazy-encode landing state. The file is uploaded and reconciled, but
+ * we've deferred Mux ingest until someone actually tries to play it.
+ * Status stays "uploading" so existing UI doesn't render it as fully
+ * ready; the `encodingDeferred` flag distinguishes this from a normal
+ * upload-in-progress row.
+ *
+ * Triggered when `shouldDeferEncoding()` returns true at upload time
+ * — typically for free-tier customers where the long tail of unwatched
+ * footage isn't worth the encoding bill.
+ */
+export const markAsEncodingDeferred = internalMutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      status: "uploading",
+      muxAssetStatus: undefined,
+      uploadError: undefined,
+      encodingDeferred: true,
     });
   },
 });
