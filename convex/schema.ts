@@ -213,6 +213,15 @@ export default defineSchema({
     muxAssetId: v.optional(v.string()),
     muxPlaybackId: v.optional(v.string()),
     muxSignedPlaybackId: v.optional(v.string()),
+    // Playback provider that owns this video's encoded ladder. Defaults
+    // to "mux" (every pre-migration row). Set to "cloudflare_stream" on
+    // new uploads after the per-tier router routes traffic there.
+    // See convex/providers/playbackProvider.ts for the abstraction.
+    playbackProvider: v.optional(
+      v.union(v.literal("mux"), v.literal("cloudflare_stream")),
+    ),
+    /** Cloudflare Stream uid — used as both asset id and playback id. */
+    streamUid: v.optional(v.string()),
     muxAssetStatus: v.optional(
       v.union(
         v.literal("preparing"),
