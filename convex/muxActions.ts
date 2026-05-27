@@ -288,24 +288,6 @@ export const processWebhook = internalAction({
             duration,
             thumbnailUrl: buildMuxThumbnailUrl(playbackId),
           });
-
-          // Encoded-minutes meter — drives the included-minutes
-          // overage gate on Basic/Pro and the metered Stripe report
-          // on Enterprise PAYG. Resolved from the workspace owner of
-          // the video's project.
-          if (typeof duration === "number" && duration > 0) {
-            const owner = await ctx.runQuery(
-              internal.usageMeters.resolveVideoWorkspaceOwner,
-              { videoId: resolved.videoId },
-            );
-            if (owner?.ownerClerkId) {
-              await ctx.runMutation(internal.usageMeters.incrementEncodedMinutes, {
-                workspaceOwnerClerkId: owner.ownerClerkId,
-                durationSeconds: duration,
-              });
-            }
-          }
-
           // Visual search: caption sampled frames so "describe a person /
           // scene" finds this video. No-ops if the Gemini key is unset.
           await ctx.scheduler.runAfter(

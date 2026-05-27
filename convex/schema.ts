@@ -789,12 +789,6 @@ export default defineSchema({
     egressBytesGb: v.number(),
     seatCount: v.number(),
     transcribedMinutes: v.number(),
-    // Source-minute count of video Mux has finished encoding for this
-    // workspace in the current period. Drives the included-minutes
-    // overage gate on Basic/Pro tiers and the metered Stripe report
-    // on Enterprise. Optional because pre-migration rows didn't have
-    // this dimension.
-    encodedMinutes: v.optional(v.number()),
     lastReportedAt: v.optional(v.number()),
   })
     .index("by_owner", ["workspaceOwnerClerkId"])

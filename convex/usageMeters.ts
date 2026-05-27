@@ -133,30 +133,6 @@ export const incrementTranscribedMinutes = internalMutation({
   },
 });
 
-/**
- * Bumps the encoded-minutes counter for a workspace. Called from the
- * Mux asset.ready webhook with the source duration in seconds — the
- * single signal Mux gives us for "you got billed for encoding N
- * source-minutes of media." Drives:
- *   • Basic/Pro overage gate via `workspaceBilling.getMyEncodingUsage`
- *   • Enterprise PAYG Stripe meter event (added to the daily cron in
- *     usageMetersActions when the meter id lands in stripeMeterIds).
- */
-export const incrementEncodedMinutes = internalMutation({
-  args: {
-    workspaceOwnerClerkId: v.string(),
-    durationSeconds: v.number(),
-  },
-  handler: async (ctx, args) => {
-    if (args.durationSeconds <= 0) return;
-    const row = await getOrCreateRow(ctx, args.workspaceOwnerClerkId);
-    if (!row) return;
-    const current = row.encodedMinutes ?? 0;
-    await ctx.db.patch(row._id, {
-      encodedMinutes: current + args.durationSeconds / 60,
-    });
-  },
-});
 
 /**
  * Daily snapshot: writes the storage delta for the day. Called by the

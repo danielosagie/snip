@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
 import { StorageUsageBar } from "@/components/StorageUsageBar";
 import { EnterpriseUpsellBanner } from "@/components/EnterpriseUpsellBanner";
+import { AddOnsSection } from "@/components/AddOnsSection";
 
 export const Route = createFileRoute("/dashboard/billing")({
   head: () =>
@@ -66,6 +67,11 @@ function BillingRoute() {
   );
   const [busy, setBusy] = useState<string | null>(null);
   const [activationNote, setActivationNote] = useState<string | null>(null);
+  // Annual prepay toggle. Defaults to monthly so the existing flow
+  // for users who don't know to look at the toggle is unchanged. The
+  // 17% discount badge inline next to each tier signals the
+  // alternative is there.
+  const [cadence, setCadence] = useState<"monthly" | "annual">("monthly");
 
   const isLoading = subscription === undefined;
   const isAuthed = subscription !== null;
@@ -79,6 +85,7 @@ function BillingRoute() {
         typeof window !== "undefined" ? window.location.origin : "";
       const result = await createCheckout({
         plan,
+        cadence,
         successUrl: `${origin}/dashboard/billing?checkout=success`,
         cancelUrl: `${origin}/dashboard/billing?checkout=cancel`,
       });
@@ -143,12 +150,50 @@ function BillingRoute() {
               {/* Tier picker. Active sub shows a Cancel button; otherwise
                   each tier card has its own Activate CTA. */}
               <div className="mt-8">
-                <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
-                  {subscription.status === "active" ||
-                  subscription.status === "trialing"
-                    ? "Change plan"
-                    : "Choose a plan"}
-                </h2>
+                <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
+                  <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888]">
+                    {subscription.status === "active" ||
+                    subscription.status === "trialing"
+                      ? "Change plan"
+                      : "Choose a plan"}
+                  </h2>
+                  {/* Monthly / Annual toggle. Annual prepay is 17% off
+                      (10 months for 12). The chosen cadence is passed
+                      to createCheckout and picks the right Stripe
+                      price ID server-side. */}
+                  <div
+                    className="inline-flex border-2 border-[#1a1a1a] bg-[#f0f0e8]"
+                    role="tablist"
+                    aria-label="Billing cadence"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={cadence === "monthly"}
+                      onClick={() => setCadence("monthly")}
+                      className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider transition-colors ${
+                        cadence === "monthly"
+                          ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                          : "text-[#1a1a1a] hover:bg-[#e8e8e0]"
+                      }`}
+                    >
+                      Monthly
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={cadence === "annual"}
+                      onClick={() => setCadence("annual")}
+                      className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider transition-colors border-l-2 border-[#1a1a1a] ${
+                        cadence === "annual"
+                          ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                          : "text-[#1a1a1a] hover:bg-[#e8e8e0]"
+                      }`}
+                    >
+                      Annual <span className="text-[#C2410C]">−17%</span>
+                    </button>
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {(tiers ?? [])
                     .filter((t) => t.plan !== "enterprise")
@@ -164,6 +209,7 @@ function BillingRoute() {
                         key={tier.plan}
                         plan={tier.plan}
                         label={tier.label}
+                        cadence={cadence}
                         baseCents={tier.baseCents}
                         perSeatCents={tier.perSeatCents}
                         includedSeats={tier.includedSeats}
@@ -228,6 +274,8 @@ function BillingRoute() {
 
               {subscription.plan === "enterprise" && <EnterpriseUsage />}
 
+              <AddOnsSection />
+
               <PayoutsSection />
             </>
           )}
@@ -249,6 +297,7 @@ function TierCard({
   isCurrent,
   busy,
   disabled,
+  cadence = "monthly",
   onActivate,
 }: {
   plan: string;
@@ -262,8 +311,15 @@ function TierCard({
   isCurrent: boolean;
   busy: boolean;
   disabled: boolean;
+  cadence?: "monthly" | "annual";
   onActivate: () => void;
 }) {
+  // Annual prepay shows the per-month equivalent (17% off) so the
+  // sticker price stays comparable. Stripe still bills the annual
+  // total up-front; we just display the monthly-equivalent here.
+  const isAnnual = cadence === "annual" && baseCents > 0;
+  const displayCents = isAnnual ? Math.round((baseCents * 10) / 12) : baseCents;
+  const cadenceSuffix = isAnnual ? "/ mo · billed yearly" : "/ month";
   // The "current" card flips to the forest-green inverted treatment
   // (used elsewhere for active/badge states). This keeps text legible
   // in both light and dark themes — the cream-on-cream variant the
@@ -304,7 +360,7 @@ function TierCard({
             isCurrent ? "text-[#f0f0e8]" : "text-[#1a1a1a]",
           )}
         >
-          {formatMoney(baseCents, currency)}
+          {formatMoney(displayCents, currency)}
         </span>
         <span
           className={cn(
@@ -312,7 +368,7 @@ function TierCard({
             isCurrent ? "text-[#FFB380]" : "text-[#666]",
           )}
         >
-          / month
+          {cadenceSuffix}
         </span>
       </div>
       <div

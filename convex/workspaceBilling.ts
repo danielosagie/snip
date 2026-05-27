@@ -108,26 +108,6 @@ export const TIERS = {
 
 export const ENTERPRISE_PLAN_KEY = "enterprise" as const;
 
-// ─── Encoded-minutes allotment ───────────────────────────────────────────
-//
-// Each paid tier includes N source-minutes of Mux encoding per billing
-// period; minutes beyond that bill at the per-minute overage rate.
-// Mux encoding is the largest variable cost on flat-rate plans, so
-// metering it directly stops a single heavy customer from blowing
-// the unit economics for the rest of the tier.
-//
-// Free tier has a hard cap — the upload flow blocks beyond it
-// (caller surfaces the same `seat_limit_exceeded`-style ConvexError).
-
-export const ENCODED_MINUTES_INCLUDED: Record<TierKey, number> = {
-  free: 100,
-  basic: 1000,
-  pro: 5000,
-  enterprise: 0, // metered separately on the PAYG bill
-};
-
-export const ENCODED_MINUTES_OVERAGE_CENTS = 5; // $0.05 / minute
-
 // ─── Add-on SKUs ─────────────────────────────────────────────────────────
 //
 // Each add-on is purchased separately on top of the base subscription.
@@ -575,62 +555,6 @@ export const getTeamSeatUsage = query({
       perSeatCents: tier.perSeatCents,
       hardCapped:
         tierKey === "free" && seats + pendingInvites >= tier.includedSeats,
-    };
-  },
-});
-
-/**
- * Encoded-minutes usage for the caller's workspace this period. The
- * UI surfaces the included/used split and the dollar amount of any
- * overage so heavy customers see what they're costing themselves
- * before the bill arrives.
- */
-export const getMyEncodingUsage = query({
-  args: {},
-  handler: async (
-    ctx,
-  ): Promise<{
-    plan: TierKey;
-    minutesUsed: number;
-    minutesIncluded: number;
-    overageMinutes: number;
-    overageCents: number;
-    overageRateCents: number;
-  } | null> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-
-    const sub = await ctx.db
-      .query("workspaceSubscriptions")
-      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
-      .unique();
-    const live = sub?.status === "active" || sub?.status === "trialing";
-    const plan: TierKey =
-      sub && live ? normalizePlanKey(sub.plan) : "free";
-
-    // Current-period meter row. Period boundaries match the Stripe
-    // billing cycle for paid tiers; for free, the daily cron still
-    // writes a row keyed by calendar month.
-    const meter = await ctx.db
-      .query("usageMeters")
-      .withIndex("by_owner", (q) =>
-        q.eq("workspaceOwnerClerkId", identity.subject),
-      )
-      .order("desc")
-      .first();
-    const minutesUsed = meter?.encodedMinutes ?? 0;
-
-    const minutesIncluded = ENCODED_MINUTES_INCLUDED[plan];
-    const overageMinutes = Math.max(0, minutesUsed - minutesIncluded);
-    const overageCents = Math.round(overageMinutes * ENCODED_MINUTES_OVERAGE_CENTS);
-
-    return {
-      plan,
-      minutesUsed,
-      minutesIncluded,
-      overageMinutes,
-      overageCents,
-      overageRateCents: ENCODED_MINUTES_OVERAGE_CENTS,
     };
   },
 });
