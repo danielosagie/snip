@@ -181,20 +181,8 @@ export async function deleteStreamAsset(streamUid: string): Promise<void> {
   }
 }
 
-/**
- * Verifies a Stream webhook signature. Stream uses a different scheme
- * than Mux — `Webhook-Signature: t=…,sig1=…` — and a separate signing
- * secret. Stubbed until the webhook handler at `/cf-stream/webhook`
- * gets wired in `convex/http.ts`.
- *
- * The validation algorithm is documented at:
- * https://developers.cloudflare.com/stream/manage-video-library/using-webhooks/
- */
-export function verifyStreamWebhookSignature(
-  _rawBody: string,
-  _signatureHeader: string | null,
-): boolean {
-  // TODO: implement when we wire the webhook route in convex/http.ts.
-  // Returning false here so any test invocation fails closed.
-  return false;
-}
+// Webhook signature verification + processing lives in
+// `convex/cloudflareStreamActions.ts` (node runtime — needs
+// `node:crypto`). The HTTP route at `/webhooks/cf-stream` proxies to
+// that action. See its `verifyStreamSignature` helper and
+// `processWebhook` action for the implementation.

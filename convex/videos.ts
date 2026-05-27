@@ -1431,6 +1431,53 @@ export const setMuxAssetReference = internalMutation({
   },
 });
 
+/**
+ * Persists the Cloudflare Stream uid + provider key on a video row.
+ * Called from the Stream webhook handler the first time we see an
+ * asset reach "ready". The Mux columns are still set on the same row
+ * (so the existing player code path works) — these columns are extra
+ * metadata for when we add provider-aware signing.
+ */
+export const setStreamRefs = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    streamUid: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      playbackProvider: "cloudflare_stream",
+      streamUid: args.streamUid,
+    });
+  },
+});
+
+/**
+ * Lookup helper for the Stream webhook. Tries the `meta.videoId` we
+ * planted on copy first (cheap), then falls back to a streamUid index
+ * scan. Returns null if no row matches — caller surfaces as a noop so
+ * webhook retries stop.
+ */
+export const resolveVideoFromStreamRefs = internalQuery({
+  args: {
+    uid: v.string(),
+    metaVideoId: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<Id<"videos"> | null> => {
+    if (args.metaVideoId) {
+      const normalized = ctx.db.normalizeId("videos", args.metaVideoId);
+      if (normalized) {
+        const video = await ctx.db.get(normalized);
+        if (video) return video._id;
+      }
+    }
+    const match = await ctx.db
+      .query("videos")
+      .withIndex("by_stream_uid", (q) => q.eq("streamUid", args.uid))
+      .unique();
+    return match?._id ?? null;
+  },
+});
+
 export const setMuxPlaybackId = internalMutation({
   args: {
     videoId: v.id("videos"),

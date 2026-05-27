@@ -43,18 +43,45 @@
 export type PlaybackProviderKey = "mux" | "cloudflare_stream";
 
 /**
- * Returns the default provider for new uploads. Reads
- * `PLAYBACK_PROVIDER_DEFAULT` from env, falls back to `"mux"` so
- * existing deployments keep their behavior until they opt in.
+ * Returns the playback provider to use for a new upload, given the
+ * workspace tier that owns the upload. Resolution order:
  *
- * Per-tier routing (e.g. free → stream, paid → mux) can layer on top
- * by passing `plan` here; left as a future hook.
+ *   1. `PLAYBACK_PROVIDER_DEFAULT` env, if set to a concrete value —
+ *      forces every new upload to that provider regardless of tier.
+ *      Use this during the dual-write phase of the cutover.
+ *   2. `PLAYBACK_PROVIDER_BY_TIER` env, if set to "true" — routes
+ *      free-tier uploads to Stream (cheap) and keeps paid tiers on
+ *      Mux (mature watermarking + signed playback). This is the
+ *      shipping cutover mode once we've verified Stream's
+ *      equivalence on the surfaces paid customers depend on.
+ *   3. Otherwise → `"mux"`. Existing deployments keep their behavior
+ *      until they opt in.
+ *
+ * `plan` is optional. When omitted (callers that don't know the
+ * tier), the env-only resolution applies — tier-based routing is
+ * skipped and Mux is the safe default.
  */
-export function defaultPlaybackProvider(): PlaybackProviderKey {
-  const raw = process.env.PLAYBACK_PROVIDER_DEFAULT?.trim().toLowerCase();
-  if (raw === "cloudflare_stream" || raw === "stream") {
+export function defaultPlaybackProvider(plan?: string): PlaybackProviderKey {
+  const explicit = process.env.PLAYBACK_PROVIDER_DEFAULT?.trim().toLowerCase();
+  if (explicit === "cloudflare_stream" || explicit === "stream") {
     return "cloudflare_stream";
   }
+  if (explicit === "mux") {
+    return "mux";
+  }
+
+  const tieredFlag = process.env.PLAYBACK_PROVIDER_BY_TIER?.trim().toLowerCase();
+  const tieredOn =
+    tieredFlag === "1" || tieredFlag === "true" || tieredFlag === "yes";
+  if (tieredOn && plan) {
+    const normalized = plan.trim().toLowerCase();
+    if (normalized === "free") return "cloudflare_stream";
+    // basic / pro / studio (legacy) / enterprise → keep Mux. The
+    // watermarked-preview pipeline + signed-playback story is more
+    // mature on Mux; flipping paid tiers waits on Stream equivalence.
+    return "mux";
+  }
+
   return "mux";
 }
 

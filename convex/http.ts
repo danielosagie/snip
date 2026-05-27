@@ -300,6 +300,29 @@ http.route({
   }),
 });
 
+// Cloudflare Stream webhook — parallel to /webhooks/mux. Stream uses a
+// different signature scheme + event shape, so the processor in
+// cloudflareStreamActions handles its own verification + parsing. The
+// route stays no-op if CF_STREAM_WEBHOOK_SECRET isn't configured.
+http.route({
+  path: "/webhooks/cf-stream",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const rawBody = await request.text();
+    const signature = request.headers.get("webhook-signature") ?? undefined;
+    try {
+      const result = await ctx.runAction(
+        internal.cloudflareStreamActions.processWebhook,
+        { rawBody, signature },
+      );
+      return new Response(result.message, { status: result.status });
+    } catch (error) {
+      console.error("Cloudflare Stream webhook proxy failed", error);
+      return new Response("Webhook processing failed", { status: 500 });
+    }
+  }),
+});
+
 // ─── Public signing endpoints (token-authed, real server IP) ─────────────────
 //
 // The signing ceremony posts here instead of calling Convex mutations directly,

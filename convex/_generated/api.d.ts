@@ -32,6 +32,7 @@ import type * as folderPermissions from "../folderPermissions.js";
 import type * as folders from "../folders.js";
 import type * as forensics from "../forensics.js";
 import type * as frameCaptions from "../frameCaptions.js";
+import type * as cloudflareStreamActions from "../cloudflareStreamActions.js";
 import type * as http from "../http.js";
 import type * as imagePreview from "../imagePreview.js";
 import type * as itemVersions from "../itemVersions.js";
@@ -96,6 +97,7 @@ declare const fullApi: ApiFromModules<{
   folders: typeof folders;
   forensics: typeof forensics;
   frameCaptions: typeof frameCaptions;
+  cloudflareStreamActions: typeof cloudflareStreamActions;
   http: typeof http;
   imagePreview: typeof imagePreview;
   itemVersions: typeof itemVersions;

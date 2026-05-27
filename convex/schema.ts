@@ -398,6 +398,7 @@ export default defineSchema({
     .index("by_mux_asset_id", ["muxAssetId"])
     .index("by_mux_playback_id", ["muxPlaybackId"])
     .index("by_mux_preview_asset_id", ["muxPreviewAssetId"])
+    .index("by_stream_uid", ["streamUid"])
     .index("by_lineage", ["lineageId"])
     .index("by_folder", ["folderId"]),
 
