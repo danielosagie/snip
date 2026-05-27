@@ -17,10 +17,12 @@ import { shareCapabilities } from "./shareAccess";
  * Flow: a client lands on a paywalled share link, gets issued a
  * shareAccessGrant token, sees a 360p watermarked preview, and clicks
  * "Pay $X." The paymentsActions.createCheckoutForGrant action redirects
- * them to Stripe Checkout (or, in demo mode, demoSeed.simulatePaymentForGrant
- * flips the grant directly). On Stripe success, the webhook in
+ * them to Stripe Checkout. On Stripe success, the webhook in
  * convex/http.ts calls recordPaymentSucceeded which sets grant.paidAt —
  * Convex reactivity then flips the player to full-res automatically.
+ * If Stripe isn't configured the action returns status:"disabled" and the
+ * share page surfaces "Payments aren't configured on this deployment"
+ * rather than silently flipping the grant — no simulation path.
  */
 
 const paymentStatusValidator = v.union(

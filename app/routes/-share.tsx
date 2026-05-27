@@ -54,10 +54,8 @@ export default function SharePage() {
   const createCheckoutForGrant = useAction(
     api.paymentsActions.createCheckoutForGrant,
   );
-  const simulatePayment = useMutation(api.demoSeed.simulatePaymentForGrant);
   const getDownloadUrl = useAction(api.videoActions.getSharedDownloadUrl);
   const getBundleCover = useAction(api.videoActions.getSharedBundleCover);
-  const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
 
   const [grantToken, setGrantToken] = useState<string | null>(null);
   const [hasAttemptedAutoGrant, setHasAttemptedAutoGrant] = useState(false);
@@ -520,45 +518,6 @@ export default function SharePage() {
     setIsCreatingCheckout(true);
     setCheckoutError(null);
 
-    // Demo bypass: if Stripe isn't configured, simulate the payment on the
-    // server (flip grant.paidAt directly). Lets you exercise the full
-    // preview → paid swap without standing up Stripe.
-    //
-    // Default to the real Stripe path while `demoStatus` is still loading —
-    // the server's `simulatePaymentForGrant` returns `stripeIsConfigured` on
-    // prod deployments and we used to silently swallow it, so a fast click
-    // before the query resolved produced no redirect.
-    const stripeConfigured = demoStatus?.stripeConfigured ?? true;
-    if (!stripeConfigured) {
-      try {
-        const result = await simulatePayment({ grantToken });
-        if (result.status === "ok" || result.status === "alreadyPaid") {
-          setReloadTrigger((n) => n + 1);
-          setIsCreatingCheckout(false);
-          return;
-        }
-        if (result.status === "noPaywall") {
-          setCheckoutError("This link is not paywalled.");
-          setIsCreatingCheckout(false);
-          return;
-        }
-        if (result.status === "invalidGrant") {
-          setCheckoutError("Session expired. Please reload.");
-          setIsCreatingCheckout(false);
-          return;
-        }
-        // `stripeIsConfigured` — the deployment actually has Stripe wired
-        // up; fall through to the real checkout path below instead of
-        // silently bailing.
-      } catch (err) {
-        setCheckoutError(
-          err instanceof Error ? err.message : "Demo payment failed.",
-        );
-        setIsCreatingCheckout(false);
-        return;
-      }
-    }
-
     try {
       const result = await createCheckoutForGrant({
         grantToken,
@@ -586,14 +545,7 @@ export default function SharePage() {
     } finally {
       setIsCreatingCheckout(false);
     }
-  }, [
-    createCheckoutForGrant,
-    demoStatus?.stripeConfigured,
-    grantToken,
-    isCreatingCheckout,
-    simulatePayment,
-    token,
-  ]);
+  }, [createCheckoutForGrant, grantToken, isCreatingCheckout, token]);
 
   const flattenedComments = useMemo(() => {
     type Marker = {
@@ -1123,11 +1075,9 @@ export default function SharePage() {
           >
             <div className="min-w-0">
               <div className="text-xs font-mono uppercase tracking-widest opacity-80">
-                {demoStatus && !demoStatus.stripeConfigured
-                  ? "Demo mode — simulated payment"
-                  : isPreviewPending
-                    ? "Preview rendering — you can pay now"
-                    : "Preview only — paywalled delivery"}
+                {isPreviewPending
+                  ? "Preview rendering — you can pay now"
+                  : "Preview only — paywalled delivery"}
               </div>
               <div className="font-black text-2xl sm:text-3xl tracking-tight break-words">
                 {formatPrice(paywall.priceCents, paywall.currency)} to unlock full
@@ -1142,20 +1092,12 @@ export default function SharePage() {
             <div className="flex flex-col gap-2 w-full sm:w-auto sm:items-end sm:shrink-0">
               <Button
                 onClick={() => void handlePay()}
-                disabled={
-                  isCreatingCheckout || !grantToken || demoStatus === undefined
-                }
+                disabled={isCreatingCheckout || !grantToken}
                 className="bg-[#f0f0e8] text-[#1a1a1a] hover:bg-white w-full sm:w-auto border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] hover:shadow-[2px_2px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px] transition-all font-black uppercase tracking-wide"
               >
-                {demoStatus === undefined
-                  ? "Loading…"
-                  : isCreatingCheckout
-                    ? demoStatus && !demoStatus.stripeConfigured
-                      ? "Unlocking…"
-                      : "Opening checkout…"
-                    : demoStatus && !demoStatus.stripeConfigured
-                      ? `Simulate paying ${formatPrice(paywall.priceCents, paywall.currency)}`
-                      : `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`}
+                {isCreatingCheckout
+                  ? "Opening checkout…"
+                  : `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`}
               </Button>
               {checkoutError ? (
                 <div className="text-xs text-[#ffd1d1] text-left sm:text-right sm:max-w-xs break-words">
