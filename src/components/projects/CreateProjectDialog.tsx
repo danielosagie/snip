@@ -53,7 +53,24 @@ export function CreateProjectDialog({
       setName("");
       navigate({ to: projectPath(teamSlug, projectId as Id<"projects">) });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't create project.");
+      // Drop the raw `[CONVEX M(projects:create)] …` text in favor of a
+      // single human-readable line. Typed ConvexError payloads (e.data)
+      // get a tailored prompt; everything else falls back to a generic
+      // failure message.
+      const data =
+        typeof e === "object" && e !== null && "data" in e
+          ? ((e as { data: unknown }).data as
+              | { code?: string; message?: string }
+              | undefined)
+          : undefined;
+      if (data?.code === "storage_quota_exceeded") {
+        setError(
+          data.message ??
+            "Storage limit reached. Upgrade in Billing & usage to keep creating.",
+        );
+      } else {
+        setError("Couldn't create the project. Try again.");
+      }
     } finally {
       setBusy(false);
     }

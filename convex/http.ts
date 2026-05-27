@@ -16,6 +16,74 @@ function getSubscriptionOrgId(subscription: Stripe.Subscription): string | undef
   return typeof orgId === "string" && orgId.length > 0 ? orgId : undefined;
 }
 
+function getSubscriptionOwnerClerkId(
+  subscription: Stripe.Subscription,
+): string | undefined {
+  const ownerClerkId = subscription.metadata.ownerClerkId;
+  return typeof ownerClerkId === "string" && ownerClerkId.length > 0
+    ? ownerClerkId
+    : undefined;
+}
+
+function getSubscriptionPlanMetadata(
+  subscription: Stripe.Subscription,
+): string | undefined {
+  const plan = subscription.metadata.plan;
+  return typeof plan === "string" && plan.length > 0 ? plan : undefined;
+}
+
+function getSubscriptionPeriodEnd(
+  subscription: Stripe.Subscription,
+): number | undefined {
+  const item = subscription.items.data[0];
+  const periodEnd = item?.current_period_end;
+  return typeof periodEnd === "number" ? periodEnd * 1000 : undefined;
+}
+
+type WebhookMutationCtx = {
+  // The Stripe component event handlers receive an action-shaped ctx
+  // that exposes runMutation. The full Convex types live inside the
+  // generated component bindings; this loose shape is enough for us
+  // to dispatch into two internal mutations side-by-side.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  runMutation: (mutation: any, args: any) => Promise<unknown>;
+};
+
+async function syncBothBillingSurfaces(
+  ctx: WebhookMutationCtx,
+  subscription: Stripe.Subscription,
+) {
+  // Same Stripe event might map to a legacy per-team sub OR a new
+  // workspace-level sub. Both sync mutations are idempotent and ignore
+  // events that don't match their schema (legacy needs `orgId`,
+  // workspace needs `ownerClerkId`), so calling both is safe.
+  const stripeCustomerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : undefined;
+  await Promise.all([
+    ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
+      orgId: getSubscriptionOrgId(subscription),
+      stripeCustomerId,
+      stripeSubscriptionId: subscription.id,
+      stripePriceId: getSubscriptionPriceId(subscription),
+      status: subscription.status,
+    }),
+    ctx.runMutation(
+      internal.workspaceBilling.syncWorkspaceSubscriptionFromWebhook,
+      {
+        ownerClerkId: getSubscriptionOwnerClerkId(subscription),
+        stripeCustomerId,
+        stripeSubscriptionId: subscription.id,
+        stripePriceId: getSubscriptionPriceId(subscription),
+        plan: getSubscriptionPlanMetadata(subscription),
+        status: subscription.status,
+        currentPeriodEnd: getSubscriptionPeriodEnd(subscription),
+      },
+    ),
+  ]);
+}
+
 function deriveConnectStatusFromAccount(
   account: Stripe.Account,
 ): "pending" | "active" | "restricted" {
@@ -39,43 +107,19 @@ registerRoutes(http, components.stripe, {
       ctx,
       event: Stripe.Event & { type: "customer.subscription.created" },
     ) => {
-      const subscription = event.data.object as Stripe.Subscription;
-      await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
-        orgId: getSubscriptionOrgId(subscription),
-        stripeCustomerId:
-          typeof subscription.customer === "string" ? subscription.customer : undefined,
-        stripeSubscriptionId: subscription.id,
-        stripePriceId: getSubscriptionPriceId(subscription),
-        status: subscription.status,
-      });
+      await syncBothBillingSurfaces(ctx, event.data.object as Stripe.Subscription);
     },
     "customer.subscription.updated": async (
       ctx,
       event: Stripe.Event & { type: "customer.subscription.updated" },
     ) => {
-      const subscription = event.data.object as Stripe.Subscription;
-      await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
-        orgId: getSubscriptionOrgId(subscription),
-        stripeCustomerId:
-          typeof subscription.customer === "string" ? subscription.customer : undefined,
-        stripeSubscriptionId: subscription.id,
-        stripePriceId: getSubscriptionPriceId(subscription),
-        status: subscription.status,
-      });
+      await syncBothBillingSurfaces(ctx, event.data.object as Stripe.Subscription);
     },
     "customer.subscription.deleted": async (
       ctx,
       event: Stripe.Event & { type: "customer.subscription.deleted" },
     ) => {
-      const subscription = event.data.object as Stripe.Subscription;
-      await ctx.runMutation(internal.billing.syncTeamSubscriptionFromWebhook, {
-        orgId: getSubscriptionOrgId(subscription),
-        stripeCustomerId:
-          typeof subscription.customer === "string" ? subscription.customer : undefined,
-        stripeSubscriptionId: subscription.id,
-        stripePriceId: getSubscriptionPriceId(subscription),
-        status: subscription.status,
-      });
+      await syncBothBillingSurfaces(ctx, event.data.object as Stripe.Subscription);
     },
     // Stripe Connect — agency's Connect account state changes.
     "account.updated": async (

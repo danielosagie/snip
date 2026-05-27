@@ -7,7 +7,6 @@ import {
   requireTeamAccess,
   requireProjectAccess,
 } from "./auth";
-import { assertTeamHasActiveSubscription } from "./billingHelpers";
 import { indexSearchable, removeSearchable, stripHtml } from "./search";
 import { internal } from "./_generated/api";
 import { prefEnabled } from "./notifications";
@@ -21,7 +20,9 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "member");
-    await assertTeamHasActiveSubscription(ctx, args.teamId);
+    // Creation isn't gated on a subscription — every team gets the
+    // free tier (20 GB). Uploads enforce the quota at the video
+    // mutation boundary via assertTeamCanStoreBytes.
 
     return await ctx.db.insert("projects", {
       teamId: args.teamId,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { Link } from "@tanstack/react-router";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import {
@@ -44,9 +45,11 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
   const [isLoading, setIsLoading] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   const members = useQuery(api.teams.getMembers, { teamId });
   const invites = useQuery(api.teams.getInvites, { teamId });
+  const seatUsage = useQuery(api.workspaceBilling.getTeamSeatUsage, { teamId });
   const inviteMember = useMutation(api.teams.inviteMember);
   const removeMember = useMutation(api.teams.removeMember);
   const updateRole = useMutation(api.teams.updateMemberRole);
@@ -56,6 +59,7 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
     if (!email.trim()) return;
 
     setIsLoading(true);
+    setInviteError(null);
     try {
       const token = await inviteMember({
         teamId,
@@ -66,7 +70,26 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
       setInviteLink(`${baseUrl}/invite/${token}`);
       setEmail("");
     } catch (error) {
-      console.error("Failed to invite member:", error);
+      // Surface typed ConvexError payloads so the user sees a real
+      // prompt instead of "[CONVEX M(teams:inviteMember)] Server Error".
+      const data =
+        typeof error === "object" && error !== null && "data" in error
+          ? ((error as { data: unknown }).data as
+              | { code?: string; message?: string }
+              | undefined)
+          : undefined;
+      if (data?.code === "seat_limit_exceeded") {
+        setInviteError(
+          data.message ??
+            "Free workspaces are limited. Upgrade in Billing & usage to invite more people.",
+        );
+      } else {
+        setInviteError(
+          error instanceof Error
+            ? error.message
+            : "Couldn't send the invite. Try again.",
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -99,6 +122,15 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
     }
   };
 
+  const hardCapped = seatUsage?.hardCapped ?? false;
+  const overageCents = seatUsage?.perSeatCents ?? 0;
+  const isOverageInvite =
+    !!seatUsage &&
+    !hardCapped &&
+    seatUsage.plan !== "free" &&
+    seatUsage.seatsUsed + seatUsage.pendingInvites >=
+      seatUsage.includedSeats;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -109,6 +141,61 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
           </DialogDescription>
         </DialogHeader>
 
+        {seatUsage ? (
+          <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+                Seats · {seatUsage.label}
+              </div>
+              <div className="text-xs font-mono text-[#1a1a1a]">
+                {seatUsage.seatsUsed + seatUsage.pendingInvites} /{" "}
+                {seatUsage.includedSeats} included
+              </div>
+            </div>
+            <div className="mt-2 h-1.5 border border-[#1a1a1a] bg-[#f0f0e8] relative">
+              <div
+                className={`absolute inset-y-0 left-0 ${
+                  hardCapped ? "bg-[#b91c1c]" : "bg-[#C2410C]"
+                }`}
+                style={{
+                  width: `${Math.min(
+                    100,
+                    ((seatUsage.seatsUsed + seatUsage.pendingInvites) /
+                      Math.max(seatUsage.includedSeats, 1)) *
+                      100,
+                  )}%`,
+                }}
+              />
+            </div>
+            {hardCapped ? (
+              <p className="mt-2 text-xs text-[#1a1a1a]">
+                Free workspaces are capped at {seatUsage.includedSeats} seats.{" "}
+                <Link
+                  to="/dashboard/billing"
+                  className="font-bold text-[#C2410C] underline"
+                  onClick={() => onOpenChange(false)}
+                >
+                  Upgrade to invite more
+                </Link>
+                .
+              </p>
+            ) : isOverageInvite ? (
+              <p className="mt-2 text-xs text-[#666]">
+                You're at the included-seat limit. The next invite adds{" "}
+                <span className="font-mono font-bold text-[#1a1a1a]">
+                  ${(overageCents / 100).toFixed(2)}/mo
+                </span>{" "}
+                to your subscription.
+              </p>
+            ) : seatUsage.pendingInvites > 0 ? (
+              <p className="mt-2 text-[10px] font-mono text-[#888]">
+                {seatUsage.pendingInvites} pending invite
+                {seatUsage.pendingInvites === 1 ? "" : "s"} counted
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <form onSubmit={handleInvite} className="space-y-4">
           <div className="flex gap-2">
             <Input
@@ -117,10 +204,15 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="flex-1"
+              disabled={hardCapped}
             />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-28">
+                <Button
+                  variant="outline"
+                  className="w-28"
+                  disabled={hardCapped}
+                >
                   {roleLabels[role]}
                   <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
@@ -138,10 +230,25 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <Button type="submit" disabled={!email.trim() || isLoading} className="w-full">
+          <Button
+            type="submit"
+            disabled={!email.trim() || isLoading || hardCapped}
+            className="w-full"
+          >
             <UserPlus className="mr-2 h-4 w-4" />
-            {isLoading ? "Sending..." : "Send invite"}
+            {hardCapped
+              ? "Upgrade to invite more"
+              : isLoading
+                ? "Sending..."
+                : isOverageInvite
+                  ? `Send invite · +$${(overageCents / 100).toFixed(2)}/mo`
+                  : "Send invite"}
           </Button>
+          {inviteError ? (
+            <div className="text-xs text-[#dc2626] font-bold">
+              {inviteError}
+            </div>
+          ) : null}
         </form>
 
         {inviteLink && (

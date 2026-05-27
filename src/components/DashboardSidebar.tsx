@@ -26,6 +26,7 @@ import {
 import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
 import { SnipMark } from "@/components/SnipMark";
+import { StorageUsageBar } from "@/components/StorageUsageBar";
 import { useSidebarState } from "@/lib/sidebarContext";
 import {
   projectPath,
@@ -247,8 +248,13 @@ export function DashboardSidebar() {
         </div>
 
         {/* Account links — no section heading, just the three rows
-            pinned above the footer. */}
-        <div className="px-2 pb-2 pt-2 border-t-2 border-[#1a1a1a]">
+            pinned above the footer. The storage bar sits directly above
+            the Billing link so the usage state is visible without a
+            click. */}
+        <div className="pt-2 border-t-2 border-[#1a1a1a]">
+          <StorageUsageBar variant="compact" />
+        </div>
+        <div className="px-2 pb-2">
           <SidebarLink
             to={BILLING_PATH}
             icon={<CreditCard className="h-4 w-4" />}
@@ -454,6 +460,26 @@ function SidebarFooter({ name }: { name: string }) {
 const DESKTOP_BTN =
   "w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
 
+/**
+ * Translates server-thrown errors into a one-line UI string. Typed
+ * `ConvexError({ code, message })` payloads surface here as
+ * `err.data` — we switch on the code to pick a friendly prompt
+ * instead of dumping the raw `[CONVEX A(...)] Server Error ...`
+ * string into the sidebar.
+ */
+function friendlyDriveError(e: unknown): string {
+  const data =
+    typeof e === "object" && e !== null && "data" in e
+      ? ((e as { data: unknown }).data as
+          | { code?: string; message?: string }
+          | undefined)
+      : undefined;
+  if (data?.code === "no_workspace") {
+    return "Create a workspace to enable the drive.";
+  }
+  return e instanceof Error ? e.message : "Couldn't enable the drive.";
+}
+
 function DesktopAppOrDrive() {
   const getStorageBootstrap = useAction(api.desktopAuth.getStorageBootstrap);
   const [isDesktop, setIsDesktop] = useState(false);
@@ -520,7 +546,7 @@ function DesktopAppOrDrive() {
       setCredExpiresAt(boot.expiresAt ?? null);
       await window.api.mount.start({});
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't enable the drive.");
+      setError(friendlyDriveError(e));
     } finally {
       setBusy(false);
     }

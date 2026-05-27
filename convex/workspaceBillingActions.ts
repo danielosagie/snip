@@ -20,8 +20,12 @@ import { api } from "./_generated/api";
  *     surfaces the reason so the operator knows what to set.
  */
 
-const STUDIO_PRICE_ENV = "STRIPE_PRICE_WORKSPACE_STUDIO";
-const PRO_PRICE_ENV = "STRIPE_PRICE_WORKSPACE_PRO";
+// Stripe price IDs. We reuse the legacy env var names so existing
+// Stripe products keep working without rotation. Mapping:
+//   STRIPE_PRICE_BASIC_MONTHLY → "basic" plan ($20 / 2 TB)
+//   STRIPE_PRICE_PRO_MONTHLY   → "pro"   plan ($50 / 5 TB)
+const BASIC_PRICE_ENV = "STRIPE_PRICE_BASIC_MONTHLY";
+const PRO_PRICE_ENV = "STRIPE_PRICE_PRO_MONTHLY";
 
 export const createCheckout = action({
   args: {
@@ -41,13 +45,17 @@ export const createCheckout = action({
       throw new Error("Not authenticated.");
     }
 
-    if (args.plan !== "studio" && args.plan !== "pro") {
+    // Back-compat: any pre-rename "studio" requests get routed to
+    // the new "basic" plan.
+    const requestedPlan =
+      args.plan === "studio" ? "basic" : args.plan;
+    if (requestedPlan !== "basic" && requestedPlan !== "pro") {
       throw new Error(`Unknown plan: ${args.plan}`);
     }
 
     const stripeSecret = process.env.STRIPE_SECRET_KEY;
     const priceEnvName =
-      args.plan === "studio" ? STUDIO_PRICE_ENV : PRO_PRICE_ENV;
+      requestedPlan === "basic" ? BASIC_PRICE_ENV : PRO_PRICE_ENV;
     const priceId = process.env[priceEnvName];
 
     if (!stripeSecret || stripeSecret.trim().length === 0) {
@@ -60,7 +68,7 @@ export const createCheckout = action({
     if (!priceId || priceId.trim().length === 0) {
       return {
         kind: "simulate",
-        reason: `${priceEnvName} is not set on Convex. Set it to the Stripe price ID for the ${args.plan === "studio" ? "Studio" : "Pro"} plan to enable real checkout.`,
+        reason: `${priceEnvName} is not set on Convex. Set it to the Stripe price ID for the ${requestedPlan === "basic" ? "Basic" : "Pro"} plan to enable real checkout.`,
       };
     }
 
@@ -75,12 +83,12 @@ export const createCheckout = action({
         typeof identity.email === "string" ? identity.email : undefined,
       metadata: {
         ownerClerkId: identity.subject,
-        plan: args.plan,
+        plan: requestedPlan,
       },
       subscription_data: {
         metadata: {
           ownerClerkId: identity.subject,
-          plan: args.plan,
+          plan: requestedPlan,
         },
       },
     });
@@ -90,7 +98,7 @@ export const createCheckout = action({
     }
 
     await ctx.runMutation(api.workspaceBilling.recordPendingCheckout, {
-      plan: args.plan,
+      plan: requestedPlan,
       stripeCustomerId: session.customer
         ? String(session.customer)
         : undefined,

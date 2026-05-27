@@ -1,5 +1,6 @@
 "use node";
 
+import { ConvexError } from "convex/values";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getIdentity } from "./auth";
@@ -238,7 +239,13 @@ export const getScopedStorageCredentials = action({
       {},
     );
     if (!scope.isMember) {
-      throw new Error("Storage access requires team membership.");
+      // Typed payload so the desktop sidebar can render a "Create a
+      // workspace" prompt instead of the raw Convex error string.
+      throw new ConvexError({
+        code: "no_workspace",
+        message:
+          "Create a workspace to enable the drive — storage is per-team.",
+      });
     }
 
     const provider = detectProvider();
