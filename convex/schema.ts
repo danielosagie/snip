@@ -737,6 +737,32 @@ export default defineSchema({
         transcription: v.string(),
       }),
     ),
+    /**
+     * Add-on SKUs purchased on top of the base tier. Each add-on is
+     * priced via its own Stripe price ID and either adds a feature
+     * surface (white-label, custom domain) or unlocks API access.
+     * Stored as a sparse object so we can add new add-ons without a
+     * schema migration. Future Stripe sync will set the matching
+     * `stripeSubscriptionItemId` so the webhook can flip these on/off.
+     */
+    addOns: v.optional(
+      v.object({
+        // Removes snip branding from share links + delivery emails.
+        whiteLabel: v.optional(v.boolean()),
+        // Custom domain CNAME for paywalled deliveries.
+        customDomain: v.optional(v.string()),
+        // Public API tier — rate limits relax, signed access tokens.
+        apiTier: v.optional(v.boolean()),
+      }),
+    ),
+    /**
+     * Billing cadence — month-to-month vs annual prepay. Annual sub
+     * gets 17% off (10 months for 12). Drives both the displayed
+     * price + the Stripe price ID used at checkout.
+     */
+    billingCadence: v.optional(
+      v.union(v.literal("monthly"), v.literal("annual")),
+    ),
   })
     .index("by_owner", ["ownerClerkId"])
     .index("by_stripe_customer", ["stripeCustomerId"])
@@ -762,6 +788,12 @@ export default defineSchema({
     egressBytesGb: v.number(),
     seatCount: v.number(),
     transcribedMinutes: v.number(),
+    // Source-minute count of video Mux has finished encoding for this
+    // workspace in the current period. Drives the included-minutes
+    // overage gate on Basic/Pro tiers and the metered Stripe report
+    // on Enterprise. Optional because pre-migration rows didn't have
+    // this dimension.
+    encodedMinutes: v.optional(v.number()),
     lastReportedAt: v.optional(v.number()),
   })
     .index("by_owner", ["workspaceOwnerClerkId"])

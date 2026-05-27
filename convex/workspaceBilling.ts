@@ -108,6 +108,50 @@ export const TIERS = {
 
 export const ENTERPRISE_PLAN_KEY = "enterprise" as const;
 
+// ─── Encoded-minutes allotment ───────────────────────────────────────────
+//
+// Each paid tier includes N source-minutes of Mux encoding per billing
+// period; minutes beyond that bill at the per-minute overage rate.
+// Mux encoding is the largest variable cost on flat-rate plans, so
+// metering it directly stops a single heavy customer from blowing
+// the unit economics for the rest of the tier.
+//
+// Free tier has a hard cap — the upload flow blocks beyond it
+// (caller surfaces the same `seat_limit_exceeded`-style ConvexError).
+
+export const ENCODED_MINUTES_INCLUDED: Record<TierKey, number> = {
+  free: 100,
+  basic: 1000,
+  pro: 5000,
+  enterprise: 0, // metered separately on the PAYG bill
+};
+
+export const ENCODED_MINUTES_OVERAGE_CENTS = 5; // $0.05 / minute
+
+// ─── Add-on SKUs ─────────────────────────────────────────────────────────
+//
+// Each add-on is purchased separately on top of the base subscription.
+// Margin is high — each one is mostly billing config + a feature
+// toggle, no incremental COGS at customer-realistic volumes.
+//
+// All available on Basic and Pro. Free tier can't purchase add-ons
+// (no Stripe customer to attach them to).
+export const ADD_ON_PRICES_CENTS = {
+  whiteLabel: 2000, // $20/mo — drop snip branding from share links/email
+  customDomain: 1000, // $10/mo — CNAME for paywalled deliveries
+  apiTier: 3000, // $30/mo — public API access + bumped rate limits
+} as const;
+
+export type AddOnKey = keyof typeof ADD_ON_PRICES_CENTS;
+
+// ─── Annual prepay ───────────────────────────────────────────────────────
+//
+// Annual customers get 17% off, billed monthly equivalent. The Stripe
+// price IDs for the annual versions live in env (paired with monthly):
+//   STRIPE_PRICE_BASIC_ANNUAL  → STRIPE_PRICE_BASIC_MONTHLY
+//   STRIPE_PRICE_PRO_ANNUAL    → STRIPE_PRICE_PRO_MONTHLY
+export const ANNUAL_DISCOUNT_RATIO = 10 / 12; // 17% off when paid yearly
+
 export type TierKey = keyof typeof TIERS;
 
 const DEFAULT_TIER = TIERS.free;
@@ -536,6 +580,62 @@ export const getTeamSeatUsage = query({
 });
 
 /**
+ * Encoded-minutes usage for the caller's workspace this period. The
+ * UI surfaces the included/used split and the dollar amount of any
+ * overage so heavy customers see what they're costing themselves
+ * before the bill arrives.
+ */
+export const getMyEncodingUsage = query({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{
+    plan: TierKey;
+    minutesUsed: number;
+    minutesIncluded: number;
+    overageMinutes: number;
+    overageCents: number;
+    overageRateCents: number;
+  } | null> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
+      .unique();
+    const live = sub?.status === "active" || sub?.status === "trialing";
+    const plan: TierKey =
+      sub && live ? normalizePlanKey(sub.plan) : "free";
+
+    // Current-period meter row. Period boundaries match the Stripe
+    // billing cycle for paid tiers; for free, the daily cron still
+    // writes a row keyed by calendar month.
+    const meter = await ctx.db
+      .query("usageMeters")
+      .withIndex("by_owner", (q) =>
+        q.eq("workspaceOwnerClerkId", identity.subject),
+      )
+      .order("desc")
+      .first();
+    const minutesUsed = meter?.encodedMinutes ?? 0;
+
+    const minutesIncluded = ENCODED_MINUTES_INCLUDED[plan];
+    const overageMinutes = Math.max(0, minutesUsed - minutesIncluded);
+    const overageCents = Math.round(overageMinutes * ENCODED_MINUTES_OVERAGE_CENTS);
+
+    return {
+      plan,
+      minutesUsed,
+      minutesIncluded,
+      overageMinutes,
+      overageCents,
+      overageRateCents: ENCODED_MINUTES_OVERAGE_CENTS,
+    };
+  },
+});
+
+/**
  * Internal: resolves a project's owning workspace tier. Used by the
  * lazy-encode decision in `videoActions.shouldDeferEncoding` — the
  * tier dictates whether we should skip Mux ingest at upload time.
@@ -605,7 +705,100 @@ export const getMyStorageUsage = query({
   },
 });
 
+/**
+ * Returns the add-ons currently active on the caller's workspace
+ * subscription. Drives the UI toggles in Billing & usage and the
+ * white-label / API-tier conditional rendering elsewhere in the app.
+ */
+export const getMyAddOns = query({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{
+    whiteLabel: boolean;
+    customDomain: string | null;
+    apiTier: boolean;
+    prices: typeof ADD_ON_PRICES_CENTS;
+  } | null> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
+      .unique();
+    const live =
+      sub && (sub.status === "active" || sub.status === "trialing");
+    const addOns = (live && sub.addOns) || {};
+    return {
+      whiteLabel: Boolean(addOns.whiteLabel),
+      customDomain: addOns.customDomain ?? null,
+      apiTier: Boolean(addOns.apiTier),
+      prices: ADD_ON_PRICES_CENTS,
+    };
+  },
+});
+
 // ─── Mutations ───────────────────────────────────────────────────────────
+
+/**
+ * Toggle an add-on on the caller's subscription. Requires a live
+ * paid subscription — add-ons can't attach to the free tier (no
+ * Stripe customer). In demo mode (no Stripe configured), the toggle
+ * still flips locally so the UI surfaces the feature behavior.
+ *
+ * Real billing wiring (Stripe SubscriptionItem add/remove) follows
+ * in a separate PR; this mutation is the durable-state half.
+ */
+export const toggleAddOn = mutation({
+  args: {
+    addOn: v.union(
+      v.literal("whiteLabel"),
+      v.literal("apiTier"),
+    ),
+    enabled: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
+      .unique();
+    if (!sub) {
+      throw new ConvexError({
+        code: "no_subscription",
+        message: "Subscribe to Basic or Pro before adding optional features.",
+      });
+    }
+    const next = { ...(sub.addOns ?? {}), [args.addOn]: args.enabled };
+    await ctx.db.patch(sub._id, { addOns: next });
+  },
+});
+
+/**
+ * Sets the custom-domain CNAME for paywalled deliveries. The DNS
+ * verification + cert provisioning happens out-of-band; this mutation
+ * just records the requested hostname so the share-link renderer can
+ * use it.
+ */
+export const setCustomDomain = mutation({
+  args: { hostname: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
+      .unique();
+    if (!sub) {
+      throw new ConvexError({
+        code: "no_subscription",
+        message: "Subscribe to Basic or Pro before adding optional features.",
+      });
+    }
+    const hostname = args.hostname?.trim() || undefined;
+    const next = { ...(sub.addOns ?? {}), customDomain: hostname };
+    await ctx.db.patch(sub._id, { addOns: next });
+  },
+});
 
 /**
  * Demo-mode activation: flips the user's subscription to "active" on
