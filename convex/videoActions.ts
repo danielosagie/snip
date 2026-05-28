@@ -2312,11 +2312,9 @@ export const requestEncoding = action({
     });
     if (!video) throw new Error("Video not found");
 
+    // Stable-property pre-checks (won't change concurrently).
     if (video.muxPlaybackId || video.status === "ready") {
       return { status: "already_ready" };
-    }
-    if (!video.encodingDeferred) {
-      return { status: "already_encoding" };
     }
     if (!video.s3Key) {
       return { status: "not_a_video" };
@@ -2327,11 +2325,32 @@ export const requestEncoding = action({
       return { status: "not_a_video" };
     }
 
-    await startEncoding(ctx, {
-      videoId: args.videoId,
-      s3Key: video.s3Key,
-      projectId: video.projectId,
-    });
-    return { status: "encoding_started" };
+    // Atomic claim — only the winner of a concurrent race proceeds to
+    // ingest, so two viewers opening the same deferred video at once
+    // can't both start a (paid) encode. A loser sees claimed=false.
+    const claimed = await ctx.runMutation(
+      internal.videos.claimDeferredEncoding,
+      { videoId: args.videoId },
+    );
+    if (!claimed) {
+      return { status: "already_encoding" };
+    }
+
+    try {
+      await startEncoding(ctx, {
+        videoId: args.videoId,
+        s3Key: video.s3Key,
+        projectId: video.projectId,
+      });
+      return { status: "encoding_started" };
+    } catch (error) {
+      // Restore the deferred state so the next viewer can retry —
+      // otherwise the row is stuck "processing" with the claim
+      // consumed and no asset behind it.
+      await ctx.runMutation(internal.videos.releaseDeferredEncoding, {
+        videoId: args.videoId,
+      });
+      throw error;
+    }
   },
 });

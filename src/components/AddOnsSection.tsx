@@ -143,6 +143,12 @@ export function AddOnsSection() {
                   setError(null);
                   try {
                     await setCustomDomain({ hostname: null });
+                  } catch (err) {
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : "Couldn't remove the custom domain.",
+                    );
                   } finally {
                     setBusy(null);
                   }
@@ -198,9 +204,13 @@ function AddOnRow({
         variant="outline"
         disabled={busy}
         onClick={() => onToggle(!enabled)}
-        className={enabled ? "bg-[#FF6600] text-[#f0f0e8] hover:bg-[#FF7A1F]" : ""}
+        className={
+          enabled
+            ? "border-[#C2410C] text-[#C2410C] font-bold"
+            : ""
+        }
       >
-        {busy ? "…" : enabled ? "Enabled" : "Enable"}
+        {busy ? "…" : enabled ? "Enabled ✓" : "Enable"}
       </Button>
     </div>
   );

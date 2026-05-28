@@ -25,8 +25,8 @@ export function EnterpriseUpsellBanner() {
   if (storage.percent < 80) return null;
 
   return (
-    <div className="border-2 border-[#b45309] bg-[#FDBA74]/30 px-4 py-3 flex items-start gap-3">
-      <AlertTriangle className="h-5 w-5 text-[#b45309] flex-shrink-0 mt-0.5" />
+    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] border-l-4 border-l-[#C2410C] px-4 py-3 flex items-start gap-3">
+      <AlertTriangle className="h-5 w-5 text-[#C2410C] flex-shrink-0 mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className="font-black text-sm uppercase tracking-tight text-[#1a1a1a]">
           You may save money on Enterprise PAYG

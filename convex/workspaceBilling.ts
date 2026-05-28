@@ -578,6 +578,59 @@ export const getCallerTier = internalQuery({
   },
 });
 
+const TIER_RANK: Record<TierKey, number> = {
+  free: 0,
+  basic: 1,
+  pro: 2,
+  enterprise: 3,
+};
+
+/**
+ * Internal: the BEST tier across every team the caller is a member of,
+ * resolved from each team's *owner's* subscription — not the caller's
+ * own. This is the right gate for shared-resource access like the
+ * desktop drive: a free-tier user who collaborates in a paid
+ * workspace should get the drive for that workspace's files, since
+ * the storage scope already grants them those prefixes.
+ *
+ * Returns "free" when the caller belongs to no paid-owned team.
+ */
+export const getCallerMaxTier = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<TierKey> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return "free";
+
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", identity.subject))
+      .collect();
+
+    let best: TierKey = "free";
+    // Cache owner→tier so two teams owned by the same person only
+    // cost one subscription lookup.
+    const tierByOwner = new Map<string, TierKey>();
+    for (const m of memberships) {
+      const team = await ctx.db.get(m.teamId);
+      if (!team?.ownerClerkId) continue;
+      let tier = tierByOwner.get(team.ownerClerkId);
+      if (tier === undefined) {
+        const sub = await ctx.db
+          .query("workspaceSubscriptions")
+          .withIndex("by_owner", (q) =>
+            q.eq("ownerClerkId", team.ownerClerkId),
+          )
+          .unique();
+        const live = sub?.status === "active" || sub?.status === "trialing";
+        tier = sub && live ? normalizePlanKey(sub.plan) : "free";
+        tierByOwner.set(team.ownerClerkId, tier);
+      }
+      if (TIER_RANK[tier] > TIER_RANK[best]) best = tier;
+    }
+    return best;
+  },
+});
+
 /**
  * Internal: resolves a project's owning workspace tier. Used by the
  * lazy-encode decision in `videoActions.shouldDeferEncoding` — the
@@ -669,9 +722,14 @@ export const getMyAddOns = query({
       .query("workspaceSubscriptions")
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
       .unique();
+    // Add-ons only exist on a live PAID subscription. Returning null
+    // for free / canceled / no-sub callers means the AddOnsSection UI
+    // hides itself (its `if (!addOns) return null` guard) instead of
+    // showing toggles that would fail the `no_subscription` mutation.
     const live =
       sub && (sub.status === "active" || sub.status === "trialing");
-    const addOns = (live && sub.addOns) || {};
+    if (!live || normalizePlanKey(sub.plan) === "free") return null;
+    const addOns = sub.addOns ?? {};
     return {
       whiteLabel: Boolean(addOns.whiteLabel),
       customDomain: addOns.customDomain ?? null,
@@ -680,6 +738,31 @@ export const getMyAddOns = query({
     };
   },
 });
+
+/**
+ * Shared guard for add-on mutations: returns the caller's
+ * subscription row only if it's a live, paid plan. Throws the typed
+ * `no_subscription` ConvexError otherwise so the client can prompt an
+ * upgrade rather than silently enabling a feature without billing.
+ */
+async function requireLivePaidSubscription(
+  ctx: MutationCtx,
+  ownerClerkId: string,
+) {
+  const sub = await ctx.db
+    .query("workspaceSubscriptions")
+    .withIndex("by_owner", (q) => q.eq("ownerClerkId", ownerClerkId))
+    .unique();
+  const live =
+    sub && (sub.status === "active" || sub.status === "trialing");
+  if (!sub || !live || normalizePlanKey(sub.plan) === "free") {
+    throw new ConvexError({
+      code: "no_subscription",
+      message: "Subscribe to Basic or Pro before adding optional features.",
+    });
+  }
+  return sub;
+}
 
 // ─── Mutations ───────────────────────────────────────────────────────────
 
@@ -702,16 +785,7 @@ export const toggleAddOn = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const sub = await ctx.db
-      .query("workspaceSubscriptions")
-      .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
-      .unique();
-    if (!sub) {
-      throw new ConvexError({
-        code: "no_subscription",
-        message: "Subscribe to Basic or Pro before adding optional features.",
-      });
-    }
+    const sub = await requireLivePaidSubscription(ctx, user.subject);
     const next = { ...(sub.addOns ?? {}), [args.addOn]: args.enabled };
     await ctx.db.patch(sub._id, { addOns: next });
   },
@@ -727,16 +801,7 @@ export const setCustomDomain = mutation({
   args: { hostname: v.union(v.string(), v.null()) },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const sub = await ctx.db
-      .query("workspaceSubscriptions")
-      .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
-      .unique();
-    if (!sub) {
-      throw new ConvexError({
-        code: "no_subscription",
-        message: "Subscribe to Basic or Pro before adding optional features.",
-      });
-    }
+    const sub = await requireLivePaidSubscription(ctx, user.subject);
     const hostname = args.hostname?.trim() || undefined;
     const next = { ...(sub.addOns ?? {}), customDomain: hostname };
     await ctx.db.patch(sub._id, { addOns: next });

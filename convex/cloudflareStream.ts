@@ -3,21 +3,20 @@
 /**
  * Cloudflare Stream client.
  *
- * Scaffolding only — the operations are stubbed where they call the
- * Cloudflare API. The migration path:
+ * Live for the in-team REVIEW path: `videoActions.startEncoding` routes
+ * new uploads here when `defaultPlaybackProvider(tier)` says Stream,
+ * the `/webhooks/cf-stream` route (convex/http.ts →
+ * cloudflareStreamActions) flips the row ready, and
+ * `getPlaybackSession` builds videodelivery.net URLs for Stream rows.
  *
- *   1. (this PR) — module exists, contract documented, schema field
- *      added on the `videos` row. Existing code still routes 100% to
- *      Mux because PLAYBACK_PROVIDER_DEFAULT is unset (Mux fallback).
- *   2. Wire one upload path (e.g. desktop drive uploads) through
- *      `createAssetFromInputUrl` here; dual-write tests in dev.
- *   3. Add webhook handler at `/cf-stream/webhook` mirroring
- *      `customer.subscription.*` style. Update video status when the
- *      `video.live_input.connected` or `stream.ready` event arrives.
- *   4. Flip PLAYBACK_PROVIDER_DEFAULT for new uploads on free tier.
- *   5. Watch margin metrics for ~30 days; flip paid tiers next.
- *   6. Backfill — only when paywalled + watermarked equivalence is
- *      proven on Stream (Mux Mosaic doesn't translate directly).
+ * Routed by env (see convex/providers/playbackProvider.ts):
+ *   • PLAYBACK_PROVIDER_DEFAULT=cloudflare_stream → all new uploads.
+ *   • PLAYBACK_PROVIDER_BY_TIER=true → free-tier uploads only.
+ *   • default (both unset/false) → Mux, no behavior change.
+ *
+ * Still on Mux (deliberate): paywalled, watermarked deliveries. That
+ * preview is encoded from the S3 original, independent of which
+ * provider does review playback, so it keeps working for Stream rows.
  *
  * Cost reference (May 2026 list):
  *   • Stream storage:  $1 per 1000 min stored / month
@@ -77,6 +76,23 @@ function authHeader(): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
 }
 
+// External calls get an explicit timeout so an upstream stall can't
+// hang the Convex action (and cascade into a stuck "processing" row).
+const STREAM_HTTP_TIMEOUT_MS = 10_000;
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STREAM_HTTP_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Asks Stream to copy a public URL into its account. Mirrors
  * `createMuxAssetFromInputUrl` — async; the asset id comes back
@@ -89,7 +105,7 @@ export async function createStreamAssetFromInputUrl(
   videoId: string,
   inputUrl: string,
 ): Promise<CreateAssetResult> {
-  const response = await fetch(`${streamBaseUrl()}/copy`, {
+  const response = await fetchWithTimeout(`${streamBaseUrl()}/copy`, {
     method: "POST",
     headers: {
       ...authHeader(),
@@ -144,7 +160,7 @@ export async function signStreamPlaybackToken(
   streamUid: string,
   ttlSeconds = 3600,
 ): Promise<string> {
-  const response = await fetch(`${streamBaseUrl()}/${streamUid}/token`, {
+  const response = await fetchWithTimeout(`${streamBaseUrl()}/${streamUid}/token`, {
     method: "POST",
     headers: {
       ...authHeader(),
@@ -171,7 +187,7 @@ export async function signStreamPlaybackToken(
  * called from the video soft-delete cleanup path.
  */
 export async function deleteStreamAsset(streamUid: string): Promise<void> {
-  const response = await fetch(`${streamBaseUrl()}/${streamUid}`, {
+  const response = await fetchWithTimeout(`${streamBaseUrl()}/${streamUid}`, {
     method: "DELETE",
     headers: authHeader(),
   });

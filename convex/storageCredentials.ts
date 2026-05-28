@@ -252,8 +252,13 @@ export const getScopedStorageCredentials = action({
     // the browser; the local FUSE mount is one of the upgrade
     // triggers. (Basic + Pro both get it — gating Basic→Pro is a
     // future option once we measure how much Basic relies on it.)
+    //
+    // Gate on the best tier across the teams the caller belongs to —
+    // resolved from each team OWNER's subscription, not the caller's
+    // own. A free user collaborating in a paid workspace already has
+    // storage-scope prefixes for it, so they should get the drive too.
     const tier = await ctx.runQuery(
-      internal.workspaceBilling.getCallerTier,
+      internal.workspaceBilling.getCallerMaxTier,
       {},
     );
     if (tier === "free") {

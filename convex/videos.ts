@@ -1278,6 +1278,58 @@ export const markAsEncodingDeferred = internalMutation({
 });
 
 /**
+ * Atomically claims a deferred video for encoding. Returns true only
+ * for the caller that wins the race — flips `encodingDeferred` off and
+ * status to "processing" in a single mutation so two concurrent
+ * `requestEncoding` calls can't both kick off a Mux/Stream ingest
+ * (which would double the encode cost + create orphan assets).
+ *
+ * Returns false when the row is already claimed, already ready, or
+ * isn't a deferred candidate — the caller treats false as "someone
+ * else is handling it" and no-ops.
+ */
+export const claimDeferredEncoding = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.boolean(),
+  handler: async (ctx, args): Promise<boolean> => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return false;
+    // Already encoded / encoding, or never a deferred candidate.
+    if (video.muxPlaybackId || video.status === "ready") return false;
+    if (!video.encodingDeferred) return false;
+    // Mutations are transactional in Convex, so this read-then-write
+    // is the atomic claim — a second concurrent call sees
+    // encodingDeferred already false and bails above.
+    await ctx.db.patch(args.videoId, {
+      status: "processing",
+      muxAssetStatus: "preparing",
+      uploadError: undefined,
+      encodingDeferred: undefined,
+    });
+    return true;
+  },
+});
+
+/**
+ * Reverts a failed deferred-encoding claim back to the deferred state
+ * so the next viewer can retry. Called when `startEncoding` throws
+ * after the claim succeeded.
+ */
+export const releaseDeferredEncoding = internalMutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return;
+    if (video.status === "ready" || video.muxPlaybackId) return;
+    await ctx.db.patch(args.videoId, {
+      status: "uploading",
+      muxAssetStatus: undefined,
+      encodingDeferred: true,
+    });
+  },
+});
+
+/**
  * Non-video upload completion. Marks the row "ready" with no Mux fields,
  * so the row represents a plain file (doc/image/audio/source). The grid
  * + share view detect the missing playback ID and render a file tile +
@@ -1529,7 +1581,19 @@ export const resolveVideoFromStreamRefs = internalQuery({
       const normalized = ctx.db.normalizeId("videos", args.metaVideoId);
       if (normalized) {
         const video = await ctx.db.get(normalized);
-        if (video) return video._id;
+        // Only trust the meta pointer if it actually belongs to a
+        // Stream-owned row whose uid matches this webhook. `streamUid`
+        // is set at ingest, so a legit row already has it; the
+        // `!streamUid` allowance covers the narrow window before the
+        // ingest mutation lands. Guards against a forged meta.videoId
+        // marking an unrelated (e.g. Mux) video ready/failed.
+        if (
+          video &&
+          video.playbackProvider === "cloudflare_stream" &&
+          (!video.streamUid || video.streamUid === args.uid)
+        ) {
+          return video._id;
+        }
       }
     }
     const match = await ctx.db
