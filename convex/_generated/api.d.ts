@@ -43,6 +43,8 @@ import type * as payments from "../payments.js";
 import type * as paymentsActions from "../paymentsActions.js";
 import type * as projectVersions from "../projectVersions.js";
 import type * as projects from "../projects.js";
+import type * as retention from "../retention.js";
+import type * as retentionPolicy from "../retentionPolicy.js";
 import type * as s3 from "../s3.js";
 import type * as search from "../search.js";
 import type * as security from "../security.js";
@@ -108,6 +110,8 @@ declare const fullApi: ApiFromModules<{
   paymentsActions: typeof paymentsActions;
   projectVersions: typeof projectVersions;
   projects: typeof projects;
+  retention: typeof retention;
+  retentionPolicy: typeof retentionPolicy;
   s3: typeof s3;
   search: typeof search;
   security: typeof security;
