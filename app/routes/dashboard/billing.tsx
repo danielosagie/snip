@@ -267,6 +267,8 @@ function BillingRoute() {
 
               <StorageUsageBar variant="full" />
 
+              <DriveFirstSection />
+
               <SeatBreakdown
                 seatCount={subscription.seatCount}
                 includedSeats={subscription.includedSeats}
@@ -705,6 +707,91 @@ function EnterpriseUsage() {
           {new Date(period.periodEnd).toLocaleDateString()}.
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Drive-first storage policy, per owned team. When on, uploads to that
+ * team defer cloud encoding and their source bytes drop off the storage
+ * cap — the source is served from the connected drive/LucidLink mount.
+ * This is the cost floor for teams that can edit off a shared drive.
+ * Owner-only; teams the user merely belongs to aren't shown.
+ */
+function DriveFirstSection() {
+  const teams = useQuery(api.teams.list, {});
+  const ownedTeams = (teams ?? []).filter((t) => t.role === "owner");
+
+  if (teams === undefined || ownedTeams.length === 0) return null;
+
+  return (
+    <section className="mt-10">
+      <div className="flex items-center gap-2 mb-1">
+        <HardDrive className="h-4 w-4" />
+        <h2 className="font-black text-sm uppercase tracking-tight">
+          Drive-first storage
+        </h2>
+      </div>
+      <p className="text-sm text-[#666] mb-4 max-w-prose">
+        Serve footage straight from a connected drive instead of holding a
+        cloud copy. New uploads skip eager encoding and stop counting against
+        your storage cap — full quality is rebuilt on demand the first time
+        someone watches, or for paywalled delivery. Best when your team edits
+        off a shared drive (LucidLink, SAN, NAS).
+      </p>
+      <div className="space-y-3">
+        {ownedTeams.map((team) => (
+          <DriveFirstToggle
+            key={team._id}
+            teamId={team._id as Id<"teams">}
+            teamName={team.name}
+            enabled={team.driveFirstStorage === true}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DriveFirstToggle({
+  teamId,
+  teamName,
+  enabled,
+}: {
+  teamId: Id<"teams">;
+  teamName: string;
+  enabled: boolean;
+}) {
+  const setDriveFirst = useMutation(api.teams.setDriveFirstStorage);
+  const [pending, setPending] = useState(false);
+
+  const toggle = async () => {
+    setPending(true);
+    try {
+      await setDriveFirst({ teamId, enabled: !enabled });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-4 border-2 border-[#1a1a1a] px-4 py-3">
+      <div>
+        <div className="font-bold text-sm">{teamName}</div>
+        <div className="text-xs font-mono uppercase tracking-wider text-[#888]">
+          {enabled ? "Drive-first · on" : "Cloud storage · default"}
+        </div>
+      </div>
+      <Button
+        variant="outline"
+        className="h-9"
+        disabled={pending}
+        onClick={() => {
+          void toggle();
+        }}
+      >
+        {pending ? "Saving…" : enabled ? "Turn off" : "Turn on"}
+      </Button>
     </div>
   );
 }

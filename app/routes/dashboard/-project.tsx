@@ -1311,9 +1311,17 @@ export default function ProjectPage({
                     {video.status !== "ready" && (
                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                         <span className="text-white text-xs font-bold uppercase tracking-wider">
-                          {video.status === "uploading" && "Uploading..."}
-                          {video.status === "processing" && "Processing..."}
-                          {video.status === "failed" && "Failed"}
+                          {video.renditionEvictedAt
+                            ? video.status === "processing"
+                              ? "Rebuilding…"
+                              : "Archived"
+                            : (
+                              <>
+                                {video.status === "uploading" && "Uploading..."}
+                                {video.status === "processing" && "Processing..."}
+                                {video.status === "failed" && "Failed"}
+                              </>
+                            )}
                         </span>
                       </div>
                     )}
@@ -1542,9 +1550,17 @@ export default function ProjectPage({
                     {video.status !== "ready" && (
                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                         <span className="text-white text-[10px] font-bold uppercase tracking-wider">
-                          {video.status === "uploading" && "Uploading..."}
-                          {video.status === "processing" && "Processing..."}
-                          {video.status === "failed" && "Failed"}
+                          {video.renditionEvictedAt
+                            ? video.status === "processing"
+                              ? "Rebuilding…"
+                              : "Archived"
+                            : (
+                              <>
+                                {video.status === "uploading" && "Uploading..."}
+                                {video.status === "processing" && "Processing..."}
+                                {video.status === "failed" && "Failed"}
+                              </>
+                            )}
                         </span>
                       </div>
                     )}

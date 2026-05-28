@@ -762,7 +762,9 @@ export default function VideoPage() {
                   qualityOptionsConfig={[
                     {
                       id: "mux720",
-                      label: playbackUrl ? "720p" : "720p (encoding...)",
+                      label: playbackUrl
+                        ? "Adaptive (HLS)"
+                        : "Adaptive (encoding...)",
                       disabled: !playbackUrl,
                     },
                     {
@@ -790,13 +792,21 @@ export default function VideoPage() {
                   ) : (
                     <div className="text-center">
                       {video.status === "uploading" && (
-                        <p className="text-white/60">Uploading...</p>
+                        <p className="text-white/60">
+                          {video.renditionEvictedAt
+                            ? "Rebuilding from archive…"
+                            : video.encodingDeferred
+                              ? "Preparing video…"
+                              : "Uploading..."}
+                        </p>
                       )}
                       {video.status === "processing" && (
                         <p className="text-white/60">
-                          {isLoadingOriginalPlayback
-                            ? "Preparing original playback..."
-                            : "Processing video..."}
+                          {video.renditionEvictedAt
+                            ? "Rebuilding full quality…"
+                            : isLoadingOriginalPlayback
+                              ? "Preparing original playback..."
+                              : "Processing video..."}
                         </p>
                       )}
                       {video.status === "failed" && (

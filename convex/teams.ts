@@ -222,6 +222,23 @@ export const update = mutation({
   },
 });
 
+/**
+ * Toggle drive-first storage for a team (owner-only). When on, new
+ * uploads defer cloud encoding and their source bytes are excluded from
+ * the storage cap — the source is served from the connected drive. This
+ * only affects uploads going forward; existing rows keep their
+ * storageClass until re-uploaded.
+ */
+export const setDriveFirstStorage = mutation({
+  args: { teamId: v.id("teams"), enabled: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireTeamAccess(ctx, args.teamId, "owner");
+    await ctx.db.patch(args.teamId, { driveFirstStorage: args.enabled });
+    return null;
+  },
+});
+
 export const inviteMember = mutation({
   args: {
     teamId: v.id("teams"),

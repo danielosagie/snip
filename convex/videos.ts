@@ -1228,13 +1228,21 @@ export const reconcileUploadedObjectMetadata = internalMutation({
     const actualSize = Number.isFinite(args.fileSize) ? Math.max(0, args.fileSize) : 0;
     const sizeDelta = actualSize - declaredSize;
 
-    if (sizeDelta > 0) {
+    // Drive-first workspaces serve the source from the connected
+    // drive/LucidLink mount, so it doesn't count against the cloud
+    // storage cap — skip the quota assert and tag the row so usage
+    // queries exclude it.
+    const team = await ctx.db.get(project.teamId);
+    const driveFirst = team?.driveFirstStorage === true;
+
+    if (!driveFirst && sizeDelta > 0) {
       await assertTeamCanStoreBytes(ctx, project.teamId, sizeDelta);
     }
 
     await ctx.db.patch(args.videoId, {
       fileSize: actualSize,
       contentType: args.contentType,
+      storageClass: driveFirst ? "drive" : "cloud",
     });
   },
 });
@@ -1305,8 +1313,84 @@ export const claimDeferredEncoding = internalMutation({
       muxAssetStatus: "preparing",
       uploadError: undefined,
       encodingDeferred: undefined,
+      // A re-encode is driven by someone trying to watch — stamp the view
+      // now and clear the cold marker so the row is hot again the moment
+      // the ladder rebuilds. (For first-time deferred encodes
+      // renditionEvictedAt is already absent; this is a no-op there.)
+      lastViewedAt: Date.now(),
+      renditionEvictedAt: undefined,
     });
     return true;
+  },
+});
+
+/**
+ * Stamps `lastViewedAt` to keep a video in the hot set. Called from the
+ * playback actions on every session start. Throttled to one write per
+ * 6 hours per row — a view inside the same window doesn't change the
+ * hot/cold decision (RETENTION_HOT_DAYS), so there's no point paying for
+ * the write on every scrub/replay.
+ */
+export const recordPlayback = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return null;
+    const now = Date.now();
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    if (video.lastViewedAt && now - video.lastViewedAt < SIX_HOURS) {
+      return null;
+    }
+    await ctx.db.patch(args.videoId, { lastViewedAt: now });
+    return null;
+  },
+});
+
+/**
+ * Cold-eviction landing state. The encoded ladder (and any mirrored R2
+ * proxies) has already been deleted from the provider by
+ * `retention.runColdEviction`; this clears the now-dangling references
+ * and flips the row back to the deferred state so the next watch
+ * re-encodes from the still-present source (`s3Key`). KEEPS s3Key,
+ * fileSize, and duration. Mux-hosted thumbnails are dropped (they'd 404
+ * once the asset is gone); the UI renders an "Archived" placeholder when
+ * renditionEvictedAt is set.
+ */
+export const markRenditionEvicted = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return null;
+    const thumbnailUrl =
+      typeof video.thumbnailUrl === "string" &&
+      /mux\.com|videodelivery\.net|cloudflarestream\.com/.test(
+        video.thumbnailUrl,
+      )
+        ? undefined
+        : video.thumbnailUrl;
+    const now = Date.now();
+    await ctx.db.patch(args.videoId, {
+      status: "uploading",
+      encodingDeferred: true,
+      renditionEvictedAt: now,
+      // Bump lastViewedAt so the row leaves the cold-scan window
+      // (`lastViewedAt < cutoff`). Without this, every evicted row keeps
+      // its stale timestamp and is re-scanned (then re-filtered) on every
+      // daily run, eventually starving the batch of fresh candidates.
+      lastViewedAt: now,
+      muxAssetId: undefined,
+      muxPlaybackId: undefined,
+      muxSignedPlaybackId: undefined,
+      muxAssetStatus: undefined,
+      muxCaptionsTrackId: undefined,
+      streamUid: undefined,
+      staticRenditions: undefined,
+      staticRenditionsUpdatedAt: undefined,
+      thumbnailUrl,
+    });
+    return null;
   },
 });
 
@@ -1378,6 +1462,8 @@ export const markAsReady = internalMutation({
       thumbnailUrl: args.thumbnailUrl,
       uploadError: undefined,
       status: "ready",
+      // Ladder is live again — clear any cold marker from a prior eviction.
+      renditionEvictedAt: undefined,
     });
 
     // Pre-warm the watermarked preview asset right as the full asset
