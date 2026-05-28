@@ -7,8 +7,11 @@
 # separately by .github/workflows/desktop-dmg.yml) and Vercel never
 # needs any of it.
 
-# Desktop Electron app + its build artifacts (DMG, Electron framework)
-desktop/
+# Desktop Electron app + its build artifacts (DMG, Electron framework).
+# Leading slash anchors this to the repo root — WITHOUT it, gitignore-style
+# matching also strips `src/components/desktop/` (real web-bundle
+# components), which breaks the Vite build with an unresolved import.
+/desktop/
 
 # Local build output — Vercel runs its own build in the cloud
 dist/
