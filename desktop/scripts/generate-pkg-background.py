@@ -2,12 +2,14 @@
 """Generate the snip .pkg installer background: a chunky, "pixelly"
 white-to-burnt-orange gradient that matches the snip brand (#C2410C).
 
-The macOS Installer places this image at the bottom-left of the wizard window.
-The native installer background is white, so the white top of the gradient
-blends seamlessly with it, and the burnt orange appears at the bottom.
-
-Height is kept to ~half the window height so the gradient only occupies the
-lower portion of the installer — the stepper text sits above it on plain white.
+The macOS Installer places this image behind the wizard, anchored bottom-left,
+and scales it to fit (`scaling: "tofit"` in package.json). A short image would
+get stretched to the full window height — so instead we bake the layout into
+the pixels: the canvas matches the installer-pane aspect, the burnt-orange
+gradient occupies only the BOTTOM HALF, and the top half is plain white that
+blends seamlessly into the installer's own white background. The result reads
+as a gradient that fills the bottom ~50% and aligns to the bottom, regardless
+of how the installer scales it.
 
 Output: desktop/resources/pkg-background.png
 
@@ -18,10 +20,12 @@ import os
 
 from PIL import Image
 
-# Final image size. Half-height so the gradient covers only the bottom portion
-# of the installer window; the installer's native white fills the top half.
+# Full-pane canvas (~the installer window's 1.48:1 aspect, at 2x for crispness).
+# The gradient is confined to the bottom GRADIENT_FRACTION; the rest is white so
+# the artwork sits in the lower half and never stretches to full height.
 WIDTH = 1200
-HEIGHT = 410
+HEIGHT = 820
+GRADIENT_FRACTION = 0.5  # gradient occupies the bottom half; top stays white
 BLOCK = 20  # size of one "pixel" block in the final image
 
 # Brand ramp: cream-white at the top → burnt orange at the bottom, easing
@@ -44,10 +48,18 @@ def lerp(a, b, t):
 
 
 def ramp(t):
-    """Two-stop ramp: white→mid for the first 55%, mid→orange after."""
-    if t <= 0.55:
-        return lerp(TOP, MID, t / 0.55)
-    return lerp(MID, BOTTOM, (t - 0.55) / 0.45)
+    """t is the vertical position over the whole canvas (0 top → 1 bottom).
+    The top (1 - GRADIENT_FRACTION) stays pure white so it blends into the
+    installer's white background; the bottom GRADIENT_FRACTION runs the
+    two-stop white→mid→orange ramp. This is what confines the gradient to the
+    lower half and keeps it bottom-aligned."""
+    split = 1.0 - GRADIENT_FRACTION
+    if t <= split:
+        return TOP
+    u = (t - split) / GRADIENT_FRACTION  # 0..1 across the gradient band
+    if u <= 0.55:
+        return lerp(TOP, MID, u / 0.55)
+    return lerp(MID, BOTTOM, (u - 0.55) / 0.45)
 
 
 def main():
