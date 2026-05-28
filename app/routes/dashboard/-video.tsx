@@ -762,7 +762,9 @@ export default function VideoPage() {
                   qualityOptionsConfig={[
                     {
                       id: "mux720",
-                      label: playbackUrl ? "720p" : "720p (encoding...)",
+                      label: playbackUrl
+                        ? "Adaptive (HLS)"
+                        : "Adaptive (encoding...)",
                       disabled: !playbackUrl,
                     },
                     {
