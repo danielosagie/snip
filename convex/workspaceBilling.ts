@@ -6,7 +6,7 @@ import {
   query,
 } from "./_generated/server";
 import { requireUser } from "./auth";
-import { getTeamStorageUsedBytes } from "./billingHelpers";
+import { getTeamStorageBreakdown } from "./billingHelpers";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
@@ -649,6 +649,33 @@ export const getProjectOwnerTier = internalQuery({
 });
 
 /**
+ * Storage policy for a project's team: effective tier + whether the
+ * workspace is drive-first. Used by the upload flow to decide both
+ * provider routing (`startEncoding`) and whether to defer encoding
+ * (`shouldDeferEncoding`). Drive-first always defers — the cloud ladder
+ * only materializes on watch or for paid delivery.
+ */
+export const getProjectStoragePolicy = internalQuery({
+  args: { projectId: v.id("projects") },
+  returns: v.object({
+    tier: v.union(
+      v.literal("free"),
+      v.literal("basic"),
+      v.literal("pro"),
+      v.literal("enterprise"),
+    ),
+    driveFirst: v.boolean(),
+  }),
+  handler: async (ctx, args): Promise<{ tier: TierKey; driveFirst: boolean }> => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project) return { tier: "free", driveFirst: false };
+    const { tierKey } = await getTeamOwnerTier(ctx, project.teamId);
+    const team = await ctx.db.get(project.teamId);
+    return { tier: tierKey, driveFirst: team?.driveFirstStorage === true };
+  },
+});
+
+/**
  * Storage usage + limit for the caller's default team. Used by the
  * sidebar progress bar and the Billing & usage page. Returns null for
  * unauthenticated callers / users with no team (the bar hides itself).
@@ -663,6 +690,9 @@ export const getMyStorageUsage = query({
     plan: TierKey;
     label: string;
     percent: number;
+    hotBytes: number;
+    coldBytes: number;
+    driveBytes: number;
   } | null> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
@@ -686,10 +716,17 @@ export const getMyStorageUsage = query({
       .withIndex("by_user", (q) => q.eq("userClerkId", identity.subject))
       .collect();
 
-    let usedBytes = 0;
+    let hotBytes = 0;
+    let coldBytes = 0;
+    let driveBytes = 0;
     for (const m of memberships) {
-      usedBytes += await getTeamStorageUsedBytes(ctx, m.teamId);
+      const b = await getTeamStorageBreakdown(ctx, m.teamId);
+      hotBytes += b.hotBytes;
+      coldBytes += b.coldBytes;
+      driveBytes += b.driveBytes;
     }
+    // Billed usage = hot + cold (drive sources don't count against cap).
+    const usedBytes = hotBytes + coldBytes;
 
     const limitBytes = tier.storageBytes;
     const percent =
@@ -697,7 +734,16 @@ export const getMyStorageUsage = query({
         ? Math.min(100, Math.round((usedBytes / limitBytes) * 100))
         : 0;
 
-    return { usedBytes, limitBytes, plan: key, label: tier.label, percent };
+    return {
+      usedBytes,
+      limitBytes,
+      plan: key,
+      label: tier.label,
+      percent,
+      hotBytes,
+      coldBytes,
+      driveBytes,
+    };
   },
 });
 

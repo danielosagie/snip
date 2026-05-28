@@ -34,6 +34,13 @@ export default defineSchema({
     // sends it as `Authorization: Bearer <token>`. Owner-only mutation
     // generates this; we look up the team by indexing on this token.
     pluginToken: v.optional(v.string()),
+    // Drive-first storage policy (opt-in, owner-controlled). When true,
+    // uploads on this team default to deferred encoding (no eager cloud
+    // ladder) and their source bytes are excluded from the storage cap —
+    // the source is served from the connected drive/LucidLink mount.
+    // This is the cost floor: encoded copies only materialize on watch
+    // (re-encode) or for paywalled external delivery. Absent = "cloud".
+    driveFirstStorage: v.optional(v.boolean()),
   })
     .index("by_slug", ["slug"])
     .index("by_owner", ["ownerClerkId"])
@@ -391,6 +398,27 @@ export default defineSchema({
     // it can be restored or purged. Mirrors the same pattern on projects.
     deletedAt: v.optional(v.number()),
     deletedByName: v.optional(v.string()),
+    // ── Retention / hot-cold lifecycle ───────────────────────────────
+    // Wall-clock of the most recent playback (review player, share
+    // page, or paid delivery). Drives the hot/cold split: a video not
+    // viewed within RETENTION_HOT_DAYS becomes eligible for cold
+    // eviction. Absent on rows that have never been played — the
+    // eviction scan falls back to _creationTime for those. Also bumped
+    // when a row is evicted, so it leaves the cold-scan window instead
+    // of being re-scanned every run.
+    lastViewedAt: v.optional(v.number()),
+    // Set when the encoded review ladder was evicted to claw back
+    // provider storage COGS. The source object (s3Key) is kept, so the
+    // row is flipped back to `encodingDeferred` and re-encodes lazily on
+    // the next watch. Cleared when the ladder is rebuilt. Presence =
+    // "cold / archived" in the UI.
+    renditionEvictedAt: v.optional(v.number()),
+    // Storage class for billing. "cloud" (default) = source lives in our
+    // object store and counts against the team's storage cap. "drive" =
+    // the workspace is drive-first; the source is served from the
+    // connected drive/LucidLink mount and is excluded from the billed
+    // cap. Absent behaves as "cloud".
+    storageClass: v.optional(v.union(v.literal("cloud"), v.literal("drive"))),
   })
     .index("by_project", ["projectId"])
     .index("by_public_id", ["publicId"])
@@ -400,7 +428,12 @@ export default defineSchema({
     .index("by_mux_preview_asset_id", ["muxPreviewAssetId"])
     .index("by_stream_uid", ["streamUid"])
     .index("by_lineage", ["lineageId"])
-    .index("by_folder", ["folderId"]),
+    .index("by_folder", ["folderId"])
+    // Cold-eviction scan walks videos in ascending lastViewedAt order.
+    // Never-viewed rows sort first (undefined < any number in Convex),
+    // and the in-handler activity check falls back to _creationTime so
+    // freshly uploaded rows aren't evicted before the window elapses.
+    .index("by_last_viewed", ["lastViewedAt"]),
 
   comments: defineTable({
     videoId: v.id("videos"),
