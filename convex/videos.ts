@@ -1248,6 +1248,83 @@ export const markAsProcessing = internalMutation({
       status: "processing",
       muxAssetStatus: "preparing",
       uploadError: undefined,
+      // Clear the lazy-encode flag if it was set — encoding has begun.
+      encodingDeferred: undefined,
+    });
+  },
+});
+
+/**
+ * Lazy-encode landing state. The file is uploaded and reconciled, but
+ * we've deferred Mux ingest until someone actually tries to play it.
+ * Status stays "uploading" so existing UI doesn't render it as fully
+ * ready; the `encodingDeferred` flag distinguishes this from a normal
+ * upload-in-progress row.
+ *
+ * Triggered when `shouldDeferEncoding()` returns true at upload time
+ * — typically for free-tier customers where the long tail of unwatched
+ * footage isn't worth the encoding bill.
+ */
+export const markAsEncodingDeferred = internalMutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      status: "uploading",
+      muxAssetStatus: undefined,
+      uploadError: undefined,
+      encodingDeferred: true,
+    });
+  },
+});
+
+/**
+ * Atomically claims a deferred video for encoding. Returns true only
+ * for the caller that wins the race — flips `encodingDeferred` off and
+ * status to "processing" in a single mutation so two concurrent
+ * `requestEncoding` calls can't both kick off a Mux/Stream ingest
+ * (which would double the encode cost + create orphan assets).
+ *
+ * Returns false when the row is already claimed, already ready, or
+ * isn't a deferred candidate — the caller treats false as "someone
+ * else is handling it" and no-ops.
+ */
+export const claimDeferredEncoding = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.boolean(),
+  handler: async (ctx, args): Promise<boolean> => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return false;
+    // Already encoded / encoding, or never a deferred candidate.
+    if (video.muxPlaybackId || video.status === "ready") return false;
+    if (!video.encodingDeferred) return false;
+    // Mutations are transactional in Convex, so this read-then-write
+    // is the atomic claim — a second concurrent call sees
+    // encodingDeferred already false and bails above.
+    await ctx.db.patch(args.videoId, {
+      status: "processing",
+      muxAssetStatus: "preparing",
+      uploadError: undefined,
+      encodingDeferred: undefined,
+    });
+    return true;
+  },
+});
+
+/**
+ * Reverts a failed deferred-encoding claim back to the deferred state
+ * so the next viewer can retry. Called when `startEncoding` throws
+ * after the claim succeeded.
+ */
+export const releaseDeferredEncoding = internalMutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) return;
+    if (video.status === "ready" || video.muxPlaybackId) return;
+    await ctx.db.patch(args.videoId, {
+      status: "uploading",
+      muxAssetStatus: undefined,
+      encodingDeferred: true,
     });
   },
 });
@@ -1403,6 +1480,127 @@ export const setMuxAssetReference = internalMutation({
       muxAssetStatus: "preparing",
       status: "processing",
     });
+  },
+});
+
+/**
+ * Persists the Cloudflare Stream uid + provider key on a video row.
+ * Called at ingest time (from `startEncoding`) so the row knows which
+ * provider owns it before the asset is ready.
+ */
+export const setStreamRefs = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    streamUid: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      playbackProvider: "cloudflare_stream",
+      streamUid: args.streamUid,
+    });
+  },
+});
+
+/**
+ * Stream's equivalent of `markAsReady`. The two differ in one
+ * important way: `markAsReady` pre-warms a Mux *watermarked preview*
+ * asset for paywalled delivery, which would fire a broken Mux job
+ * against a Stream-hosted video. Paywalled/watermarked delivery is
+ * still Mux-only (see the cutover plan), so Stream videos skip that
+ * pre-warm — a paywalled link on a Stream video will mint its preview
+ * on demand later.
+ *
+ * `muxPlaybackId` is set to the stream uid as a "has playback"
+ * sentinel so the player's `isPlayable` gate + thumbnail logic work
+ * unchanged; `getPlaybackSession` switches on `playbackProvider` to
+ * build the right URLs.
+ */
+export const markStreamReady = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    streamUid: v.string(),
+    duration: v.optional(v.number()),
+    thumbnailUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const before = await ctx.db.get(args.videoId);
+    await ctx.db.patch(args.videoId, {
+      playbackProvider: "cloudflare_stream",
+      streamUid: args.streamUid,
+      // Sentinel: keeps isPlayable + thumbnail code paths working.
+      muxPlaybackId: args.streamUid,
+      muxAssetId: args.streamUid,
+      muxAssetStatus: "ready",
+      duration: args.duration,
+      thumbnailUrl: args.thumbnailUrl,
+      uploadError: undefined,
+      status: "ready",
+      encodingDeferred: undefined,
+    });
+
+    // Provider-agnostic "long upload finished" email (no Mux preview
+    // pre-warm — that's the key difference from markAsReady).
+    try {
+      if (before && before.status !== "ready") {
+        const elapsed = Date.now() - before._creationTime;
+        if (
+          elapsed > 5 * 60 * 1000 &&
+          (await prefEnabled(ctx, before.uploadedByClerkId, "uploadFinished"))
+        ) {
+          const to = await resolveUserEmail(ctx, before.uploadedByClerkId);
+          const project = await ctx.db.get(before.projectId);
+          const team = project ? await ctx.db.get(project.teamId) : null;
+          if (to && project && team) {
+            await ctx.scheduler.runAfter(0, internal.email.sendUploadFinished, {
+              to,
+              videoTitle: before.title,
+              path: `/dashboard/${team.slug}/${before.projectId}/${args.videoId}`,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error("upload-finished notification failed", e);
+    }
+  },
+});
+
+/**
+ * Lookup helper for the Stream webhook. Tries the `meta.videoId` we
+ * planted on copy first (cheap), then falls back to a streamUid index
+ * scan. Returns null if no row matches — caller surfaces as a noop so
+ * webhook retries stop.
+ */
+export const resolveVideoFromStreamRefs = internalQuery({
+  args: {
+    uid: v.string(),
+    metaVideoId: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<Id<"videos"> | null> => {
+    if (args.metaVideoId) {
+      const normalized = ctx.db.normalizeId("videos", args.metaVideoId);
+      if (normalized) {
+        const video = await ctx.db.get(normalized);
+        // Only trust the meta pointer if it actually belongs to a
+        // Stream-owned row whose uid matches this webhook. `streamUid`
+        // is set at ingest, so a legit row already has it; the
+        // `!streamUid` allowance covers the narrow window before the
+        // ingest mutation lands. Guards against a forged meta.videoId
+        // marking an unrelated (e.g. Mux) video ready/failed.
+        if (
+          video &&
+          video.playbackProvider === "cloudflare_stream" &&
+          (!video.streamUid || video.streamUid === args.uid)
+        ) {
+          return video._id;
+        }
+      }
+    }
+    const match = await ctx.db
+      .query("videos")
+      .withIndex("by_stream_uid", (q) => q.eq("streamUid", args.uid))
+      .unique();
+    return match?._id ?? null;
   },
 });
 

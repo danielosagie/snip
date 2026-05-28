@@ -213,6 +213,23 @@ export default defineSchema({
     muxAssetId: v.optional(v.string()),
     muxPlaybackId: v.optional(v.string()),
     muxSignedPlaybackId: v.optional(v.string()),
+    // Playback provider that owns this video's encoded ladder. Defaults
+    // to "mux" (every pre-migration row). Set to "cloudflare_stream" on
+    // new uploads after the per-tier router routes traffic there.
+    // See convex/providers/playbackProvider.ts for the abstraction.
+    playbackProvider: v.optional(
+      v.union(v.literal("mux"), v.literal("cloudflare_stream")),
+    ),
+    /** Cloudflare Stream uid — used as both asset id and playback id. */
+    streamUid: v.optional(v.string()),
+    /**
+     * When true, the video was uploaded but Mux ingest was skipped.
+     * Lazy encoding: cuts COGS for the long tail of footage no one
+     * ever plays. The video player triggers `requestEncoding` on
+     * mount, which clears this flag and kicks off the normal Mux
+     * pipeline. See `shouldDeferEncoding` in videoActions.ts.
+     */
+    encodingDeferred: v.optional(v.boolean()),
     muxAssetStatus: v.optional(
       v.union(
         v.literal("preparing"),
@@ -381,6 +398,7 @@ export default defineSchema({
     .index("by_mux_asset_id", ["muxAssetId"])
     .index("by_mux_playback_id", ["muxPlaybackId"])
     .index("by_mux_preview_asset_id", ["muxPreviewAssetId"])
+    .index("by_stream_uid", ["streamUid"])
     .index("by_lineage", ["lineageId"])
     .index("by_folder", ["folderId"]),
 
@@ -719,6 +737,32 @@ export default defineSchema({
         seats: v.string(),
         transcription: v.string(),
       }),
+    ),
+    /**
+     * Add-on SKUs purchased on top of the base tier. Each add-on is
+     * priced via its own Stripe price ID and either adds a feature
+     * surface (white-label, custom domain) or unlocks API access.
+     * Stored as a sparse object so we can add new add-ons without a
+     * schema migration. Future Stripe sync will set the matching
+     * `stripeSubscriptionItemId` so the webhook can flip these on/off.
+     */
+    addOns: v.optional(
+      v.object({
+        // Removes snip branding from share links + delivery emails.
+        whiteLabel: v.optional(v.boolean()),
+        // Custom domain CNAME for paywalled deliveries.
+        customDomain: v.optional(v.string()),
+        // Public API tier — rate limits relax, signed access tokens.
+        apiTier: v.optional(v.boolean()),
+      }),
+    ),
+    /**
+     * Billing cadence — month-to-month vs annual prepay. Annual sub
+     * gets 17% off (10 months for 12). Drives both the displayed
+     * price + the Stripe price ID used at checkout.
+     */
+    billingCadence: v.optional(
+      v.union(v.literal("monthly"), v.literal("annual")),
     ),
   })
     .index("by_owner", ["ownerClerkId"])

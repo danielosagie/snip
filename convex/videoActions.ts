@@ -28,6 +28,12 @@ import {
 } from "./mux";
 import { BUCKET_NAME, getS3Client } from "./s3";
 import { isFeatureEnabled } from "./featureFlags";
+import {
+  buildStreamPlaybackUrls,
+  createStreamAssetFromInputUrl,
+  isCloudflareStreamConfigured,
+} from "./cloudflareStream";
+import { resolvePlaybackProvider, defaultPlaybackProvider } from "./providers/playbackProvider";
 
 const GIBIBYTE = 1024 ** 3;
 const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
@@ -517,19 +523,19 @@ export const markUploadComplete = action({
       });
 
       if (isMuxVideoType(normalizedContentType, video.s3Key)) {
-        // Video path — kick off Mux ingest as before.
-        await ctx.runMutation(internal.videos.markAsProcessing, {
-          videoId: args.videoId,
-        });
-
-        const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
-          expiresIn: 60 * 60 * 24,
-        });
-        const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
-        if (asset.id) {
-          await ctx.runMutation(internal.videos.setMuxAssetReference, {
+        // Lazy encoding: when enabled, skip ingest and hold the video
+        // in `encodingDeferred` state. The first watch triggers
+        // `requestEncoding`, which runs the same pipeline. Cuts COGS
+        // on the long tail of footage uploaded but never played.
+        if (await shouldDeferEncoding(ctx, video.projectId)) {
+          await ctx.runMutation(internal.videos.markAsEncodingDeferred, {
             videoId: args.videoId,
-            muxAssetId: asset.id,
+          });
+        } else {
+          await startEncoding(ctx, {
+            videoId: args.videoId,
+            s3Key: video.s3Key,
+            projectId: video.projectId,
           });
         }
       } else {
@@ -607,10 +613,24 @@ export const getPlaybackSession = action({
       videoId: args.videoId,
     });
 
-    if (!video || !video.muxPlaybackId || video.status !== "ready") {
+    if (!video || video.status !== "ready") {
       throw new Error("Video not found or not ready");
     }
 
+    // Cloudflare Stream path — the stream uid is both the asset and
+    // playback handle, so we build the videodelivery.net URLs
+    // directly. No SDK round-trip like Mux's ensurePublicPlaybackId.
+    if (resolvePlaybackProvider(video) === "cloudflare_stream") {
+      if (!video.streamUid) {
+        throw new Error("Stream video is missing its uid");
+      }
+      const urls = buildStreamPlaybackUrls(video.streamUid);
+      return { url: urls.hlsUrl, posterUrl: urls.thumbnailUrl };
+    }
+
+    if (!video.muxPlaybackId) {
+      throw new Error("Video not found or not ready");
+    }
     const playbackId = await ensurePublicPlaybackId(ctx, {
       videoId: args.videoId,
       muxAssetId: video.muxAssetId,
@@ -630,10 +650,20 @@ export const getPlaybackUrl = action({
       videoId: args.videoId,
     });
 
-    if (!video || !video.muxPlaybackId || video.status !== "ready") {
+    if (!video || video.status !== "ready") {
       throw new Error("Video not found or not ready");
     }
 
+    if (resolvePlaybackProvider(video) === "cloudflare_stream") {
+      if (!video.streamUid) {
+        throw new Error("Stream video is missing its uid");
+      }
+      return { url: buildStreamPlaybackUrls(video.streamUid).hlsUrl };
+    }
+
+    if (!video.muxPlaybackId) {
+      throw new Error("Video not found or not ready");
+    }
     const playbackId = await ensurePublicPlaybackId(ctx, {
       videoId: args.videoId,
       muxAssetId: video.muxAssetId,
@@ -2161,5 +2191,166 @@ export const ensurePreviewAssetForShareLink = action({
     }
 
     return { status: "ok" as const };
+  },
+});
+
+// ─── Lazy encoding ───────────────────────────────────────────────────────────
+//
+// We defer Mux ingest on upload when the workspace tier qualifies — the
+// "long tail of unwatched footage" is a real COGS line and the encoding
+// cost is wasted for clips no one ever opens. The first watch triggers
+// `requestEncoding` below, which runs the normal pipeline.
+//
+// Decision is driven by env: LAZY_ENCODE_DEFAULT={never|free|always}.
+//   never   — default; existing behavior, encode on upload.
+//   free    — defer for free-tier workspaces only.
+//   always  — defer everywhere (use during a Cloudflare Stream cutover,
+//             since Stream's storage is so cheap that delaying encode
+//             is essentially free).
+
+/**
+ * Kicks off encoding for a video, routing to the provider chosen by
+ * `defaultPlaybackProvider(tier)`. Shared by the upload flow and the
+ * lazy-encode `requestEncoding` trigger so the routing logic lives in
+ * one place.
+ *
+ * Falls back to Mux if Stream is selected but not configured on the
+ * deployment — better to encode somewhere than to fail the upload.
+ */
+async function startEncoding(
+  ctx: ActionCtx,
+  params: { videoId: Id<"videos">; s3Key: string; projectId: Id<"projects"> },
+): Promise<void> {
+  const tier = await ctx.runQuery(
+    internal.workspaceBilling.getProjectOwnerTier,
+    { projectId: params.projectId },
+  );
+  let provider = defaultPlaybackProvider(tier);
+  if (provider === "cloudflare_stream" && !isCloudflareStreamConfigured()) {
+    provider = "mux";
+  }
+
+  await ctx.runMutation(internal.videos.markAsProcessing, {
+    videoId: params.videoId,
+  });
+
+  const ingestUrl = await buildSignedBucketObjectUrl(params.s3Key, {
+    expiresIn: 60 * 60 * 24,
+  });
+
+  if (provider === "cloudflare_stream") {
+    const asset = await createStreamAssetFromInputUrl(
+      params.videoId,
+      ingestUrl,
+    );
+    await ctx.runMutation(internal.videos.setStreamRefs, {
+      videoId: params.videoId,
+      streamUid: asset.assetId,
+    });
+    return;
+  }
+
+  const asset = await createMuxAssetFromInputUrl(params.videoId, ingestUrl);
+  if (asset.id) {
+    await ctx.runMutation(internal.videos.setMuxAssetReference, {
+      videoId: params.videoId,
+      muxAssetId: asset.id,
+    });
+  }
+}
+
+async function shouldDeferEncoding(
+  ctx: ActionCtx,
+  projectId: Id<"projects">,
+): Promise<boolean> {
+  const mode = (process.env.LAZY_ENCODE_DEFAULT ?? "never")
+    .trim()
+    .toLowerCase();
+  if (mode === "never" || mode === "off" || mode === "false" || mode === "") {
+    return false;
+  }
+  if (mode === "always" || mode === "all" || mode === "true") {
+    return true;
+  }
+  if (mode !== "free") return false;
+  const tier = await ctx.runQuery(
+    internal.workspaceBilling.getProjectOwnerTier,
+    { projectId },
+  );
+  return tier === "free";
+}
+
+/**
+ * Public surface the video player calls when it loads a video that
+ * has `encodingDeferred: true` and no `muxPlaybackId` yet. Kicks off
+ * the same Mux ingest path the upload flow would have, transitioning
+ * the row to "processing". Idempotent.
+ */
+export const requestEncoding = action({
+  args: { videoId: v.id("videos") },
+  returns: v.object({
+    status: v.union(
+      v.literal("encoding_started"),
+      v.literal("already_encoding"),
+      v.literal("already_ready"),
+      v.literal("not_a_video"),
+    ),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    status:
+      | "encoding_started"
+      | "already_encoding"
+      | "already_ready"
+      | "not_a_video";
+  }> => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+    if (!video) throw new Error("Video not found");
+
+    // Stable-property pre-checks (won't change concurrently).
+    if (video.muxPlaybackId || video.status === "ready") {
+      return { status: "already_ready" };
+    }
+    if (!video.s3Key) {
+      return { status: "not_a_video" };
+    }
+    if (
+      !isMuxVideoType(video.contentType ?? "application/octet-stream", video.s3Key)
+    ) {
+      return { status: "not_a_video" };
+    }
+
+    // Atomic claim — only the winner of a concurrent race proceeds to
+    // ingest, so two viewers opening the same deferred video at once
+    // can't both start a (paid) encode. A loser sees claimed=false.
+    const claimed = await ctx.runMutation(
+      internal.videos.claimDeferredEncoding,
+      { videoId: args.videoId },
+    );
+    if (!claimed) {
+      return { status: "already_encoding" };
+    }
+
+    try {
+      await startEncoding(ctx, {
+        videoId: args.videoId,
+        s3Key: video.s3Key,
+        projectId: video.projectId,
+      });
+      return { status: "encoding_started" };
+    } catch (error) {
+      // Restore the deferred state so the next viewer can retry —
+      // otherwise the row is stuck "processing" with the claim
+      // consumed and no asset behind it.
+      await ctx.runMutation(internal.videos.releaseDeferredEncoding, {
+        videoId: args.videoId,
+      });
+      throw error;
+    }
   },
 });

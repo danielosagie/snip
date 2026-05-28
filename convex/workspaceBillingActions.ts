@@ -22,16 +22,30 @@ import { api } from "./_generated/api";
 
 // Stripe price IDs. We reuse the legacy env var names so existing
 // Stripe products keep working without rotation. Mapping:
-//   STRIPE_PRICE_BASIC_MONTHLY → "basic" plan ($20 / 2 TB)
-//   STRIPE_PRICE_PRO_MONTHLY   → "pro"   plan ($50 / 5 TB)
-const BASIC_PRICE_ENV = "STRIPE_PRICE_BASIC_MONTHLY";
-const PRO_PRICE_ENV = "STRIPE_PRICE_PRO_MONTHLY";
+//   STRIPE_PRICE_BASIC_MONTHLY → "basic" plan ($20 / 2 TB) — monthly
+//   STRIPE_PRICE_PRO_MONTHLY   → "pro"   plan ($50 / 5 TB) — monthly
+//   STRIPE_PRICE_BASIC_ANNUAL  → "basic" plan, billed annually (17% off)
+//   STRIPE_PRICE_PRO_ANNUAL    → "pro"   plan, billed annually (17% off)
+const PRICE_ENV: Record<"basic" | "pro", Record<"monthly" | "annual", string>> = {
+  basic: {
+    monthly: "STRIPE_PRICE_BASIC_MONTHLY",
+    annual: "STRIPE_PRICE_BASIC_ANNUAL",
+  },
+  pro: {
+    monthly: "STRIPE_PRICE_PRO_MONTHLY",
+    annual: "STRIPE_PRICE_PRO_ANNUAL",
+  },
+};
 
 export const createCheckout = action({
   args: {
     plan: v.string(),
     successUrl: v.string(),
     cancelUrl: v.string(),
+    // Defaults to monthly so existing call sites that don't pass
+    // cadence keep their current behavior. Pass "annual" to use the
+    // 17%-off yearly price.
+    cadence: v.optional(v.union(v.literal("monthly"), v.literal("annual"))),
   },
   handler: async (
     ctx,
@@ -52,10 +66,10 @@ export const createCheckout = action({
     if (requestedPlan !== "basic" && requestedPlan !== "pro") {
       throw new Error(`Unknown plan: ${args.plan}`);
     }
+    const cadence = args.cadence ?? "monthly";
 
     const stripeSecret = process.env.STRIPE_SECRET_KEY;
-    const priceEnvName =
-      requestedPlan === "basic" ? BASIC_PRICE_ENV : PRO_PRICE_ENV;
+    const priceEnvName = PRICE_ENV[requestedPlan][cadence];
     const priceId = process.env[priceEnvName];
 
     if (!stripeSecret || stripeSecret.trim().length === 0) {
@@ -68,7 +82,7 @@ export const createCheckout = action({
     if (!priceId || priceId.trim().length === 0) {
       return {
         kind: "simulate",
-        reason: `${priceEnvName} is not set on Convex. Set it to the Stripe price ID for the ${requestedPlan === "basic" ? "Basic" : "Pro"} plan to enable real checkout.`,
+        reason: `${priceEnvName} is not set on Convex. Set it to the Stripe price ID for the ${requestedPlan === "basic" ? "Basic" : "Pro"} ${cadence} plan to enable real checkout.`,
       };
     }
 
@@ -84,11 +98,13 @@ export const createCheckout = action({
       metadata: {
         ownerClerkId: identity.subject,
         plan: requestedPlan,
+        cadence,
       },
       subscription_data: {
         metadata: {
           ownerClerkId: identity.subject,
           plan: requestedPlan,
+          cadence,
         },
       },
     });
@@ -102,6 +118,7 @@ export const createCheckout = action({
       stripeCustomerId: session.customer
         ? String(session.customer)
         : undefined,
+      cadence,
     });
 
     return { kind: "redirect", url: session.url };

@@ -1,5 +1,10 @@
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { requireUser } from "./auth";
 import { getTeamStorageUsedBytes } from "./billingHelpers";
 import type { Id } from "./_generated/dataModel";
@@ -102,6 +107,30 @@ export const TIERS = {
 } as const;
 
 export const ENTERPRISE_PLAN_KEY = "enterprise" as const;
+
+// ─── Add-on SKUs ─────────────────────────────────────────────────────────
+//
+// Each add-on is purchased separately on top of the base subscription.
+// Margin is high — each one is mostly billing config + a feature
+// toggle, no incremental COGS at customer-realistic volumes.
+//
+// All available on Basic and Pro. Free tier can't purchase add-ons
+// (no Stripe customer to attach them to).
+export const ADD_ON_PRICES_CENTS = {
+  whiteLabel: 2000, // $20/mo — drop snip branding from share links/email
+  customDomain: 1000, // $10/mo — CNAME for paywalled deliveries
+  apiTier: 3000, // $30/mo — public API access + bumped rate limits
+} as const;
+
+export type AddOnKey = keyof typeof ADD_ON_PRICES_CENTS;
+
+// ─── Annual prepay ───────────────────────────────────────────────────────
+//
+// Annual customers get 17% off, billed monthly equivalent. The Stripe
+// price IDs for the annual versions live in env (paired with monthly):
+//   STRIPE_PRICE_BASIC_ANNUAL  → STRIPE_PRICE_BASIC_MONTHLY
+//   STRIPE_PRICE_PRO_ANNUAL    → STRIPE_PRICE_PRO_MONTHLY
+export const ANNUAL_DISCOUNT_RATIO = 10 / 12; // 17% off when paid yearly
 
 export type TierKey = keyof typeof TIERS;
 
@@ -531,6 +560,95 @@ export const getTeamSeatUsage = query({
 });
 
 /**
+ * Internal: resolves the caller's workspace tier. Used by gates that
+ * need to check the tier of the signed-in user (e.g. desktop drive
+ * access). Returns "free" when no live subscription exists.
+ */
+export const getCallerTier = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<TierKey> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return "free";
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
+      .unique();
+    const live = sub?.status === "active" || sub?.status === "trialing";
+    return sub && live ? normalizePlanKey(sub.plan) : "free";
+  },
+});
+
+const TIER_RANK: Record<TierKey, number> = {
+  free: 0,
+  basic: 1,
+  pro: 2,
+  enterprise: 3,
+};
+
+/**
+ * Internal: the BEST tier across every team the caller is a member of,
+ * resolved from each team's *owner's* subscription — not the caller's
+ * own. This is the right gate for shared-resource access like the
+ * desktop drive: a free-tier user who collaborates in a paid
+ * workspace should get the drive for that workspace's files, since
+ * the storage scope already grants them those prefixes.
+ *
+ * Returns "free" when the caller belongs to no paid-owned team.
+ */
+export const getCallerMaxTier = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<TierKey> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return "free";
+
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", identity.subject))
+      .collect();
+
+    let best: TierKey = "free";
+    // Cache owner→tier so two teams owned by the same person only
+    // cost one subscription lookup.
+    const tierByOwner = new Map<string, TierKey>();
+    for (const m of memberships) {
+      const team = await ctx.db.get(m.teamId);
+      if (!team?.ownerClerkId) continue;
+      let tier = tierByOwner.get(team.ownerClerkId);
+      if (tier === undefined) {
+        const sub = await ctx.db
+          .query("workspaceSubscriptions")
+          .withIndex("by_owner", (q) =>
+            q.eq("ownerClerkId", team.ownerClerkId),
+          )
+          .unique();
+        const live = sub?.status === "active" || sub?.status === "trialing";
+        tier = sub && live ? normalizePlanKey(sub.plan) : "free";
+        tierByOwner.set(team.ownerClerkId, tier);
+      }
+      if (TIER_RANK[tier] > TIER_RANK[best]) best = tier;
+    }
+    return best;
+  },
+});
+
+/**
+ * Internal: resolves a project's owning workspace tier. Used by the
+ * lazy-encode decision in `videoActions.shouldDeferEncoding` — the
+ * tier dictates whether we should skip Mux ingest at upload time.
+ * Returns "free" when no live subscription exists so the defer rule
+ * naturally lands on the cheapest tier.
+ */
+export const getProjectOwnerTier = internalQuery({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args): Promise<TierKey> => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project) return "free";
+    const { tierKey } = await getTeamOwnerTier(ctx, project.teamId);
+    return tierKey;
+  },
+});
+
+/**
  * Storage usage + limit for the caller's default team. Used by the
  * sidebar progress bar and the Billing & usage page. Returns null for
  * unauthenticated callers / users with no team (the bar hides itself).
@@ -583,7 +701,112 @@ export const getMyStorageUsage = query({
   },
 });
 
+/**
+ * Returns the add-ons currently active on the caller's workspace
+ * subscription. Drives the UI toggles in Billing & usage and the
+ * white-label / API-tier conditional rendering elsewhere in the app.
+ */
+export const getMyAddOns = query({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{
+    whiteLabel: boolean;
+    customDomain: string | null;
+    apiTier: boolean;
+    prices: typeof ADD_ON_PRICES_CENTS;
+  } | null> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
+      .unique();
+    // Add-ons only exist on a live PAID subscription. Returning null
+    // for free / canceled / no-sub callers means the AddOnsSection UI
+    // hides itself (its `if (!addOns) return null` guard) instead of
+    // showing toggles that would fail the `no_subscription` mutation.
+    const live =
+      sub && (sub.status === "active" || sub.status === "trialing");
+    if (!live || normalizePlanKey(sub.plan) === "free") return null;
+    const addOns = sub.addOns ?? {};
+    return {
+      whiteLabel: Boolean(addOns.whiteLabel),
+      customDomain: addOns.customDomain ?? null,
+      apiTier: Boolean(addOns.apiTier),
+      prices: ADD_ON_PRICES_CENTS,
+    };
+  },
+});
+
+/**
+ * Shared guard for add-on mutations: returns the caller's
+ * subscription row only if it's a live, paid plan. Throws the typed
+ * `no_subscription` ConvexError otherwise so the client can prompt an
+ * upgrade rather than silently enabling a feature without billing.
+ */
+async function requireLivePaidSubscription(
+  ctx: MutationCtx,
+  ownerClerkId: string,
+) {
+  const sub = await ctx.db
+    .query("workspaceSubscriptions")
+    .withIndex("by_owner", (q) => q.eq("ownerClerkId", ownerClerkId))
+    .unique();
+  const live =
+    sub && (sub.status === "active" || sub.status === "trialing");
+  if (!sub || !live || normalizePlanKey(sub.plan) === "free") {
+    throw new ConvexError({
+      code: "no_subscription",
+      message: "Subscribe to Basic or Pro before adding optional features.",
+    });
+  }
+  return sub;
+}
+
 // ─── Mutations ───────────────────────────────────────────────────────────
+
+/**
+ * Toggle an add-on on the caller's subscription. Requires a live
+ * paid subscription — add-ons can't attach to the free tier (no
+ * Stripe customer). In demo mode (no Stripe configured), the toggle
+ * still flips locally so the UI surfaces the feature behavior.
+ *
+ * Real billing wiring (Stripe SubscriptionItem add/remove) follows
+ * in a separate PR; this mutation is the durable-state half.
+ */
+export const toggleAddOn = mutation({
+  args: {
+    addOn: v.union(
+      v.literal("whiteLabel"),
+      v.literal("apiTier"),
+    ),
+    enabled: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const sub = await requireLivePaidSubscription(ctx, user.subject);
+    const next = { ...(sub.addOns ?? {}), [args.addOn]: args.enabled };
+    await ctx.db.patch(sub._id, { addOns: next });
+  },
+});
+
+/**
+ * Sets the custom-domain CNAME for paywalled deliveries. The DNS
+ * verification + cert provisioning happens out-of-band; this mutation
+ * just records the requested hostname so the share-link renderer can
+ * use it.
+ */
+export const setCustomDomain = mutation({
+  args: { hostname: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const sub = await requireLivePaidSubscription(ctx, user.subject);
+    const hostname = args.hostname?.trim() || undefined;
+    const next = { ...(sub.addOns ?? {}), customDomain: hostname };
+    await ctx.db.patch(sub._id, { addOns: next });
+  },
+});
 
 /**
  * Demo-mode activation: flips the user's subscription to "active" on
@@ -673,6 +896,7 @@ export const recordPendingCheckout = mutation({
   args: {
     plan: v.string(),
     stripeCustomerId: v.optional(v.string()),
+    cadence: v.optional(v.union(v.literal("monthly"), v.literal("annual"))),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -681,6 +905,7 @@ export const recordPendingCheckout = mutation({
       throw new Error("Pick a paid plan to start checkout.");
     }
     const tier = TIERS[key];
+    const cadence = args.cadence ?? "monthly";
     const existing = await ctx.db
       .query("workspaceSubscriptions")
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
@@ -693,6 +918,7 @@ export const recordPendingCheckout = mutation({
         perSeatCents: tier.perSeatCents,
         includedSeats: tier.includedSeats,
         currency: tier.currency,
+        billingCadence: cadence,
         stripeCustomerId: args.stripeCustomerId ?? existing.stripeCustomerId,
       });
       return;
@@ -705,6 +931,7 @@ export const recordPendingCheckout = mutation({
       perSeatCents: tier.perSeatCents,
       includedSeats: tier.includedSeats,
       currency: tier.currency,
+      billingCadence: cadence,
       stripeCustomerId: args.stripeCustomerId,
     });
   },

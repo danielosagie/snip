@@ -189,6 +189,7 @@ export default function VideoPage() {
   const getPlaybackSession = useAction(api.videoActions.getPlaybackSession);
   const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
+  const requestEncoding = useAction(api.videoActions.requestEncoding);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -358,6 +359,18 @@ export default function VideoPage() {
       navigate({ to: context.canonicalPath, replace: true });
     }
   }, [shouldCanonicalize, context, navigate]);
+
+  // Lazy encoding: this video was uploaded with `encodingDeferred:
+  // true` and no Mux ingest fired. The first viewer kicks the
+  // pipeline — flips the status to "processing" upstream; the
+  // reactive `video` query will repaint as Mux's webhook progresses.
+  // Action is idempotent so concurrent viewers don't double-fire.
+  useEffect(() => {
+    if (!resolvedVideoId) return;
+    if (!video?.encodingDeferred) return;
+    if (video.muxPlaybackId) return; // already encoded by the time we got here
+    void requestEncoding({ videoId: resolvedVideoId });
+  }, [resolvedVideoId, video?.encodingDeferred, video?.muxPlaybackId, requestEncoding]);
 
   useEffect(() => {
     if (!resolvedVideoId || !isPlayable) {

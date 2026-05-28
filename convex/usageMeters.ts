@@ -133,6 +133,7 @@ export const incrementTranscribedMinutes = internalMutation({
   },
 });
 
+
 /**
  * Daily snapshot: writes the storage delta for the day. Called by the
  * cron in convex/crons.ts via the action wrapper. `bytesNow` is the
