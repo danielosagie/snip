@@ -10,10 +10,11 @@
  *
  * What this does instead:
  *   1. Boots an HTTP server bound to 127.0.0.1 that speaks just enough WebDAV
- *      to satisfy rclone (PROPFIND, OPTIONS, GET, HEAD, PUT).
- *   2. PROPFIND queries Convex via the existing `convexCall` helper to list
- *      teams / projects / videos by human name, with collision suffixes when
- *      duplicates exist.
+ *      to satisfy rclone (PROPFIND, OPTIONS, GET, HEAD, PUT, MKCOL).
+ *   2. PROPFIND queries Convex via the existing `convexCall` helper to mirror
+ *      the web app's tree — team / project / folders / subfolders / files — by
+ *      human name, with collision suffixes when duplicates exist. MKCOL creates
+ *      real folder rows; PUT into a subfolder files the upload there.
  *   3. GET 302-redirects to a presigned S3 URL returned by Convex — rclone
  *      follows redirects, so bytes never proxy through this process.
  *   4. PUT calls `createUploadForDesktop` (which inserts the `videos` row and
@@ -35,7 +36,7 @@ const { Readable } = require("stream");
 const DAV_HEADERS = {
   DAV: "1",
   "MS-Author-Via": "DAV",
-  Allow: "OPTIONS, GET, HEAD, PROPFIND, PUT",
+  Allow: "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL",
 };
 
 function xmlEscape(s) {
@@ -229,6 +230,9 @@ async function handle(req, res, { convexCall, pushLog }) {
   if (method === "PUT") {
     return handlePut(req, res, segments, { convexCall, pushLog });
   }
+  if (method === "MKCOL") {
+    return handleMkcol(req, res, segments, { convexCall, pushLog });
+  }
 
   res.writeHead(405, { ...DAV_HEADERS, "content-type": "text/plain" });
   return res.end(`Method ${method} not implemented yet.`);
@@ -301,56 +305,64 @@ async function handlePropfind(req, res, segments, depth, { convexCall, pushLog }
     return sendMultistatus(res, entries);
   }
 
-  if (segments.length === 2) {
-    // /team/project/ → list videos.
-    const [teamSlug, projectName] = segments;
-    const self = {
-      href: buildHref(["webdav"], [teamSlug, projectName], true),
-      isCollection: true,
-      mtime: Date.now(),
-    };
-    if (!includeChildren) return sendMultistatus(res, [self]);
-    const summary = await convexCall(
-      "query",
-      "desktopBrowse:listVideosForDesktop",
-      { teamSlug, projectName },
+  // /team/project[/folder…/[file]] → a directory or file inside the project.
+  // browsePathForDesktop walks the folder tree and tells us whether the path
+  // is a folder (returns its subfolders + videos) or a single file, so the
+  // mount mirrors the web app's workspace → project → folders → files tree.
+  const [teamSlug, projectName, ...folderPath] = segments;
+  let node;
+  try {
+    node = await convexCall("query", "desktopBrowse:browsePathForDesktop", {
+      teamSlug,
+      projectName,
+      folderPath,
+    });
+  } catch (err) {
+    pushLog?.(
+      `webdav: browsePathForDesktop(${segments.join("/")}) failed: ${err.message}`,
     );
-    if (!summary) return notFound(res);
-    const entries = [self];
-    for (const v of summary.videos) {
-      entries.push({
-        href: buildHref(["webdav"], [teamSlug, projectName, v.displayName], false),
-        isCollection: false,
-        size: v.size,
-        contentType: v.contentType || contentTypeFromExt(v.ext),
-        mtime: v.updatedAt,
-      });
-    }
-    return sendMultistatus(res, entries);
+    return notFound(res);
   }
+  if (!node) return notFound(res);
 
-  if (segments.length === 3) {
-    // /team/project/file.ext — PROPFIND of a single file. Always Depth 0.
-    const [teamSlug, projectName, fileName] = segments;
-    const target = await convexCall(
-      "query",
-      "desktopBrowse:resolveVideoForDesktop",
-      { teamSlug, projectName, fileName },
-    );
-    if (!target) return notFound(res);
+  if (node.type === "file") {
+    const ext = segments[segments.length - 1].split(".").pop();
     return sendMultistatus(res, [
       {
-        href: buildHref(["webdav"], [teamSlug, projectName, fileName], false),
+        href: buildHref(["webdav"], segments, false),
         isCollection: false,
-        size: target.size,
-        contentType: target.contentType,
-        mtime: target.updatedAt,
+        size: node.size,
+        contentType: node.contentType || contentTypeFromExt(ext),
+        mtime: node.updatedAt,
       },
     ]);
   }
 
-  // Deeper paths (folders, versions) not implemented yet.
-  return notFound(res);
+  // Directory: self + subfolders (collections) + videos (files).
+  const self = {
+    href: buildHref(["webdav"], segments, true),
+    isCollection: true,
+    mtime: Date.now(),
+  };
+  if (!includeChildren) return sendMultistatus(res, [self]);
+  const entries = [self];
+  for (const folder of node.folders) {
+    entries.push({
+      href: buildHref(["webdav"], [...segments, folder.displayName], true),
+      isCollection: true,
+      mtime: folder.updatedAt,
+    });
+  }
+  for (const vd of node.videos) {
+    entries.push({
+      href: buildHref(["webdav"], [...segments, vd.displayName], false),
+      isCollection: false,
+      size: vd.size,
+      contentType: vd.contentType || contentTypeFromExt(vd.ext),
+      mtime: vd.updatedAt,
+    });
+  }
+  return sendMultistatus(res, entries);
 }
 
 function sendMultistatus(res, entries) {
@@ -364,12 +376,15 @@ function sendMultistatus(res, entries) {
 }
 
 async function handleGet(req, res, segments, headOnly, { convexCall, pushLog }) {
-  if (segments.length !== 3) return notFound(res);
-  const [teamSlug, projectName, fileName] = segments;
+  // /team/project[/folder…]/file.ext — at least team + project + file.
+  if (segments.length < 3) return notFound(res);
+  const [teamSlug, projectName, ...rest] = segments;
+  const fileName = rest.pop();
+  const folderPath = rest;
   const result = await convexCall(
     "action",
     "desktopBrowse:getDownloadUrlForDesktop",
-    { teamSlug, projectName, fileName },
+    { teamSlug, projectName, folderPath, fileName },
   );
   if (!result) return notFound(res);
   // rclone follows redirects; we hand back the presigned S3 URL so bytes
@@ -383,10 +398,12 @@ async function handleGet(req, res, segments, headOnly, { convexCall, pushLog }) 
 }
 
 async function handlePut(req, res, segments, { convexCall, pushLog }) {
-  if (segments.length !== 3) {
-    return forbidden(res, "Uploads must be at /team/project/file.ext");
+  if (segments.length < 3) {
+    return forbidden(res, "Uploads must be at /team/project[/folder…]/file.ext");
   }
-  const [teamSlug, projectName, fileName] = segments;
+  const [teamSlug, projectName, ...rest] = segments;
+  const fileName = rest.pop();
+  const folderPath = rest;
   const declaredSize = Number(req.headers["content-length"] || "0");
   if (!Number.isFinite(declaredSize) || declaredSize <= 0) {
     return forbidden(res, "Content-Length is required for uploads.");
@@ -403,6 +420,7 @@ async function handlePut(req, res, segments, { convexCall, pushLog }) {
       {
         teamSlug,
         projectName,
+        folderPath,
         fileName,
         size: declaredSize,
         contentType,
@@ -461,6 +479,30 @@ async function handlePut(req, res, segments, { convexCall, pushLog }) {
   }
   res.writeHead(201, { "content-type": "text/plain" });
   res.end("created");
+}
+
+async function handleMkcol(req, res, segments, { convexCall, pushLog }) {
+  // Finder/rclone issue MKCOL to make a new folder. Must sit inside a project:
+  // /team/project[/folder…]/newFolder. Backed by a real `folders` row so the
+  // web app sees the same tree.
+  if (segments.length < 3) {
+    res.writeHead(403, { "content-type": "text/plain" });
+    return res.end("Folders can only be created inside a project.");
+  }
+  const [teamSlug, projectName, ...folderPath] = segments;
+  try {
+    await convexCall("mutation", "desktopBrowse:ensureFolderForDesktop", {
+      teamSlug,
+      projectName,
+      folderPath,
+    });
+  } catch (err) {
+    pushLog?.(`webdav: MKCOL ${segments.join("/")} failed: ${err.message}`);
+    res.writeHead(409, { "content-type": "text/plain" });
+    return res.end(err.message);
+  }
+  res.writeHead(201, { "content-type": "text/plain" });
+  return res.end("created");
 }
 
 module.exports = { start };

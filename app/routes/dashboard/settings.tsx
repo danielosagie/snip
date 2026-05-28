@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
 import { useMutation, useQuery } from "convex/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Input } from "@/components/ui/input";
@@ -15,9 +15,12 @@ import {
   Calendar,
   AlertCircle,
   Check,
+  RefreshCw,
+  DownloadCloud,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
+import { useIsDesktop } from "@/lib/useIsDesktop";
 
 export const Route = createFileRoute("/dashboard/settings")({
   head: () =>
@@ -240,11 +243,135 @@ function NotifyToggle({
   );
 }
 
+type DesktopUpdateStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "none"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+type DesktopUpdateSnapshot = {
+  status: DesktopUpdateStatus;
+  version: string | null;
+  percent: number;
+  error: string | null;
+};
+
+/**
+ * snip Desktop version + updates. Only renders inside the desktop shell — in a
+ * plain browser window.api is absent and this is null. The native menu's
+ * "Check for Updates…" item drives the same flow; this surfaces version,
+ * progress, and the "Restart & install" handoff so updating is possible
+ * without leaving the app.
+ */
+function DesktopUpdatesSection() {
+  const isDesktop = useIsDesktop();
+  const [version, setVersion] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<DesktopUpdateSnapshot | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    if (!isDesktop || typeof window === "undefined" || !window.api) return;
+    void window.api.app.version().then(setVersion).catch(() => {});
+    void window.api.update.state().then((s) => setSnapshot(s)).catch(() => {});
+    return window.api.update.onStatus((s) => setSnapshot(s));
+  }, [isDesktop]);
+
+  if (!isDesktop) return null;
+
+  const status = snapshot?.status ?? "idle";
+  const busy = checking || status === "checking" || status === "downloading";
+
+  const check = async () => {
+    if (!window.api) return;
+    setChecking(true);
+    try {
+      const res = await window.api.update.check();
+      if (!res.ok && res.reason && res.reason !== "dev") {
+        setSnapshot((prev) => ({
+          status: "error",
+          version: prev?.version ?? null,
+          percent: prev?.percent ?? 0,
+          error: res.reason ?? "Update check failed.",
+        }));
+      }
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const statusLine = (() => {
+    switch (status) {
+      case "checking":
+        return "Checking for updates…";
+      case "available":
+        return `Update available${snapshot?.version ? ` (v${snapshot.version})` : ""} — downloading in the background…`;
+      case "downloading":
+        return `Downloading update… ${snapshot?.percent ?? 0}%`;
+      case "downloaded":
+        return `Update ready${snapshot?.version ? ` (v${snapshot.version})` : ""}. Restart to install.`;
+      case "none":
+        return "You're on the latest version.";
+      case "error":
+        return snapshot?.error ?? "Update check failed.";
+      default:
+        return "Updates download automatically in the background and install on the next quit.";
+    }
+  })();
+
+  return (
+    <Section
+      title="snip Desktop"
+      description="App version and automatic updates for this Mac."
+    >
+      <Field label="Installed version">
+        <div className="font-mono text-sm text-[#1a1a1a]">
+          {version ? `v${version}` : "—"}
+        </div>
+      </Field>
+      <p
+        className={cn(
+          "text-xs font-mono",
+          status === "error" ? "text-[#b91c1c]" : "text-[#666]",
+        )}
+      >
+        {statusLine}
+      </p>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() => void check()}
+          disabled={busy}
+          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors disabled:opacity-50"
+        >
+          <RefreshCw
+            className={cn("h-3.5 w-3.5", busy && "animate-spin")}
+          />
+          Check for updates
+        </button>
+        {status === "downloaded" ? (
+          <button
+            type="button"
+            onClick={() => void window.api?.update.install()}
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#FF6600] bg-[#FF6600] text-[#f0f0e8] hover:bg-[#FF7A1F] transition-colors"
+          >
+            <DownloadCloud className="h-3.5 w-3.5" />
+            Restart &amp; install
+          </button>
+        ) : null}
+      </div>
+    </Section>
+  );
+}
+
 function IntegrationsTab() {
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
 
   return (
     <>
+      <DesktopUpdatesSection />
       <Section
         title="Connected services"
         description="Service status across this deployment. Per-team integrations like Stripe Connect link out to the team they belong to."

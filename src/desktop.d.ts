@@ -8,10 +8,31 @@ interface DesktopMountState {
   lastError: string | null;
 }
 
+interface DesktopUpdateState {
+  status:
+    | "idle"
+    | "checking"
+    | "available"
+    | "none"
+    | "downloading"
+    | "downloaded"
+    | "error";
+  version: string | null;
+  percent: number;
+  error: string | null;
+}
+
 interface DesktopApi {
   app: {
     version: () => Promise<string>;
     uninstall: () => Promise<{ ok: boolean; trashed?: boolean }>;
+    onUninstallRequested: (handler: () => void) => () => void;
+  };
+  update: {
+    state: () => Promise<DesktopUpdateState>;
+    check: () => Promise<{ ok: boolean; reason?: string }>;
+    install: () => Promise<{ ok: boolean; reason?: string }>;
+    onStatus: (handler: (state: DesktopUpdateState) => void) => () => void;
   };
   settings: {
     get: () => Promise<Record<string, unknown> & { storage: Record<string, unknown> }>;

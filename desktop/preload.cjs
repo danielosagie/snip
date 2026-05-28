@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld("api", {
   app: {
     version: () => ipcRenderer.invoke("app:version"),
     uninstall: () => ipcRenderer.invoke("app:uninstall"),
+    // Fired when the user picks "Uninstall snip Desktop…" from the native
+    // app menu. The web app shows its own branded confirm modal and calls
+    // uninstall() on confirm.
+    onUninstallRequested: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on("menu:uninstall", listener);
+      return () => ipcRenderer.off("menu:uninstall", listener);
+    },
   },
   update: {
     state: () => ipcRenderer.invoke("update:state"),

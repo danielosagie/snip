@@ -1,7 +1,7 @@
 // Electron main process. Plain CJS so it runs without a build step.
 // Talks to the renderer (React UI in src/) via IPC.
 
-const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage, Menu } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
@@ -2511,15 +2511,106 @@ ipcMain.handle("update:install", async () => {
   return { ok: true };
 });
 
+// ---- Application menu --------------------------------------------------------
+//
+// The desktop loads the web app, so the in-window UI is the web app's. The
+// native app menu is where OS-level affordances live: "Check for Updates…" and
+// "Uninstall snip Desktop…". Uninstall used to be a link in the web sidebar;
+// it now lives here and asks the renderer to show snip's own confirm modal
+// (menu:uninstall → window.api.app.onUninstallRequested) rather than a stock
+// system dialog.
+
+function triggerUpdateCheck() {
+  if (!app.isPackaged) {
+    dialog.showMessageBox(mainWindow ?? undefined, {
+      type: "info",
+      message: "Updates are only available in the installed app.",
+      detail: "You're running a development build.",
+    });
+    return;
+  }
+  updateState = { ...updateState, status: "checking", error: null };
+  emitUpdateStatus();
+  autoUpdater.checkForUpdates().catch((e) => {
+    updateState = {
+      ...updateState,
+      status: "error",
+      error: e?.message ?? String(e),
+    };
+    emitUpdateStatus();
+  });
+}
+
+function requestUninstallFromRenderer() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("menu:uninstall");
+  }
+}
+
+function buildAppMenu() {
+  const isMac = process.platform === "darwin";
+  const checkForUpdates = {
+    label: "Check for Updates…",
+    click: () => triggerUpdateCheck(),
+  };
+  const uninstall = {
+    label: "Uninstall snip Desktop…",
+    click: () => requestUninstallFromRenderer(),
+  };
+
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              checkForUpdates,
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              uninstall,
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+    {
+      role: "help",
+      submenu: [
+        ...(isMac
+          ? []
+          : [checkForUpdates, { type: "separator" }, uninstall, { type: "separator" }]),
+        {
+          label: "Open snip Website",
+          click: () => void shell.openExternal(WEB_APP_URL),
+        },
+      ],
+    },
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
 // ---- Window management -------------------------------------------------------
 
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
-    // Standard macOS title bar so the traffic lights live in their own bar and
-    // never overlap the web app's header (the web UI isn't ours to re-pad).
-    titleBarStyle: "default",
+    // No native title bar — just the inset traffic lights overlaid on the web
+    // content for a clean, app-like chrome. The web app reserves a short
+    // draggable strip at the top (gated on window.snipDesktop) so the lights
+    // don't collide with the sidebar; see app/routes/dashboard/-layout.tsx.
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 14, y: 14 },
     backgroundColor: "#f0f0e8",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -2605,6 +2696,7 @@ app.whenReady().then(() => {
   // boots fresh.
   if (maybeMoveToApplications()) return;
   createWindow();
+  Menu.setApplicationMenu(buildAppMenu());
   // Only run the updater in packaged (signed) builds — dev has no release feed.
   if (app.isPackaged) setupAutoUpdater();
   void tryAutoMount();

@@ -1,7 +1,15 @@
 
 import { useAuth } from "@clerk/tanstack-react-start";
 import { useConvex, useQuery } from "convex/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+} from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 
@@ -33,6 +41,16 @@ import { useVideoUploadManager } from "./-useVideoUploadManager";
 import { DashboardUploadProvider } from "@/lib/dashboardUploadContext";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { SidebarProvider } from "@/lib/sidebarContext";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import { DesktopUninstallModal } from "@/components/desktop/DesktopUninstallModal";
+
+// The desktop shell hides the native title bar (titleBarStyle: hiddenInset),
+// so we reserve a short draggable strip at the very top for the traffic lights
+// to live in without colliding with the sidebar. `app-region: drag` makes the
+// whole strip a window-move handle.
+const DESKTOP_DRAG_REGION = {
+  WebkitAppRegion: "drag",
+} as unknown as CSSProperties;
 
 function getDroppedFiles(files: FileList | null) {
   // No file-type filter. The dashboard accepts every file the user
@@ -53,6 +71,7 @@ export default function DashboardLayout() {
   const { pathname, searchStr } = location;
   const params = useParams({ strict: false });
   const convex = useConvex();
+  const isDesktop = useIsDesktop();
   const teamSlug =
     typeof params.teamSlug === "string" ? params.teamSlug : undefined;
   const routeProjectId =
@@ -262,7 +281,14 @@ export default function DashboardLayout() {
 
   return (
     <SidebarProvider>
-    <div className={cn("relative h-full flex bg-[#f0f0e8]")}>
+    <div className={cn("relative h-full flex flex-col bg-[#f0f0e8]")}>
+      {isDesktop ? (
+        <div
+          className="h-7 w-full flex-shrink-0 bg-[#f0f0e8]"
+          style={DESKTOP_DRAG_REGION}
+        />
+      ) : null}
+      <div className="relative flex-1 flex min-h-0">
       <DashboardSidebar />
       {/* Main content */}
       <main className="flex-1 overflow-auto flex flex-col min-w-0">
@@ -338,6 +364,8 @@ export default function DashboardLayout() {
           )}
         </DialogContent>
       </Dialog>
+      </div>
+      {isDesktop ? <DesktopUninstallModal /> : null}
     </div>
     </SidebarProvider>
   );

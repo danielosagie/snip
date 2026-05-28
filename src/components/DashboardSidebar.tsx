@@ -555,6 +555,22 @@ function DesktopAppOrDrive() {
     }
   }, [getStorageBootstrap]);
 
+  // Tearing the drive back down. mount.stop also flips the persisted
+  // autoMount flag off in the main process, so the drive stays disconnected
+  // on the next launch until the user explicitly re-enables it.
+  const disconnect = useCallback(async () => {
+    if (!window.api) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await window.api.mount.stop();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't disconnect the drive.");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   if (!isDesktop) {
     return (
       <a
@@ -573,14 +589,32 @@ function DesktopAppOrDrive() {
   return (
     <div className="flex flex-col gap-1.5">
       {status === "mounted" ? (
-        <button
-          type="button"
-          onClick={() => void window.api?.shell.openFolder(mount?.mountPath ?? "")}
-          className={DESKTOP_BTN}
-          title="Open the cloud drive in Finder"
-        >
+        <>
+          <button
+            type="button"
+            onClick={() => void window.api?.shell.openFolder(mount?.mountPath ?? "")}
+            className={DESKTOP_BTN}
+            title="Open the cloud drive in Finder"
+          >
+            <HardDrive className="h-3.5 w-3.5" />
+            Drive connected · Open
+          </button>
+          {/* The "remove" half of the toggle — the connected state used to
+              be a dead end with no way to turn the drive off. */}
+          <button
+            type="button"
+            onClick={() => void disconnect()}
+            disabled={busy}
+            className="text-[10px] text-[#888] hover:text-[#b91c1c] underline self-center disabled:opacity-50"
+            title="Unmount the cloud drive"
+          >
+            {busy ? "Disconnecting…" : "Disconnect drive"}
+          </button>
+        </>
+      ) : status === "unmounting" ? (
+        <button type="button" disabled className={DESKTOP_BTN}>
           <HardDrive className="h-3.5 w-3.5" />
-          Drive connected · Open
+          Disconnecting…
         </button>
       ) : (
         <button
@@ -601,21 +635,6 @@ function DesktopAppOrDrive() {
       {shownError ? (
         <p className="text-[10px] leading-snug text-[#b91c1c]">{shownError}</p>
       ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          if (
-            window.confirm(
-              "Uninstall snip Desktop? This removes the app and its local data (the drive unmounts; macFUSE stays installed). Your cloud files are not affected.",
-            )
-          ) {
-            void window.api?.app.uninstall();
-          }
-        }}
-        className="text-[10px] text-[#888] hover:text-[#b91c1c] underline self-center"
-      >
-        Uninstall snip Desktop
-      </button>
     </div>
   );
 }
