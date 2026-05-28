@@ -28,6 +28,12 @@ import {
 } from "./mux";
 import { BUCKET_NAME, getS3Client } from "./s3";
 import { isFeatureEnabled } from "./featureFlags";
+import {
+  buildStreamPlaybackUrls,
+  createStreamAssetFromInputUrl,
+  isCloudflareStreamConfigured,
+} from "./cloudflareStream";
+import { resolvePlaybackProvider, defaultPlaybackProvider } from "./providers/playbackProvider";
 
 const GIBIBYTE = 1024 ** 3;
 const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
@@ -517,31 +523,20 @@ export const markUploadComplete = action({
       });
 
       if (isMuxVideoType(normalizedContentType, video.s3Key)) {
-        // Lazy encoding: when enabled, skip Mux ingest and hold the
-        // video in `encodingDeferred` state. The first watch triggers
-        // `requestEncoding`, which kicks off the normal pipeline.
-        // Cuts COGS on the long tail of footage that's uploaded but
-        // never played (very common on free-tier review workflows).
+        // Lazy encoding: when enabled, skip ingest and hold the video
+        // in `encodingDeferred` state. The first watch triggers
+        // `requestEncoding`, which runs the same pipeline. Cuts COGS
+        // on the long tail of footage uploaded but never played.
         if (await shouldDeferEncoding(ctx, video.projectId)) {
           await ctx.runMutation(internal.videos.markAsEncodingDeferred, {
             videoId: args.videoId,
           });
         } else {
-          // Video path — kick off Mux ingest as before.
-          await ctx.runMutation(internal.videos.markAsProcessing, {
+          await startEncoding(ctx, {
             videoId: args.videoId,
+            s3Key: video.s3Key,
+            projectId: video.projectId,
           });
-
-          const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
-            expiresIn: 60 * 60 * 24,
-          });
-          const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
-          if (asset.id) {
-            await ctx.runMutation(internal.videos.setMuxAssetReference, {
-              videoId: args.videoId,
-              muxAssetId: asset.id,
-            });
-          }
         }
       } else {
         // Non-video path — file lives in object storage, no Mux processing.
@@ -618,10 +613,24 @@ export const getPlaybackSession = action({
       videoId: args.videoId,
     });
 
-    if (!video || !video.muxPlaybackId || video.status !== "ready") {
+    if (!video || video.status !== "ready") {
       throw new Error("Video not found or not ready");
     }
 
+    // Cloudflare Stream path — the stream uid is both the asset and
+    // playback handle, so we build the videodelivery.net URLs
+    // directly. No SDK round-trip like Mux's ensurePublicPlaybackId.
+    if (resolvePlaybackProvider(video) === "cloudflare_stream") {
+      if (!video.streamUid) {
+        throw new Error("Stream video is missing its uid");
+      }
+      const urls = buildStreamPlaybackUrls(video.streamUid);
+      return { url: urls.hlsUrl, posterUrl: urls.thumbnailUrl };
+    }
+
+    if (!video.muxPlaybackId) {
+      throw new Error("Video not found or not ready");
+    }
     const playbackId = await ensurePublicPlaybackId(ctx, {
       videoId: args.videoId,
       muxAssetId: video.muxAssetId,
@@ -641,10 +650,20 @@ export const getPlaybackUrl = action({
       videoId: args.videoId,
     });
 
-    if (!video || !video.muxPlaybackId || video.status !== "ready") {
+    if (!video || video.status !== "ready") {
       throw new Error("Video not found or not ready");
     }
 
+    if (resolvePlaybackProvider(video) === "cloudflare_stream") {
+      if (!video.streamUid) {
+        throw new Error("Stream video is missing its uid");
+      }
+      return { url: buildStreamPlaybackUrls(video.streamUid).hlsUrl };
+    }
+
+    if (!video.muxPlaybackId) {
+      throw new Error("Video not found or not ready");
+    }
     const playbackId = await ensurePublicPlaybackId(ctx, {
       videoId: args.videoId,
       muxAssetId: video.muxAssetId,
@@ -2189,6 +2208,57 @@ export const ensurePreviewAssetForShareLink = action({
 //             since Stream's storage is so cheap that delaying encode
 //             is essentially free).
 
+/**
+ * Kicks off encoding for a video, routing to the provider chosen by
+ * `defaultPlaybackProvider(tier)`. Shared by the upload flow and the
+ * lazy-encode `requestEncoding` trigger so the routing logic lives in
+ * one place.
+ *
+ * Falls back to Mux if Stream is selected but not configured on the
+ * deployment — better to encode somewhere than to fail the upload.
+ */
+async function startEncoding(
+  ctx: ActionCtx,
+  params: { videoId: Id<"videos">; s3Key: string; projectId: Id<"projects"> },
+): Promise<void> {
+  const tier = await ctx.runQuery(
+    internal.workspaceBilling.getProjectOwnerTier,
+    { projectId: params.projectId },
+  );
+  let provider = defaultPlaybackProvider(tier);
+  if (provider === "cloudflare_stream" && !isCloudflareStreamConfigured()) {
+    provider = "mux";
+  }
+
+  await ctx.runMutation(internal.videos.markAsProcessing, {
+    videoId: params.videoId,
+  });
+
+  const ingestUrl = await buildSignedBucketObjectUrl(params.s3Key, {
+    expiresIn: 60 * 60 * 24,
+  });
+
+  if (provider === "cloudflare_stream") {
+    const asset = await createStreamAssetFromInputUrl(
+      params.videoId,
+      ingestUrl,
+    );
+    await ctx.runMutation(internal.videos.setStreamRefs, {
+      videoId: params.videoId,
+      streamUid: asset.assetId,
+    });
+    return;
+  }
+
+  const asset = await createMuxAssetFromInputUrl(params.videoId, ingestUrl);
+  if (asset.id) {
+    await ctx.runMutation(internal.videos.setMuxAssetReference, {
+      videoId: params.videoId,
+      muxAssetId: asset.id,
+    });
+  }
+}
+
 async function shouldDeferEncoding(
   ctx: ActionCtx,
   projectId: Id<"projects">,
@@ -2257,19 +2327,11 @@ export const requestEncoding = action({
       return { status: "not_a_video" };
     }
 
-    await ctx.runMutation(internal.videos.markAsProcessing, {
+    await startEncoding(ctx, {
       videoId: args.videoId,
+      s3Key: video.s3Key,
+      projectId: video.projectId,
     });
-    const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
-      expiresIn: 60 * 60 * 24,
-    });
-    const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
-    if (asset.id) {
-      await ctx.runMutation(internal.videos.setMuxAssetReference, {
-        videoId: args.videoId,
-        muxAssetId: asset.id,
-      });
-    }
     return { status: "encoding_started" };
   },
 });

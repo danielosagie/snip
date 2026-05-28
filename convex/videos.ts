@@ -1433,10 +1433,8 @@ export const setMuxAssetReference = internalMutation({
 
 /**
  * Persists the Cloudflare Stream uid + provider key on a video row.
- * Called from the Stream webhook handler the first time we see an
- * asset reach "ready". The Mux columns are still set on the same row
- * (so the existing player code path works) — these columns are extra
- * metadata for when we add provider-aware signing.
+ * Called at ingest time (from `startEncoding`) so the row knows which
+ * provider owns it before the asset is ready.
  */
 export const setStreamRefs = internalMutation({
   args: {
@@ -1448,6 +1446,70 @@ export const setStreamRefs = internalMutation({
       playbackProvider: "cloudflare_stream",
       streamUid: args.streamUid,
     });
+  },
+});
+
+/**
+ * Stream's equivalent of `markAsReady`. The two differ in one
+ * important way: `markAsReady` pre-warms a Mux *watermarked preview*
+ * asset for paywalled delivery, which would fire a broken Mux job
+ * against a Stream-hosted video. Paywalled/watermarked delivery is
+ * still Mux-only (see the cutover plan), so Stream videos skip that
+ * pre-warm — a paywalled link on a Stream video will mint its preview
+ * on demand later.
+ *
+ * `muxPlaybackId` is set to the stream uid as a "has playback"
+ * sentinel so the player's `isPlayable` gate + thumbnail logic work
+ * unchanged; `getPlaybackSession` switches on `playbackProvider` to
+ * build the right URLs.
+ */
+export const markStreamReady = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    streamUid: v.string(),
+    duration: v.optional(v.number()),
+    thumbnailUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const before = await ctx.db.get(args.videoId);
+    await ctx.db.patch(args.videoId, {
+      playbackProvider: "cloudflare_stream",
+      streamUid: args.streamUid,
+      // Sentinel: keeps isPlayable + thumbnail code paths working.
+      muxPlaybackId: args.streamUid,
+      muxAssetId: args.streamUid,
+      muxAssetStatus: "ready",
+      duration: args.duration,
+      thumbnailUrl: args.thumbnailUrl,
+      uploadError: undefined,
+      status: "ready",
+      encodingDeferred: undefined,
+    });
+
+    // Provider-agnostic "long upload finished" email (no Mux preview
+    // pre-warm — that's the key difference from markAsReady).
+    try {
+      if (before && before.status !== "ready") {
+        const elapsed = Date.now() - before._creationTime;
+        if (
+          elapsed > 5 * 60 * 1000 &&
+          (await prefEnabled(ctx, before.uploadedByClerkId, "uploadFinished"))
+        ) {
+          const to = await resolveUserEmail(ctx, before.uploadedByClerkId);
+          const project = await ctx.db.get(before.projectId);
+          const team = project ? await ctx.db.get(project.teamId) : null;
+          if (to && project && team) {
+            await ctx.scheduler.runAfter(0, internal.email.sendUploadFinished, {
+              to,
+              videoTitle: before.title,
+              path: `/dashboard/${team.slug}/${before.projectId}/${args.videoId}`,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.error("upload-finished notification failed", e);
+    }
   },
 });
 

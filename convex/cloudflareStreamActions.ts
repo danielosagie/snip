@@ -121,24 +121,17 @@ export const processWebhook = internalAction({
 
     if (state === READY_STATE) {
       const urls = buildStreamPlaybackUrls(uid);
-      await ctx.runMutation(internal.videos.markAsReady, {
+      // Stream-specific ready path — skips the Mux watermarked-preview
+      // pre-warm that markAsReady fires (which would be a broken Mux
+      // job against a Stream-hosted video). See markStreamReady.
+      await ctx.runMutation(internal.videos.markStreamReady, {
         videoId,
-        // Mux schema is the source of truth for now; Stream surfaces
-        // through the existing muxPlaybackId / thumbnail fields so the
-        // player doesn't need to know which provider owns the row.
-        // (The dedicated playbackProvider + streamUid columns let us
-        // disambiguate when we add per-provider signing.)
-        muxAssetId: uid,
-        muxPlaybackId: uid,
+        streamUid: uid,
         duration:
           typeof body.duration === "number" && body.duration > 0
             ? body.duration
             : undefined,
         thumbnailUrl: body.thumbnail ?? urls.thumbnailUrl,
-      });
-      await ctx.runMutation(internal.videos.setStreamRefs, {
-        videoId,
-        streamUid: uid,
       });
       return { status: 200, message: "ok" };
     }
