@@ -170,12 +170,12 @@ function isHidden(name) {
   );
 }
 
-function start({ convexCall, pushLog, port = 0 }) {
+function start({ convexCall, pushLog, port = 0, preferProxy = true, uploadObject = null }) {
   let aborted = false;
 
   const server = http.createServer(async (req, res) => {
     try {
-      await handle(req, res, { convexCall, pushLog });
+      await handle(req, res, { convexCall, pushLog, preferProxy, uploadObject });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       pushLog?.(`webdav: ${req.method} ${req.url} → 500: ${msg}`);
@@ -206,7 +206,7 @@ function start({ convexCall, pushLog, port = 0 }) {
   });
 }
 
-async function handle(req, res, { convexCall, pushLog }) {
+async function handle(req, res, { convexCall, pushLog, preferProxy, uploadObject }) {
   const method = req.method?.toUpperCase() ?? "GET";
   const { segments } = parsePath(req.url || "/");
   const depth = (req.headers.depth || "1").toString();
@@ -222,13 +222,13 @@ async function handle(req, res, { convexCall, pushLog }) {
   }
 
   if (method === "PROPFIND") {
-    return handlePropfind(req, res, segments, depth, { convexCall, pushLog });
+    return handlePropfind(req, res, segments, depth, { convexCall, pushLog, preferProxy });
   }
   if (method === "GET" || method === "HEAD") {
-    return handleGet(req, res, segments, method === "HEAD", { convexCall, pushLog });
+    return handleGet(req, res, segments, method === "HEAD", { convexCall, pushLog, preferProxy });
   }
   if (method === "PUT") {
-    return handlePut(req, res, segments, { convexCall, pushLog });
+    return handlePut(req, res, segments, { convexCall, pushLog, uploadObject });
   }
   if (method === "MKCOL") {
     return handleMkcol(req, res, segments, { convexCall, pushLog });
@@ -248,7 +248,7 @@ function forbidden(res, msg) {
   return res.end(msg || "Forbidden");
 }
 
-async function handlePropfind(req, res, segments, depth, { convexCall, pushLog }) {
+async function handlePropfind(req, res, segments, depth, { convexCall, pushLog, preferProxy }) {
   const includeChildren = depth !== "0";
 
   if (segments.length === 0) {
@@ -316,6 +316,7 @@ async function handlePropfind(req, res, segments, depth, { convexCall, pushLog }
       teamSlug,
       projectName,
       folderPath,
+      preferProxy,
     });
   } catch (err) {
     pushLog?.(
@@ -375,7 +376,7 @@ function sendMultistatus(res, entries) {
   res.end(xml);
 }
 
-async function handleGet(req, res, segments, headOnly, { convexCall, pushLog }) {
+async function handleGet(req, res, segments, headOnly, { convexCall, pushLog, preferProxy }) {
   // /team/project[/folder…]/file.ext — at least team + project + file.
   if (segments.length < 3) return notFound(res);
   const [teamSlug, projectName, ...rest] = segments;
@@ -384,7 +385,7 @@ async function handleGet(req, res, segments, headOnly, { convexCall, pushLog }) 
   const result = await convexCall(
     "action",
     "desktopBrowse:getDownloadUrlForDesktop",
-    { teamSlug, projectName, folderPath, fileName },
+    { teamSlug, projectName, folderPath, fileName, preferProxy },
   );
   if (!result) return notFound(res);
   // rclone follows redirects; we hand back the presigned S3 URL so bytes
@@ -397,7 +398,7 @@ async function handleGet(req, res, segments, headOnly, { convexCall, pushLog }) 
   return res.end();
 }
 
-async function handlePut(req, res, segments, { convexCall, pushLog }) {
+async function handlePut(req, res, segments, { convexCall, pushLog, uploadObject }) {
   if (segments.length < 3) {
     return forbidden(res, "Uploads must be at /team/project[/folder…]/file.ext");
   }
@@ -433,33 +434,32 @@ async function handlePut(req, res, segments, { convexCall, pushLog }) {
     return forbidden(res, err.message);
   }
 
-  // Stream the request body directly to the presigned S3 URL. We don't read
-  // into memory — for multi-GB video uploads that would OOM the renderer.
-  let putRes;
+  // Prefer the desktop's MULTIPART uploader: a single presigned PUT caps at
+  // 5 GB (S3/R2), which ProRes masters blow past. The uploader streams the
+  // request body to S3 in 64 MB parts using the desktop's own scoped creds, so
+  // there's no size ceiling and no OOM (backpressure flows through the stream).
+  // Falls back to the presigned single PUT when no uploader was injected.
   try {
-    putRes = await fetch(upload.uploadUrl, {
-      method: "PUT",
-      // Node's undici accepts a stream body and pipes it through.
-      body: Readable.toWeb(req),
-      duplex: "half",
-      headers: {
-        "content-type": contentType,
-        "content-length": String(declaredSize),
-      },
-    });
+    if (uploadObject) {
+      await uploadObject({ key: upload.s3Key, body: req, contentType });
+    } else {
+      const putRes = await fetch(upload.uploadUrl, {
+        method: "PUT",
+        body: Readable.toWeb(req),
+        duplex: "half",
+        headers: {
+          "content-type": contentType,
+          "content-length": String(declaredSize),
+        },
+      });
+      if (!putRes.ok) {
+        const body = await putRes.text().catch(() => "");
+        throw new Error(`S3 rejected upload (${putRes.status}): ${body.slice(0, 200)}`);
+      }
+    }
   } catch (err) {
-    pushLog?.(`webdav: S3 PUT failed: ${err.message}`);
-    return forbidden(res, `S3 upload failed: ${err.message}`);
-  }
-  if (!putRes.ok) {
-    const body = await putRes.text().catch(() => "");
-    pushLog?.(
-      `webdav: S3 PUT ${putRes.status} ${putRes.statusText}: ${body.slice(0, 200)}`,
-    );
-    return forbidden(
-      res,
-      `S3 rejected upload (${putRes.status}): ${body.slice(0, 200)}`,
-    );
+    pushLog?.(`webdav: upload of ${fileName} failed: ${err.message}`);
+    return forbidden(res, `Upload failed: ${err.message}`);
   }
 
   // Kick off finalize (Mux ingest for video/*, status flip for everything

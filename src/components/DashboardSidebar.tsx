@@ -483,6 +483,20 @@ function friendlyDriveError(e: unknown): string {
   return e instanceof Error ? e.message : "Couldn't enable the drive.";
 }
 
+// Bound a promise so a hung backend call can't leave the Enable button stuck on
+// "Connecting drive…" forever. Rejects with a friendly message on timeout.
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out — check your connection and retry.`)),
+        ms,
+      ),
+    ),
+  ]);
+}
+
 function DesktopAppOrDrive() {
   const getStorageBootstrap = useAction(api.desktopAuth.getStorageBootstrap);
   const [isDesktop, setIsDesktop] = useState(false);
@@ -490,6 +504,7 @@ function DesktopAppOrDrive() {
     status: string;
     mountPath: string | null;
     lastError: string | null;
+    log?: string[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -539,7 +554,12 @@ function DesktopAppOrDrive() {
     setBusy(true);
     setError(null);
     try {
-      const boot = await getStorageBootstrap({});
+      // Vending creds is the first thing that can hang the flow — bound it.
+      const boot = await withTimeout(
+        getStorageBootstrap({}),
+        20_000,
+        "Fetching drive credentials",
+      );
       if (!boot) {
         setError("Storage isn't configured on the server (no bucket creds).");
         return;
@@ -547,6 +567,9 @@ function DesktopAppOrDrive() {
       const cur = await window.api.settings.get();
       await window.api.settings.set({ ...cur, storage: { ...cur.storage, ...boot } });
       setCredExpiresAt(boot.expiresAt ?? null);
+      // mount.start returns quickly (status flips to "mounting"); the main
+      // process owns the rest and self-aborts via its watchdog, and we render
+      // its live progress from the mount status log below.
       await window.api.mount.start({});
     } catch (e) {
       setError(friendlyDriveError(e));
@@ -586,6 +609,14 @@ function DesktopAppOrDrive() {
 
   const status = mount?.status ?? "unmounted";
   const shownError = error ?? (status === "error" ? mount?.lastError : null);
+  // Live progress: the last line of the mount log, shown while connecting so
+  // the spinner isn't a black box (e.g. "Downloading drive engine — 50%",
+  // "Starting rclone mount…"). The log is the tail emitted by electron-main.
+  const connecting = busy || status === "mounting";
+  const lastStep =
+    connecting && mount?.log && mount.log.length > 0
+      ? mount.log[mount.log.length - 1].replace(/^\d{2}:\d{2}:\d{2}\s+/, "")
+      : null;
   return (
     <div className="flex flex-col gap-1.5">
       {status === "mounted" ? (
@@ -632,6 +663,11 @@ function DesktopAppOrDrive() {
               : "Enable drive"}
         </button>
       )}
+      {lastStep ? (
+        <p className="text-[10px] leading-snug text-[#888] font-mono truncate" title={lastStep}>
+          {lastStep}
+        </p>
+      ) : null}
       {shownError ? (
         <p className="text-[10px] leading-snug text-[#b91c1c]">{shownError}</p>
       ) : null}

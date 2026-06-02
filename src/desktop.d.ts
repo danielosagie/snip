@@ -6,6 +6,9 @@ interface DesktopMountState {
   status: "unmounted" | "mounting" | "mounted" | "unmounting" | "error";
   mountPath: string | null;
   lastError: string | null;
+  // Tail of the mount log (last ~30 lines) so the UI can show live progress
+  // while connecting instead of a black-box spinner.
+  log?: string[];
 }
 
 interface DesktopUpdateState {
