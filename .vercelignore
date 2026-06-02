@@ -7,11 +7,14 @@
 # separately by .github/workflows/desktop-dmg.yml) and Vercel never
 # needs any of it.
 
-# Desktop Electron app + its build artifacts (DMG, Electron framework)
-desktop/
+# Desktop Electron app + its build artifacts (DMG, Electron framework).
+# Leading slash anchors to the ROOT desktop/ only — an unanchored `desktop/`
+# ALSO matches src/components/desktop/, which silently dropped
+# DesktopUninstallModal from CLI uploads and broke the production build.
+/desktop/
 
 # Local build output — Vercel runs its own build in the cloud
-dist/
+/dist/
 
 # Deps + caches — Vercel installs cleanly
 node_modules/
