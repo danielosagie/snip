@@ -89,6 +89,27 @@ export function StorageUsageBar({
           {usage.percent}%
         </span>
       </div>
+
+      {/* Active / archived split — the retention model in one line. */}
+      <dl className="mt-4 grid grid-cols-3 gap-px border-2 border-[#1a1a1a] bg-[#1a1a1a] text-center font-mono">
+        <Stat label="Active" value={formatBytes(usage.hotBytes)} hint="instant playback" />
+        <Stat
+          label="Archived"
+          value={formatBytes(usage.coldBytes)}
+          hint="re-encodes on watch"
+        />
+        <Stat
+          label="On drive"
+          value={formatBytes(usage.driveBytes)}
+          hint="not billed"
+        />
+      </dl>
+      <p className="text-[11px] text-[#888] mt-2 leading-snug max-w-prose">
+        Clips you haven&apos;t watched in 30 days are archived to cut storage
+        cost — the source stays put and the player rebuilds full quality on the
+        next watch. <span className="text-[#666]">Archived still counts toward your cap; on-drive doesn&apos;t.</span>
+      </p>
+
       {isFree ? (
         <p className="text-xs text-[#666] mt-3 max-w-prose">
           Free workspaces get 20 GB. Upgrade to Basic or Pro for more
@@ -96,6 +117,26 @@ export function StorageUsageBar({
         </p>
       ) : null}
     </section>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="bg-[#f0f0e8] px-2 py-3">
+      <dt className="text-[10px] uppercase tracking-wider text-[#888]">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm font-bold text-[#1a1a1a]">{value}</dd>
+      <dd className="text-[10px] text-[#888]">{hint}</dd>
+    </div>
   );
 }
 

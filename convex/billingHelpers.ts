@@ -139,6 +139,9 @@ export async function getTeamStorageUsedBytes(
   for (const videos of videosByProject) {
     for (const video of videos) {
       if (video.status === "failed") continue;
+      // Drive-first sources live on the connected drive, not in our
+      // object store, so they don't count against the cloud cap.
+      if (video.storageClass === "drive") continue;
       if (typeof video.fileSize === "number" && Number.isFinite(video.fileSize)) {
         total += video.fileSize;
       }
@@ -146,6 +149,63 @@ export async function getTeamStorageUsedBytes(
   }
 
   return total;
+}
+
+/**
+ * Storage usage split by lifecycle, for the billing UI's "active vs
+ * archived" readout. All sizes are source bytes (`videos.fileSize`):
+ *   • hotBytes   — live encoded ladder; instant playback.
+ *   • coldBytes  — evicted/deferred (no live ladder); re-encodes on watch.
+ *   • driveBytes — drive-first sources; served off the connected drive.
+ *
+ * `billedBytes` = hot + cold (what counts against the cap). driveBytes is
+ * tracked for display but excluded from the cap.
+ */
+export async function getTeamStorageBreakdown(
+  ctx: BillingCtx,
+  teamId: Id<"teams">,
+) {
+  const projects = await ctx.db
+    .query("projects")
+    .withIndex("by_team", (q) => q.eq("teamId", teamId))
+    .collect();
+
+  const videosByProject = await Promise.all(
+    projects.map((project) =>
+      ctx.db
+        .query("videos")
+        .withIndex("by_project", (q) => q.eq("projectId", project._id))
+        .collect(),
+    ),
+  );
+
+  let hotBytes = 0;
+  let coldBytes = 0;
+  let driveBytes = 0;
+  for (const videos of videosByProject) {
+    for (const video of videos) {
+      if (video.status === "failed") continue;
+      const size =
+        typeof video.fileSize === "number" && Number.isFinite(video.fileSize)
+          ? video.fileSize
+          : 0;
+      if (size <= 0) continue;
+      if (video.storageClass === "drive") {
+        driveBytes += size;
+      } else if (video.encodingDeferred || video.renditionEvictedAt) {
+        coldBytes += size;
+      } else {
+        hotBytes += size;
+      }
+    }
+  }
+
+  return {
+    hotBytes,
+    coldBytes,
+    driveBytes,
+    billedBytes: hotBytes + coldBytes,
+  };
 }
 
 /**

@@ -617,6 +617,11 @@ export const getPlaybackSession = action({
       throw new Error("Video not found or not ready");
     }
 
+    // Keep this video in the hot set (retention). Throttled write.
+    await ctx.runMutation(internal.videos.recordPlayback, {
+      videoId: args.videoId,
+    });
+
     // Cloudflare Stream path — the stream uid is both the asset and
     // playback handle, so we build the videodelivery.net URLs
     // directly. No SDK round-trip like Mux's ensurePublicPlaybackId.
@@ -653,6 +658,10 @@ export const getPlaybackUrl = action({
     if (!video || video.status !== "ready") {
       throw new Error("Video not found or not ready");
     }
+
+    await ctx.runMutation(internal.videos.recordPlayback, {
+      videoId: args.videoId,
+    });
 
     if (resolvePlaybackProvider(video) === "cloudflare_stream") {
       if (!video.streamUid) {
@@ -718,6 +727,10 @@ export const getPublicPlaybackSession = action({
       throw new Error("Video not found or not ready");
     }
 
+    await ctx.runMutation(internal.videos.recordPlayback, {
+      videoId: result.video._id,
+    });
+
     const playbackId = await ensurePublicPlaybackId(ctx, {
       videoId: result.video._id,
       muxAssetId: result.video.muxAssetId,
@@ -744,6 +757,10 @@ export const getSharedPlaybackSession = action({
     if (!result?.video?.muxPlaybackId) {
       throw new Error("Video not found or not ready");
     }
+
+    await ctx.runMutation(internal.videos.recordPlayback, {
+      videoId: result.video._id,
+    });
 
     const playbackId = await ensurePublicPlaybackId(ctx, {
       videoId: result.video._id,
@@ -1571,6 +1588,10 @@ export const getSharedPaywalledPlayback = action({
       throw new Error("Video is not ready yet.");
     }
 
+    await ctx.runMutation(internal.videos.recordPlayback, {
+      videoId: video._id,
+    });
+
     // Owner detection. The viewer is the owner iff their Clerk subject
     // matches the share link's creator. When they explicitly ask for
     // viewAs="owner", we serve full-res signed playback regardless of
@@ -2263,6 +2284,14 @@ async function shouldDeferEncoding(
   ctx: ActionCtx,
   projectId: Id<"projects">,
 ): Promise<boolean> {
+  const policy = await ctx.runQuery(
+    internal.workspaceBilling.getProjectStoragePolicy,
+    { projectId },
+  );
+  // Drive-first workspaces never eagerly encode — the cloud ladder only
+  // materializes on the first watch (re-encode) or for paid delivery.
+  if (policy.driveFirst) return true;
+
   const mode = (process.env.LAZY_ENCODE_DEFAULT ?? "never")
     .trim()
     .toLowerCase();
@@ -2273,11 +2302,7 @@ async function shouldDeferEncoding(
     return true;
   }
   if (mode !== "free") return false;
-  const tier = await ctx.runQuery(
-    internal.workspaceBilling.getProjectOwnerTier,
-    { projectId },
-  );
-  return tier === "free";
+  return policy.tier === "free";
 }
 
 /**

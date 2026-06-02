@@ -1,7 +1,7 @@
 {
   "name": "snip-desktop",
   "productName": "snip",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Desktop sync + cloud-mount companion for snip.",
   "main": "electron-main.cjs",
@@ -55,8 +55,8 @@
       }
     ],
     "files": [
-      "electron-main.cjs",
-      "preload.cjs",
+      "*.cjs",
+      "!afterPack.cjs",
       "dist/**/*",
       "resources/**/*",
       "!resources/macfuse.pkg",
