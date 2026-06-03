@@ -53,7 +53,7 @@ export const TIERS = {
     // Owner + 1 collaborator. "Free gets 1 invitee" so an existing
     // owner can pull in one trusted teammate before having to pay.
     includedSeats: 2,
-    storageBytes: 20 * GIBIBYTE, // 20 GB — enough to kick the tires
+    storageBytes: 50 * GIBIBYTE, // 50 GB — generous free tier (drive included)
     currency: "usd",
     features: [...COMMON_FEATURES],
   },
@@ -398,7 +398,7 @@ export const getMySubscription = query({
 
     // Normalize the stored plan key — legacy rows still say "studio".
     // When a sub exists but isn't active/trialing, treat the user as
-    // free-tier so quotas (20 GB) kick in rather than the formerly-paid
+    // free-tier so quotas (50 GB) kick in rather than the formerly-paid
     // limits.
     const normalizedKey = normalizePlanKey(sub?.plan);
     const isLive = sub?.status === "active" || sub?.status === "trialing";
@@ -698,7 +698,7 @@ export const getMyStorageUsage = query({
     if (!identity) return null;
 
     // Resolve the user's effective tier from their workspace
-    // subscription. No row / non-live status = free tier (20 GB).
+    // subscription. No row / non-live status = free tier (50 GB).
     const sub = await ctx.db
       .query("workspaceSubscriptions")
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))

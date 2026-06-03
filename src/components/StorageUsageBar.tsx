@@ -112,7 +112,7 @@ export function StorageUsageBar({
 
       {isFree ? (
         <p className="text-xs text-[#666] mt-3 max-w-prose">
-          Free workspaces get 20 GB. Upgrade to Basic or Pro for more
+          Free workspaces get 50 GB. Upgrade to Basic or Pro for more
           space and bigger uploads.
         </p>
       ) : null}
