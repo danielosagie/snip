@@ -248,27 +248,10 @@ export const getScopedStorageCredentials = action({
       });
     }
 
-    // Drive is a paid-tier feature. Free workspaces can review in
-    // the browser; the local FUSE mount is one of the upgrade
-    // triggers. (Basic + Pro both get it — gating Basic→Pro is a
-    // future option once we measure how much Basic relies on it.)
-    //
-    // Gate on the best tier across the teams the caller belongs to —
-    // resolved from each team OWNER's subscription, not the caller's
-    // own. A free user collaborating in a paid workspace already has
-    // storage-scope prefixes for it, so they should get the drive too.
-    const tier = await ctx.runQuery(
-      internal.workspaceBilling.getCallerMaxTier,
-      {},
-    );
-    if (tier === "free") {
-      throw new ConvexError({
-        code: "drive_requires_upgrade",
-        message:
-          "The local cloud drive is a paid feature. Upgrade to Basic to enable it.",
-      });
-    }
-
+    // The drive is available on EVERY tier, including free (50 GB). It used to
+    // be a paid-only upgrade trigger, but free workspaces now get it too — the
+    // per-plan storage quota (enforced at upload in videos.create →
+    // assertTeamCanStoreBytes) is the cost lever, not drive access itself.
     const provider = detectProvider();
     if (!provider) throw new Error("Object storage is not configured.");
 

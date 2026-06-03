@@ -5,7 +5,7 @@ import { MutationCtx, QueryCtx } from "./_generated/server";
 
 /**
  * Plan keys. Three tiers post-collapse:
- *   • `free`  — no Stripe subscription required (20 GB)
+ *   • `free`  — no Stripe subscription required (50 GB)
  *   • `basic` — $20/mo, 2 TB
  *   • `pro`   — $50/mo, 5 TB
  *
@@ -24,7 +24,7 @@ export const TEAM_PLAN_MONTHLY_PRICE_USD: Record<TeamPlan, number> = {
 };
 
 export const TEAM_PLAN_STORAGE_LIMIT_BYTES: Record<TeamPlan, number> = {
-  free: 20 * GIBIBYTE,
+  free: 50 * GIBIBYTE,
   basic: 2 * 1024 * GIBIBYTE,
   pro: 5 * 1024 * GIBIBYTE,
 };
@@ -226,7 +226,7 @@ function isBillingEnforced(): boolean {
  *   1. Workspace-level subscription on the team owner — preferred,
  *      since one Stripe customer covers all of the owner's teams.
  *   2. Legacy per-team Stripe subscription (component-backed).
- *   3. Otherwise → free tier (20 GB).
+ *   3. Otherwise → free tier (50 GB).
  *
  * The function used to throw when no subscription existed, which forced
  * users into Stripe before they could create their first project. That

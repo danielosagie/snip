@@ -21,7 +21,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "member");
     // Creation isn't gated on a subscription — every team gets the
-    // free tier (20 GB). Uploads enforce the quota at the video
+    // free tier (50 GB). Uploads enforce the quota at the video
     // mutation boundary via assertTeamCanStoreBytes.
 
     return await ctx.db.insert("projects", {

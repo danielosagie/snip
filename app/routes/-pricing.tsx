@@ -55,7 +55,7 @@ export default function PricingPage() {
                 </li>
                 <li className="flex items-center gap-3">
                   <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
-                  20 GB Storage
+                  50 GB Storage
                 </li>
               </ul>
 
