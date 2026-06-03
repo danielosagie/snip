@@ -14,7 +14,14 @@
  */
 
 import { v } from "convex/values";
-import { action, mutation, query, QueryCtx } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  QueryCtx,
+} from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { getUser, requireProjectAccess, requireTeamAccess } from "./auth";
@@ -27,18 +34,32 @@ function shortId(id: string): string {
   return id.slice(-ID_SUFFIX_LEN);
 }
 
-function disambiguate<T extends { _id: string; rawName: string }>(
-  rows: T[],
-): Array<T & { displayName: string }> {
-  const counts = new Map<string, number>();
+function disambiguate<
+  T extends { _id: string; rawName: string; createdAt?: number },
+>(rows: T[]): Array<T & { displayName: string }> {
+  const groups = new Map<string, T[]>();
   for (const row of rows) {
-    counts.set(row.rawName, (counts.get(row.rawName) ?? 0) + 1);
+    const g = groups.get(row.rawName) ?? [];
+    g.push(row);
+    groups.set(row.rawName, g);
   }
   return rows.map((row) => {
-    const isDup = (counts.get(row.rawName) ?? 0) > 1;
+    const group = groups.get(row.rawName) ?? [row];
+    if (group.length <= 1) return { ...row, displayName: row.rawName };
+    // Keep the OLDEST occurrence under the plain name so the name the user (or
+    // rclone) wrote always resolves. Suffixing EVERY duplicate made the plain
+    // name vanish from the listing — which made rclone believe its just-
+    // uploaded file was missing and re-upload it on every dir-cache refresh,
+    // each retry spawning yet another duplicate. (See createUploadForDesktop.)
+    const oldest = group.reduce((a, b) =>
+      (a.createdAt ?? 0) <= (b.createdAt ?? 0) ? a : b,
+    );
     return {
       ...row,
-      displayName: isDup ? `${row.rawName} (${shortId(row._id)})` : row.rawName,
+      displayName:
+        row._id === oldest._id
+          ? row.rawName
+          : `${row.rawName} (${shortId(row._id)})`,
     };
   });
 }
@@ -206,6 +227,7 @@ function buildVideoEntries(
     return {
       _id: vd._id as string,
       rawName: ext ? `${rawTitle}.${ext}` : rawTitle,
+      createdAt: vd._creationTime,
       video: vd,
       rawTitle,
       ext: ext ?? "",
@@ -727,6 +749,34 @@ export const createUploadForDesktop = action({
     if (target.role === "viewer") {
       throw new Error("Viewer role can't upload to this project.");
     }
+    // Idempotency. rclone re-PUTs the same drop repeatedly under
+    // vfs-cache-mode full (it can't confirm the upload "took" — we serve no
+    // mtime), so without this each retry spawned a fresh video row + a new
+    // ~full-size R2 upload + Mux ingest. Reuse the in-flight row + object key.
+    const inflight = await ctx.runQuery(
+      internal.desktopBrowse.findInflightUpload,
+      {
+        projectId: target.projectId,
+        folderId: target.folderId ?? undefined,
+        title: args.fileName,
+      },
+    );
+    if (inflight) {
+      const reuseUrl = await getSignedUrl(
+        getS3Client(),
+        new PutObjectCommand({
+          Bucket: getBucketName(),
+          Key: inflight.s3Key,
+          ContentType: args.contentType,
+        }),
+        { expiresIn: 3600 },
+      );
+      return {
+        videoId: inflight.videoId,
+        uploadUrl: reuseUrl,
+        s3Key: inflight.s3Key,
+      };
+    }
     const videoId: Id<"videos"> = await ctx.runMutation(api.videos.create, {
       projectId: target.projectId,
       title: args.fileName,
@@ -750,6 +800,98 @@ export const createUploadForDesktop = action({
       contentType: args.contentType,
     });
     return { videoId, uploadUrl, s3Key: key };
+  },
+});
+
+// Find the user's still-uploading video of the same name in the same folder, so
+// a re-PUT of the same drop reuses that row + object instead of duplicating it.
+// Oldest match wins so concurrent retries all converge on one row.
+export const findInflightUpload = internalQuery({
+  args: {
+    projectId: v.id("projects"),
+    folderId: v.optional(v.id("folders")),
+    title: v.string(),
+  },
+  returns: v.union(
+    v.object({ videoId: v.id("videos"), s3Key: v.string() }),
+    v.null(),
+  ),
+  handler: async (ctx: QueryCtx, args) => {
+    const rows = args.folderId
+      ? await ctx.db
+          .query("videos")
+          .withIndex("by_folder", (q) => q.eq("folderId", args.folderId))
+          .collect()
+      : await ctx.db
+          .query("videos")
+          .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+          .collect();
+    const match = rows
+      .filter(
+        (vd) =>
+          vd.projectId === args.projectId &&
+          (args.folderId ? vd.folderId === args.folderId : !vd.folderId) &&
+          vd.title === args.title &&
+          vd.status === "uploading" &&
+          !vd.deletedAt &&
+          typeof vd.s3Key === "string",
+      )
+      .sort((a, b) => a._creationTime - b._creationTime)[0];
+    return match
+      ? { videoId: match._id, s3Key: match.s3Key as string }
+      : null;
+  },
+});
+
+// One-off remediation for the duplicate-upload storm: collapse same-named
+// videos stuck in "uploading" down to the oldest one (which owns the real R2
+// object), soft-deleting the rest. Dry-run unless `apply` is true. Run via
+// `npx convex run desktopBrowse:cleanupStuckDriveDuplicates '{"apply":true}'`.
+export const cleanupStuckDriveDuplicates = internalMutation({
+  args: {
+    projectId: v.optional(v.id("projects")),
+    apply: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    scanned: v.number(),
+    dupGroups: v.number(),
+    removed: v.number(),
+    kept: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const cap = Math.min(args.limit ?? 8000, 16000);
+    const all = args.projectId
+      ? await ctx.db
+          .query("videos")
+          .withIndex("by_project", (q) =>
+            q.eq("projectId", args.projectId as Id<"projects">),
+          )
+          .take(cap)
+      : await ctx.db.query("videos").take(cap);
+    const stuck = all.filter((vd) => vd.status === "uploading" && !vd.deletedAt);
+    const byKey = new Map<string, Doc<"videos">[]>();
+    for (const vd of stuck) {
+      const k = `${vd.projectId}::${vd.folderId ?? "root"}::${vd.title}`;
+      const g = byKey.get(k) ?? [];
+      g.push(vd);
+      byKey.set(k, g);
+    }
+    let dupGroups = 0;
+    let removed = 0;
+    let kept = 0;
+    const now = Date.now();
+    for (const g of byKey.values()) {
+      if (g.length <= 1) continue;
+      dupGroups++;
+      g.sort((a, b) => a._creationTime - b._creationTime);
+      kept++; // keep the oldest (g[0]) — it owns the real upload
+      for (const dup of g.slice(1)) {
+        removed++;
+        if (args.apply) await ctx.db.patch(dup._id, { deletedAt: now });
+      }
+    }
+    return { scanned: all.length, dupGroups, removed, kept };
   },
 });
 
