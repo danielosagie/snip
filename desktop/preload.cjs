@@ -44,6 +44,16 @@ contextBridge.exposeInMainWorld("api", {
     // Clerk-minted Convex JWT down so the native WebDAV drive can call Convex.
     setAuth: (payload) => ipcRenderer.invoke("convex:setAuth", payload),
   },
+  drive: {
+    // Native upload activity from rclone's VFS queue — fires the instant a
+    // dropped file is queued for upload, before write-back/transfer finishes.
+    // Payload: { uploading: Array<{ name: string; size: number | null }> }.
+    onActivity: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("drive:activity", listener);
+      return () => ipcRenderer.off("drive:activity", listener);
+    },
+  },
   dialog: {
     pickFolder: () => ipcRenderer.invoke("dialog:pick-folder"),
   },

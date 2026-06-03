@@ -1768,6 +1768,11 @@ async function startMount({ mountPath } = {}) {
   // since they're a hot path for finder/Resolve listings. The whole stanza
   // mirrors docs/MOUNTING.md + the Settings “Mount command” preview so
   // editors can copy/paste it for ad-hoc terminal mounts.
+  //
+  // We also turn on rclone's remote-control API (localhost, no auth) so the app
+  // can poll the VFS upload queue for INSTANT drop feedback — the moment rclone
+  // queues a dropped file, well before write-back/upload finishes.
+  const rcPort = await getFreePort();
   const args = [
     "mount",
     mountTarget,
@@ -1806,6 +1811,10 @@ async function startMount({ mountPath } = {}) {
     "--transfers", "8",
     "--use-mmap",
     "--allow-other=false",
+    // Remote-control API for the instant-upload indicator (see startDriveQueuePoll).
+    "--rc",
+    "--rc-addr", `127.0.0.1:${rcPort}`,
+    "--rc-no-auth",
     "-vv",
   ];
 
@@ -1868,6 +1877,7 @@ async function startMount({ mountPath } = {}) {
   });
   mountChild.on("close", (code) => {
     clearMountWatchdog();
+    stopDriveQueuePoll();
     pushLog(`rclone exited with code ${code}`);
     mountState.status = code === 0 ? "unmounted" : "error";
     mountState.pid = null;
@@ -1883,6 +1893,7 @@ async function startMount({ mountPath } = {}) {
   });
   mountChild.on("error", (err) => {
     clearMountWatchdog();
+    stopDriveQueuePoll();
     mountState.status = "error";
     mountState.lastError = err.message;
     mountChild = null;
@@ -1911,6 +1922,7 @@ async function startMount({ mountPath } = {}) {
       mountState.status = "mounted";
       pushLog("Mount ready (FUSE attached).");
       emitMountStatus();
+      startDriveQueuePoll(rcPort);
       clearInterval(ready);
       return;
     }
@@ -1926,6 +1938,78 @@ async function startMount({ mountPath } = {}) {
   }, 500);
 
   return { status: mountState.status, mountPath: targetPath };
+}
+
+// ─── Instant drive-upload feedback ────────────────────────────────────────
+//
+// rclone's VFS write-back queue is the ONLY clean "upload in progress" signal:
+// fs.watch on the FUSE mount produces false positives (rclone surfaces existing
+// REMOTE files as you browse), and the local VFS cache dir conflates uploads
+// with read-caching. The rc `vfs/queue` endpoint lists only files that are
+// dirty + pending upload, so we poll it and push the names to the renderer the
+// instant a drop is queued — before the byte transfer even starts.
+let driveQueueTimer = null;
+let lastDriveQueueKey = "";
+
+function getFreePort() {
+  const net = require("node:net");
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+function sendDriveActivity(uploading) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("drive:activity", { uploading });
+  }
+}
+
+function startDriveQueuePoll(rcPort) {
+  stopDriveQueuePoll();
+  lastDriveQueueKey = "";
+  const url = `http://127.0.0.1:${rcPort}/vfs/queue`;
+  driveQueueTimer = setInterval(async () => {
+    let inflight = [];
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        const queue = Array.isArray(body?.queue) ? body.queue : [];
+        inflight = queue
+          .filter((q) => q && typeof q.name === "string")
+          .map((q) => ({
+            name: String(q.name).split("/").pop(),
+            size: typeof q.size === "number" ? q.size : null,
+          }));
+      }
+    } catch {
+      // rc not up yet / transient — don't clear the indicator on a blip.
+      return;
+    }
+    const key = inflight.map((i) => i.name).sort().join("|");
+    if (key === lastDriveQueueKey) return; // unchanged → don't spam IPC
+    lastDriveQueueKey = key;
+    sendDriveActivity(inflight);
+  }, 400);
+}
+
+function stopDriveQueuePoll() {
+  if (driveQueueTimer) {
+    clearInterval(driveQueueTimer);
+    driveQueueTimer = null;
+  }
+  lastDriveQueueKey = "";
+  sendDriveActivity([]);
 }
 
 // True once `targetPath` is a real (FUSE) mount, not just an empty placeholder
