@@ -8,13 +8,13 @@
 # needs any of it.
 
 # Desktop Electron app + its build artifacts (DMG, Electron framework).
-# Leading slash anchors this to the repo root — WITHOUT it, gitignore-style
-# matching also strips `src/components/desktop/` (real web-bundle
-# components), which breaks the Vite build with an unresolved import.
+# Leading slash anchors to the repo root — WITHOUT it, gitignore-style matching
+# ALSO strips src/components/desktop/ (real web-bundle components, e.g.
+# DesktopUninstallModal), which breaks the Vite build with an unresolved import.
 /desktop/
 
 # Local build output — Vercel runs its own build in the cloud
-dist/
+/dist/
 
 # Deps + caches — Vercel installs cleanly
 node_modules/

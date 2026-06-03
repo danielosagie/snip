@@ -6,6 +6,9 @@ interface DesktopMountState {
   status: "unmounted" | "mounting" | "mounted" | "unmounting" | "error";
   mountPath: string | null;
   lastError: string | null;
+  // Tail of the mount log (last ~30 lines) so the UI can show live progress
+  // while connecting instead of a black-box spinner.
+  log?: string[];
 }
 
 interface DesktopUpdateState {
@@ -37,6 +40,11 @@ interface DesktopApi {
   settings: {
     get: () => Promise<Record<string, unknown> & { storage: Record<string, unknown> }>;
     set: (next: Record<string, unknown>) => Promise<unknown>;
+  };
+  convex: {
+    // Push the Convex deployment URL + a fresh Clerk-minted Convex JWT to the
+    // native layer so the WebDAV drive can authenticate its Convex calls.
+    setAuth: (payload: { url: string; token: string }) => Promise<{ ok: boolean }>;
   };
   mount: {
     status: () => Promise<DesktopMountState>;

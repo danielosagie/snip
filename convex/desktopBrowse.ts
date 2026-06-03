@@ -108,6 +108,73 @@ async function resolveProjectByName(
   return match?.project ?? null;
 }
 
+// ── Proxy-vs-original resolution for the drive ───────────────────────────────
+//
+// Proxy-first editing is what makes the drive LucidLink-fast AND cheap: the
+// ~720p edit proxy is ~10% the bytes, so it streams cold off R2 in real time
+// and fits the local VFS cache far better than a full-res master. When proxy
+// mode is on we serve the R2-mirrored rendition; otherwise (or when no proxy
+// has been generated/mirrored yet) we serve the original. The SAME predicate
+// runs in both the directory listing (PROPFIND size) and the GET redirect, so
+// the advertised Content-Length always matches the bytes actually served — a
+// mismatch would corrupt reads through FUSE. See plans/proxies-unified.md.
+
+type DriveObject = {
+  key: string | null;
+  size: number;
+  contentType: string;
+  isProxy: boolean;
+};
+
+// A rendition is usable for the drive only if it's ready, mirrored to R2
+// (r2Key), AND has a known byte size — without the size we can't advertise a
+// correct Content-Length, so we fall back to the original instead.
+function pickReadyProxy(
+  video: Doc<"videos">,
+): { r2Key: string; size: number; contentType: string } | null {
+  const rends = video.staticRenditions ?? [];
+  const usable = rends.filter(
+    (r) =>
+      r.status === "ready" &&
+      typeof r.r2Key === "string" &&
+      r.r2Key.length > 0 &&
+      typeof r.filesizeBytes === "number" &&
+      r.filesizeBytes > 0,
+  );
+  if (usable.length === 0) return null;
+  // Prefer the 720p edit proxy; otherwise take the smallest ready rendition.
+  const sorted = [...usable].sort(
+    (a, b) => (a.filesizeBytes ?? 0) - (b.filesizeBytes ?? 0),
+  );
+  const pick = usable.find((r) => r.resolution === "720p") ?? sorted[0];
+  return {
+    r2Key: pick.r2Key as string,
+    size: pick.filesizeBytes as number,
+    contentType: pick.ext === "m4a" ? "audio/mp4" : "video/mp4",
+  };
+}
+
+// Resolve which object the drive should serve for a video, given proxy mode.
+function pickDriveObject(video: Doc<"videos">, preferProxy: boolean): DriveObject {
+  if (preferProxy) {
+    const proxy = pickReadyProxy(video);
+    if (proxy) {
+      return {
+        key: proxy.r2Key,
+        size: proxy.size,
+        contentType: proxy.contentType,
+        isProxy: true,
+      };
+    }
+  }
+  return {
+    key: video.s3Key ?? null,
+    size: video.fileSize ?? 0,
+    contentType: video.contentType ?? "application/octet-stream",
+    isProxy: false,
+  };
+}
+
 type VideoListEntry = {
   videoId: Id<"videos">;
   displayName: string;
@@ -118,9 +185,13 @@ type VideoListEntry = {
   updatedAt: number;
   isReady: boolean;
   hasS3Key: boolean;
+  isProxy: boolean;
 };
 
-function buildVideoEntries(videos: Doc<"videos">[]): VideoListEntry[] {
+function buildVideoEntries(
+  videos: Doc<"videos">[],
+  preferProxy: boolean,
+): VideoListEntry[] {
   const live = videos.filter((vd) => !vd.deletedAt);
   // Items are content-type agnostic — the `videos` table doubles as the
   // generic file table (PDFs, images, audio, .ai, .psd, anything). The
@@ -128,6 +199,8 @@ function buildVideoEntries(videos: Doc<"videos">[]): VideoListEntry[] {
   // through markAsReadyAsFile, so the desktop drive just surfaces whatever
   // landed.
   const rows = live.map((vd) => {
+    // Keep the ORIGINAL name+extension even when serving a proxy — the drive
+    // exposes one logical file per video whose bytes flip with proxy mode.
     const ext = extractExt(vd.s3Key ?? undefined) ?? extractExt(vd.title);
     const rawTitle = ext ? stripExt(vd.title, ext) : vd.title;
     return {
@@ -139,17 +212,23 @@ function buildVideoEntries(videos: Doc<"videos">[]): VideoListEntry[] {
     };
   });
   const disambig = disambiguate(rows);
-  return disambig.map((r) => ({
-    videoId: r.video._id,
-    displayName: r.displayName,
-    rawTitle: r.rawTitle,
-    ext: r.ext,
-    size: r.video.fileSize ?? 0,
-    contentType: r.video.contentType ?? "application/octet-stream",
-    updatedAt: r.video._creationTime,
-    isReady: r.video.status === "ready",
-    hasS3Key: Boolean(r.video.s3Key),
-  }));
+  return disambig.map((r) => {
+    const obj = pickDriveObject(r.video, preferProxy);
+    return {
+      videoId: r.video._id,
+      displayName: r.displayName,
+      rawTitle: r.rawTitle,
+      ext: r.ext,
+      // Size + content-length reflect the object we'll actually serve (proxy
+      // when present + enabled, else original) so PROPFIND == GET bytes.
+      size: obj.size,
+      contentType: obj.contentType,
+      updatedAt: r.video._creationTime,
+      isReady: r.video.status === "ready",
+      hasS3Key: Boolean(obj.key),
+      isProxy: obj.isProxy,
+    };
+  });
 }
 
 // Videos that live directly inside `folderId` — or at the project root when
@@ -160,6 +239,7 @@ async function listVideosInFolder(
   ctx: QueryCtx,
   projectId: Id<"projects">,
   folderId: Id<"folders"> | undefined,
+  preferProxy: boolean,
 ): Promise<VideoListEntry[]> {
   let videos: Doc<"videos">[];
   if (folderId) {
@@ -177,7 +257,7 @@ async function listVideosInFolder(
         .collect()
     ).filter((vd) => !vd.folderId);
   }
-  return buildVideoEntries(videos);
+  return buildVideoEntries(videos, preferProxy);
 }
 
 type FolderListEntry = {
@@ -334,6 +414,9 @@ export const browsePathForDesktop = query({
     teamSlug: v.string(),
     projectName: v.string(),
     folderPath: v.optional(v.array(v.string())),
+    // When true (default), file sizes/types reflect the ~720p edit proxy where
+    // a ready R2-mirrored rendition exists. Must match the GET path's choice.
+    preferProxy: v.optional(v.boolean()),
   },
   returns: v.union(
     v.null(),
@@ -371,6 +454,7 @@ export const browsePathForDesktop = query({
     if (!project) return null;
     await requireProjectAccess(ctx, project._id);
 
+    const preferProxy = args.preferProxy ?? true;
     const names = args.folderPath ?? [];
     const walk = await walkFolderPath(ctx, project._id, names);
 
@@ -378,7 +462,7 @@ export const browsePathForDesktop = query({
     if (walk.matched === names.length) {
       const [folders, videos] = await Promise.all([
         listSubfolders(ctx, project._id, walk.folderId),
-        listVideosInFolder(ctx, project._id, walk.folderId),
+        listVideosInFolder(ctx, project._id, walk.folderId, preferProxy),
       ]);
       return {
         type: "folder" as const,
@@ -401,7 +485,12 @@ export const browsePathForDesktop = query({
     // matched folder.
     if (walk.matched === names.length - 1) {
       const fileName = names[names.length - 1];
-      const videos = await listVideosInFolder(ctx, project._id, walk.folderId);
+      const videos = await listVideosInFolder(
+        ctx,
+        project._id,
+        walk.folderId,
+        preferProxy,
+      );
       const match = videos.find((vd) => vd.displayName === fileName);
       if (match) {
         return {
@@ -468,15 +557,22 @@ export const resolveVideoForDesktop = query({
     projectName: v.string(),
     folderPath: v.optional(v.array(v.string())),
     fileName: v.string(),
+    // Mirror browsePathForDesktop: resolve the proxy object when enabled so the
+    // presigned GET points at the same bytes PROPFIND advertised.
+    preferProxy: v.optional(v.boolean()),
   },
   returns: v.union(
     v.null(),
     v.object({
       videoId: v.id("videos"),
+      // The key to serve — proxy r2Key when proxy mode is on and a ready
+      // rendition exists, else the original s3Key. Field name kept as `s3Key`
+      // for call-site compatibility.
       s3Key: v.string(),
       size: v.number(),
       contentType: v.string(),
       updatedAt: v.number(),
+      isProxy: v.boolean(),
     }),
   ),
   handler: async (ctx, args) => {
@@ -488,20 +584,29 @@ export const resolveVideoForDesktop = query({
     const project = await resolveProjectByName(ctx, team._id, args.projectName);
     if (!project) return null;
     await requireProjectAccess(ctx, project._id);
+    const preferProxy = args.preferProxy ?? true;
     const names = args.folderPath ?? [];
     const walk = await walkFolderPath(ctx, project._id, names);
     if (walk.matched !== names.length) return null;
-    const videos = await listVideosInFolder(ctx, project._id, walk.folderId);
+    const videos = await listVideosInFolder(
+      ctx,
+      project._id,
+      walk.folderId,
+      preferProxy,
+    );
     const match = videos.find((vd) => vd.displayName === args.fileName);
-    if (!match || !match.hasS3Key) return null;
+    if (!match) return null;
     const video = await ctx.db.get(match.videoId);
-    if (!video || !video.s3Key) return null;
+    if (!video) return null;
+    const obj = pickDriveObject(video, preferProxy);
+    if (!obj.key) return null;
     return {
       videoId: match.videoId,
-      s3Key: video.s3Key,
-      size: match.size,
-      contentType: match.contentType,
+      s3Key: obj.key,
+      size: obj.size,
+      contentType: obj.contentType,
       updatedAt: match.updatedAt,
+      isProxy: obj.isProxy,
     };
   },
 });
@@ -517,6 +622,7 @@ export const getDownloadUrlForDesktop = action({
     projectName: v.string(),
     folderPath: v.optional(v.array(v.string())),
     fileName: v.string(),
+    preferProxy: v.optional(v.boolean()),
   },
   returns: v.union(
     v.null(),
@@ -525,6 +631,7 @@ export const getDownloadUrlForDesktop = action({
       size: v.number(),
       contentType: v.string(),
       expiresAt: v.number(),
+      isProxy: v.boolean(),
     }),
   ),
   handler: async (
@@ -535,6 +642,7 @@ export const getDownloadUrlForDesktop = action({
     size: number;
     contentType: string;
     expiresAt: number;
+    isProxy: boolean;
   } | null> => {
     const target: {
       videoId: Id<"videos">;
@@ -542,6 +650,7 @@ export const getDownloadUrlForDesktop = action({
       size: number;
       contentType: string;
       updatedAt: number;
+      isProxy: boolean;
     } | null = await ctx.runQuery(api.desktopBrowse.resolveVideoForDesktop, args);
     if (!target) return null;
     const s3 = getS3Client();
@@ -550,13 +659,23 @@ export const getDownloadUrlForDesktop = action({
       Key: target.s3Key,
       ResponseContentType: target.contentType,
     });
-    const TTL = 3600;
+    // Size-aware TTL: the URL must outlive a full cold read of the object. With
+    // vfs-cache-mode=full rclone downloads the whole file once on open; a big
+    // full-res original at a pessimistic ~3 MB/s sustained can take hours, and
+    // a URL that expired mid-download would 403. Floor 6h (plenty for proxies),
+    // cap 24h.
+    const PESSIMISTIC_BYTES_PER_SEC = 3 * 1024 * 1024;
+    const TTL = Math.min(
+      24 * 3600,
+      Math.max(6 * 3600, Math.ceil(target.size / PESSIMISTIC_BYTES_PER_SEC)),
+    );
     const url = await getSignedUrl(s3, cmd, { expiresIn: TTL });
     return {
       url,
       size: target.size,
       contentType: target.contentType,
       expiresAt: Date.now() + TTL * 1000,
+      isProxy: target.isProxy,
     };
   },
 });

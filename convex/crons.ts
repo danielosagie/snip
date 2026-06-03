@@ -32,7 +32,7 @@ crons.daily(
 crons.daily(
   "evict cold video renditions",
   { hourUTC: 4, minuteUTC: 0 },
-  internal.retention.runColdEviction,
+  internal.retentionActions.runColdEviction,
   {},
 );
 

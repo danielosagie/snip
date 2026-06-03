@@ -1,7 +1,7 @@
 "use client";
 
 import { Link, useLocation, useParams } from "@tanstack/react-router";
-import { UserButton, useUser } from "@clerk/tanstack-react-start";
+import { UserButton, useUser, useAuth } from "@clerk/tanstack-react-start";
 import { useQuery, useAction } from "convex/react";
 import {
   ChevronsUpDown,
@@ -483,13 +483,29 @@ function friendlyDriveError(e: unknown): string {
   return e instanceof Error ? e.message : "Couldn't enable the drive.";
 }
 
+// Bound a promise so a hung backend call can't leave the Enable button stuck on
+// "Connecting drive…" forever. Rejects with a friendly message on timeout.
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out — check your connection and retry.`)),
+        ms,
+      ),
+    ),
+  ]);
+}
+
 function DesktopAppOrDrive() {
   const getStorageBootstrap = useAction(api.desktopAuth.getStorageBootstrap);
+  const { getToken, isSignedIn } = useAuth();
   const [isDesktop, setIsDesktop] = useState(false);
   const [mount, setMount] = useState<{
     status: string;
     mountPath: string | null;
     lastError: string | null;
+    log?: string[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -497,12 +513,39 @@ function DesktopAppOrDrive() {
   // only; null for the legacy shared key). Drives the refresh timer.
   const [credExpiresAt, setCredExpiresAt] = useState<number | null>(null);
 
+  // The native WebDAV drive resolves every path (list / read / upload) through
+  // Convex, so the main process needs the Convex deployment URL + a valid Convex
+  // JWT. We're the signed-in web app inside the shell, so we mint the token via
+  // Clerk and push it down. Kept in memory on the native side — nothing is
+  // persisted. Returns false when we can't produce a token (not signed in yet).
+  const pushConvexAuth = useCallback(async () => {
+    if (typeof window === "undefined" || !window.api?.convex) return false;
+    try {
+      const token = await getToken({ template: "convex" });
+      const url = import.meta.env.VITE_CONVEX_URL as string | undefined;
+      if (!token || !url) return false;
+      await window.api.convex.setAuth({ url, token });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [getToken]);
+
   useEffect(() => {
     if (typeof window === "undefined" || !window.snipDesktop?.isDesktop || !window.api) return;
     setIsDesktop(true);
     void window.api.mount.status().then(setMount).catch(() => {});
     return window.api.mount.onStatus(setMount);
   }, []);
+
+  // Push Convex auth to native as soon as we're signed in. This also releases a
+  // deferred auto-mount: the native side waits for a token before mounting on
+  // launch, so the drive comes up by itself once the web app finishes loading.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.snipDesktop?.isDesktop || !window.api?.convex) return;
+    if (!isSignedIn) return;
+    void pushConvexAuth();
+  }, [isSignedIn, pushConvexAuth]);
 
   // Scoped credentials are short-lived. Re-vend shortly before expiry and
   // remount so the long-lived FUSE mount keeps a valid token. Inert when
@@ -531,6 +574,19 @@ function DesktopAppOrDrive() {
     return () => clearTimeout(timer);
   }, [credExpiresAt, mountStatus, getStorageBootstrap]);
 
+  // Keep the native Convex token fresh while the drive is up. Clerk tokens are
+  // short-lived (~60s); re-push every 30s so a long-lived FUSE mount never makes
+  // a Convex call with an expired bearer. getToken returns Clerk's cached token
+  // until it nears expiry, so this is cheap.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.api?.convex) return;
+    if (mountStatus !== "mounted" && mountStatus !== "mounting") return;
+    const id = setInterval(() => {
+      void pushConvexAuth();
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [mountStatus, pushConvexAuth]);
+
   const enable = useCallback(async () => {
     if (!window.api) {
       setError("Desktop bridge unavailable — restart the app.");
@@ -539,7 +595,12 @@ function DesktopAppOrDrive() {
     setBusy(true);
     setError(null);
     try {
-      const boot = await getStorageBootstrap({});
+      // Vending creds is the first thing that can hang the flow — bound it.
+      const boot = await withTimeout(
+        getStorageBootstrap({}),
+        20_000,
+        "Fetching drive credentials",
+      );
       if (!boot) {
         setError("Storage isn't configured on the server (no bucket creds).");
         return;
@@ -547,13 +608,23 @@ function DesktopAppOrDrive() {
       const cur = await window.api.settings.get();
       await window.api.settings.set({ ...cur, storage: { ...cur.storage, ...boot } });
       setCredExpiresAt(boot.expiresAt ?? null);
+      // Hand the native layer a live Convex session BEFORE mounting — the
+      // WebDAV drive resolves every path through Convex and is dead without it.
+      const authed = await pushConvexAuth();
+      if (!authed) {
+        setError("Couldn't get a Convex session — make sure you're signed in, then retry.");
+        return;
+      }
+      // mount.start returns quickly (status flips to "mounting"); the main
+      // process owns the rest and self-aborts via its watchdog, and we render
+      // its live progress from the mount status log below.
       await window.api.mount.start({});
     } catch (e) {
       setError(friendlyDriveError(e));
     } finally {
       setBusy(false);
     }
-  }, [getStorageBootstrap]);
+  }, [getStorageBootstrap, pushConvexAuth]);
 
   // Tearing the drive back down. mount.stop also flips the persisted
   // autoMount flag off in the main process, so the drive stays disconnected
@@ -586,6 +657,14 @@ function DesktopAppOrDrive() {
 
   const status = mount?.status ?? "unmounted";
   const shownError = error ?? (status === "error" ? mount?.lastError : null);
+  // Live progress: the last line of the mount log, shown while connecting so
+  // the spinner isn't a black box (e.g. "Downloading drive engine — 50%",
+  // "Starting rclone mount…"). The log is the tail emitted by electron-main.
+  const connecting = busy || status === "mounting";
+  const lastStep =
+    connecting && mount?.log && mount.log.length > 0
+      ? mount.log[mount.log.length - 1].replace(/^\d{2}:\d{2}:\d{2}\s+/, "")
+      : null;
   return (
     <div className="flex flex-col gap-1.5">
       {status === "mounted" ? (
@@ -632,6 +711,11 @@ function DesktopAppOrDrive() {
               : "Enable drive"}
         </button>
       )}
+      {lastStep ? (
+        <p className="text-[10px] leading-snug text-[#888] font-mono truncate" title={lastStep}>
+          {lastStep}
+        </p>
+      ) : null}
       {shownError ? (
         <p className="text-[10px] leading-snug text-[#b91c1c]">{shownError}</p>
       ) : null}

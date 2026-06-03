@@ -28,7 +28,14 @@ const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 // in from the Settings → Features panel.
 const DEFAULT_FEATURES = {
   presence: { enabled: false },
-  prefetch: { enabled: false },
+  // Prefetch defaults ON: with a cloud-backed mount the cold path is too slow
+  // for scrubbing unless rclone's VFS cache already holds the first chunk of
+  // every clip in the bin. The watcher warms the media referenced by a
+  // Premiere .prproj on save — i.e. it's already bin/timeline-aware — so the
+  // clips around the playhead are warm before the editor hits play. Cheap
+  // (cache pulls are bounded by --vfs-cache-max-size) and only runs while
+  // mounted. Turn off in Settings → Features if undesired.
+  prefetch: { enabled: true },
   lanCache: { enabled: false, port: 17900 },
   acls: { enabled: false },
   // Proxy mode is the ONE feature that defaults ON — proxy-first editing is the
@@ -135,6 +142,24 @@ async function saveSettings(settings) {
   }
 }
 
+// Live Convex auth pushed from the signed-in renderer (the web app running
+// inside the desktop shell). The renderer mints a short-lived Convex JWT via
+// Clerk and re-pushes it on a timer, so we keep it in MEMORY ONLY — never
+// written to settings.json (a ~60s token isn't worth persisting, and it avoids
+// churning the encrypted settings file every refresh). Every Convex HTTP call
+// in this process prefers it over the legacy on-disk fields.
+let liveConvexAuth = null; // { url: string, token: string } | null
+// Set by tryAutoMount when it wants to mount but no token has arrived yet;
+// the convex:setAuth handler fires the deferred mount once the renderer signs in.
+let pendingAutoMount = null; // { mountPath: string } | null
+
+function resolveConvexCreds(settings) {
+  return {
+    url: liveConvexAuth?.url || settings.convexUrl || "",
+    token: liveConvexAuth?.token || settings.convexAuthToken || "",
+  };
+}
+
 // ---- S3 helpers --------------------------------------------------------------
 
 function makeS3(settings) {
@@ -199,6 +224,32 @@ async function uploadFile(s3, bucket, key, filePath) {
   await upload.done();
 }
 
+// Stream an arbitrary readable (e.g. an incoming WebDAV PUT body) straight to
+// object storage with MULTIPART, so drag-and-drop uploads through the drive
+// aren't capped at S3/R2's 5 GB single-PUT limit (ProRes masters routinely
+// exceed it). Uses the desktop's own scoped creds — the key the server hands us
+// is always under the user's `projects/<teamSlug>/…` prefix, which those creds
+// can write. Returns when the whole object has landed.
+async function uploadStreamToStorage({ key, body, contentType }) {
+  const settings = await loadSettings();
+  if (!settings.storage?.bucket) throw new Error("Storage bucket not configured.");
+  const s3 = makeS3(settings);
+  const { Upload } = require("@aws-sdk/lib-storage");
+  const upload = new Upload({
+    client: s3,
+    params: {
+      Bucket: settings.storage.bucket,
+      Key: key,
+      Body: body,
+      ...(contentType ? { ContentType: contentType } : {}),
+    },
+    queueSize: 4, // 4 parts in flight
+    partSize: 64 * 1024 * 1024, // 64 MB parts → up to ~640 GB at 10k parts
+    leavePartsOnError: false,
+  });
+  await upload.done();
+}
+
 async function walkLocal(dir) {
   const out = [];
   async function recurse(d, base) {
@@ -240,6 +291,31 @@ ipcMain.handle("settings:set", async (_event, next) => {
   return next;
 });
 
+// The signed-in renderer pushes the Convex deployment URL + a fresh
+// Clerk-minted Convex JWT here — on enable and on a ~30s refresh timer. The
+// WebDAV drive calls Convex for every listing / read / upload, so without this
+// the mount can't resolve a single path. (Empty convexUrl/convexAuthToken was
+// THE reason the drive hung forever on "Connecting…": the old enable handler
+// only pushed S3 storage creds, never the Convex pairing the WebDAV server
+// needs.) Memory-only; an empty/partial push clears it.
+ipcMain.handle("convex:setAuth", async (_event, payload) => {
+  const url = typeof payload?.url === "string" ? payload.url : "";
+  const token = typeof payload?.token === "string" ? payload.token : "";
+  if (!url || !token) {
+    liveConvexAuth = null;
+    return { ok: false };
+  }
+  liveConvexAuth = { url, token };
+  // If auto-mount was deferred at launch because no token had arrived yet, fire
+  // it now that we're authenticated.
+  if (pendingAutoMount && !mountChild && mountState.status !== "mounting") {
+    const args = pendingAutoMount;
+    pendingAutoMount = null;
+    startMount(args).catch((e) => console.error("deferred autoMount failed", e));
+  }
+  return { ok: true };
+});
+
 // ---- Convex HTTP helper (for background loops in this file) ------------------
 //
 // The existing call-sites in this file inline the fetch + bearer-token dance;
@@ -249,15 +325,18 @@ ipcMain.handle("settings:set", async (_event, next) => {
 
 async function convexCall(kind, fnPath, args) {
   const settings = await loadSettings();
-  if (!settings.convexUrl || !settings.convexAuthToken) {
-    throw new Error("Convex URL + auth token not configured.");
+  const { url: baseUrl, token } = resolveConvexCreds(settings);
+  if (!baseUrl || !token) {
+    throw new Error(
+      "Not signed in yet — the drive is waiting for the app to finish loading.",
+    );
   }
-  const url = `${settings.convexUrl.replace(/\/$/, "")}/api/${kind}`;
+  const url = `${baseUrl.replace(/\/$/, "")}/api/${kind}`;
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.convexAuthToken}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ path: fnPath, args, format: "json" }),
   });
@@ -376,7 +455,8 @@ async function pushPresenceOnce() {
   try {
     const settings = await loadSettings();
     if (!settings.features?.presence?.enabled) return;
-    if (!settings.convexUrl || !settings.convexAuthToken) return;
+    const presenceCreds = resolveConvexCreds(settings);
+    if (!presenceCreds.url || !presenceCreds.token) return;
     if (mountState.status !== "mounted" || !mountState.mountPath) return;
 
     const files = await listOpenFilesUnderMount(mountState.mountPath);
@@ -1162,6 +1242,17 @@ let mountState = {
 };
 let mountChild = null;
 let webdavServer = null;
+// Overall deadline for the WHOLE mount setup. The post-spawn readiness poller
+// only guards the rclone-is-up phase; this backstop covers the slow async
+// steps BEFORE spawn (credential vending, first-run rclone download, WebDAV
+// boot) so none of them can leave the UI stuck on "Connecting drive…" forever.
+let mountWatchdog = null;
+function clearMountWatchdog() {
+  if (mountWatchdog) {
+    clearTimeout(mountWatchdog);
+    mountWatchdog = null;
+  }
+}
 const { start: startWebdavServer } = require("./electron-webdav.cjs");
 
 // Track the last status we emitted so we only kick the feature
@@ -1209,6 +1300,28 @@ function commandExists(cmd) {
 
 const RCLONE_BIN = process.platform === "win32" ? "rclone.exe" : "rclone";
 
+// Absolute locations a system rclone commonly lives. We MUST check these by
+// path, not just `command -v`, because a macOS app launched from Finder/Dock
+// inherits launchd's minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) — it does NOT
+// see Homebrew's /opt/homebrew/bin, so a user who ran `brew install rclone`
+// still looks "rclone-less" to us and we fall through to the slow download.
+function commonRcloneInstallPaths() {
+  if (process.platform === "win32") {
+    const pf = process.env["ProgramFiles"] || "C:/Program Files";
+    return [
+      path.join(pf, "rclone", "rclone.exe"),
+      "C:/rclone/rclone.exe",
+    ];
+  }
+  return [
+    "/opt/homebrew/bin/rclone", // Apple-silicon Homebrew
+    "/usr/local/bin/rclone", // Intel Homebrew / manual installs
+    "/opt/local/bin/rclone", // MacPorts
+    "/usr/bin/rclone", // distro packages (Linux)
+    "/usr/sbin/rclone",
+  ];
+}
+
 function resolveRclonePath() {
   // 1. A bundled copy, if a future build ever ships one (signed).
   if (process.resourcesPath) {
@@ -1218,9 +1331,69 @@ function resolveRclonePath() {
   // 2. Our own provisioned copy.
   const managed = path.join(SETTINGS_DIR, "bin", RCLONE_BIN);
   if (fssync.existsSync(managed)) return managed;
-  // 3. A system install on PATH.
+  // 3. A system install at a known absolute path (covers Homebrew, which
+  //    isn't on a Finder-launched app's PATH).
+  for (const cand of commonRcloneInstallPaths()) {
+    if (fssync.existsSync(cand)) return cand;
+  }
+  // 4. Last resort: whatever is on PATH (works when launched from a terminal).
   if (commandExists("rclone")) return "rclone";
   return null;
+}
+
+// Bounded, retried, progress-logged download. Returns the body as a Buffer.
+// Each attempt is killed by an AbortSignal after `timeoutMs` so a stalled
+// connection can never wedge the caller (the root cause of the "Connecting
+// drive…" forever-hang). Streams the body so we can log progress and so a
+// slow-trickle download trips the per-attempt deadline rather than sitting.
+async function downloadWithRetry(url, { attempts = 3, timeoutMs = 90_000, label = "file" } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      if (attempt > 1) pushLog(`Downloading ${label} — retry ${attempt}/${attempts}…`);
+      const resp = await fetch(url, { signal: ac.signal, redirect: "follow" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+      const total = Number(resp.headers.get("content-length") || "0");
+      const chunks = [];
+      let received = 0;
+      let nextLogAt = 0.25;
+      if (resp.body && typeof resp.body.getReader === "function") {
+        const reader = resp.body.getReader();
+        // Re-arm the deadline on each chunk: a healthy-but-slow link should
+        // keep going, but a fully stalled stream still aborts.
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          timer.refresh?.();
+          chunks.push(Buffer.from(value));
+          received += value.length;
+          if (total && received / total >= nextLogAt) {
+            pushLog(`Downloading ${label} — ${Math.round((received / total) * 100)}%`);
+            nextLogAt += 0.25;
+          }
+        }
+      } else {
+        chunks.push(Buffer.from(await resp.arrayBuffer()));
+        received = chunks[0].length;
+      }
+      clearTimeout(timer);
+      pushLog(`Downloaded ${label} (${(received / 1e6).toFixed(1)} MB).`);
+      return Buffer.concat(chunks);
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      const why = ac.signal.aborted ? `timed out after ${timeoutMs / 1000}s` : (e?.message || String(e));
+      pushLog(`Download of ${label} failed (attempt ${attempt}/${attempts}): ${why}`);
+      // brief backoff before the next try
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+  }
+  throw new Error(
+    `Couldn't download ${label} after ${attempts} attempts — ${lastErr?.message || lastErr}. ` +
+      `Check your connection, or install rclone manually (brew install rclone).`,
+  );
 }
 
 // Download + unzip the right rclone build into userData/bin. Returns the path.
@@ -1244,10 +1417,18 @@ async function ensureRclone() {
   const zipPath = path.join(binDir, "rclone-download.zip");
   const tmp = path.join(binDir, "rclone-unzip");
 
-  pushLog(`Setting up rclone (${os}-${arch})…`);
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`rclone download failed — HTTP ${resp.status}`);
-  await fs.writeFile(zipPath, Buffer.from(await resp.arrayBuffer()));
+  pushLog(`Setting up rclone (${os}-${arch}) — downloading drive engine…`);
+  // The previous implementation did a bare `await fetch(url)` with no timeout:
+  // if the download stalled (flaky network, blocked CDN, IPv6 black-hole) the
+  // whole mount hung forever with no way out, and the UI just sat on
+  // "Connecting drive…". Now every attempt is bounded, retried, and logs
+  // progress so a stall surfaces instead of wedging.
+  const buf = await downloadWithRetry(url, {
+    attempts: 3,
+    timeoutMs: 90_000,
+    label: "rclone",
+  });
+  await fs.writeFile(zipPath, buf);
 
   await fs.rm(tmp, { recursive: true, force: true });
   await fs.mkdir(tmp, { recursive: true });
@@ -1327,6 +1508,11 @@ function checkMountPrereqs() {
     // snip provisions rclone automatically (resolveRclonePath / ensureRclone),
     // so it's never a manual prerequisite — report it as handled.
     rclone: true,
+    // Diagnostic: the actual resolved rclone path, or null if none is present
+    // yet (first run downloads it). Unlike `rclone: true`, this reflects reality
+    // — surfaced so `mount.prereqs()` can tell you if a Homebrew rclone was
+    // found vs. a download being needed.
+    rcloneResolved: resolveRclonePath(),
     // macFUSE on macOS, WinFsp on Windows, kernel FUSE elsewhere. This is the
     // one thing snip can't auto-install (kernel extension / driver).
     fuse: isMac
@@ -1368,13 +1554,13 @@ async function startMount({ mountPath } = {}) {
       "Storage credentials incomplete — fill in bucket, endpoint, access key, secret in Settings.",
     );
   }
-  // rclone is auto-provisioned (below); macFUSE is bundled and installed on
-  // demand. Both throw a clear, surfaced error if they can't be set up.
-  await ensureMacFuse();
-
   const targetPath = mountPath || settings.rootDir;
-  await fs.mkdir(targetPath, { recursive: true });
 
+  // Enter "mounting" and arm the overall watchdog up front, so EVERY step
+  // below (macFUSE check, rclone download, WebDAV boot, spawn) runs under a
+  // deadline and streams progress to the log. Previously the status flipped to
+  // "mounting" only after macFUSE, and nothing bounded the pre-spawn awaits —
+  // a stalled rclone download wedged the button on "Connecting drive…".
   mountState = {
     status: "mounting",
     mountPath: targetPath,
@@ -1383,14 +1569,59 @@ async function startMount({ mountPath } = {}) {
     log: [],
   };
   emitMountStatus();
-  pushLog(`Mounting ${s.provider}:${s.bucket}/projects → ${targetPath}`);
+  pushLog(`Preparing drive for ${s.provider}:${s.bucket} → ${targetPath}`);
 
-  // Make sure rclone is available (downloads it on first run). Failures here
-  // surface as a mount error with a clear log line.
+  clearMountWatchdog();
+  const OVERALL_DEADLINE_MS = 150_000; // generous: covers a slow first-run rclone download
+  mountWatchdog = setTimeout(() => {
+    if (mountState.status !== "mounting") return;
+    mountState.status = "error";
+    mountState.lastError =
+      "Drive setup timed out. The last step is shown in the log above — usually a slow/blocked rclone download or unreachable storage. Retry, or install rclone manually: brew install rclone.";
+    pushLog(mountState.lastError);
+    try { mountChild?.kill(); } catch { /* ignore */ }
+    mountChild = null;
+    if (webdavServer) {
+      const sv = webdavServer;
+      webdavServer = null;
+      void sv.stop().catch(() => {});
+    }
+    mountWatchdog = null;
+    emitMountStatus();
+  }, OVERALL_DEADLINE_MS);
+
+  // Bail helper: after each long await, stop if the watchdog already failed us.
+  const abortedByWatchdog = () => mountState.status !== "mounting";
+
+  // macFUSE is bundled + installed on demand; throws a clear, surfaced error.
+  try {
+    pushLog("Checking macFUSE…");
+    await ensureMacFuse();
+  } catch (e) {
+    clearMountWatchdog();
+    mountState.status = "error";
+    mountState.lastError = e instanceof Error ? e.message : String(e);
+    pushLog(mountState.lastError);
+    emitMountStatus();
+    throw e;
+  }
+  if (abortedByWatchdog()) return { status: mountState.status, mountPath: targetPath };
+
+  await fs.mkdir(targetPath, { recursive: true });
+
+  // Make sure rclone is available. Logs where it found it, or downloads it on
+  // first run (bounded + retried by ensureRclone). Failures surface clearly.
   let rclonePath;
   try {
+    const preResolved = resolveRclonePath();
+    pushLog(
+      preResolved
+        ? `Using rclone at ${preResolved}`
+        : "rclone not found locally — fetching the drive engine…",
+    );
     rclonePath = await ensureRclone();
   } catch (e) {
+    clearMountWatchdog();
     mountState.status = "error";
     mountState.lastError =
       "Couldn't set up rclone — " + (e instanceof Error ? e.message : String(e));
@@ -1398,19 +1629,31 @@ async function startMount({ mountPath } = {}) {
     emitMountStatus();
     throw e;
   }
+  if (abortedByWatchdog()) return { status: mountState.status, mountPath: targetPath };
 
   // The desktop now mounts a local WebDAV server (electron-webdav.cjs) that
   // serves team/project/video names from Convex instead of raw S3 keys, and
   // handles drag-and-drop uploads by streaming through to S3 + registering
   // each file as a Convex `videos` row. Boot it before configuring rclone so
   // we know the port to point the remote at.
+  // Proxy-first is the default: serve the lightweight ~720p edit proxy when a
+  // ready R2-mirrored rendition exists, so editing is LucidLink-fast and cheap.
+  // Flip `features.proxy.enabled = false` to expose full-res originals.
+  const preferProxy = settings.features?.proxy?.enabled !== false;
   try {
+    pushLog("Starting local file server…");
     if (webdavServer) {
       await webdavServer.stop().catch(() => {});
       webdavServer = null;
     }
-    webdavServer = await startWebdavServer({ convexCall, pushLog });
+    webdavServer = await startWebdavServer({
+      convexCall,
+      pushLog,
+      preferProxy,
+      uploadObject: uploadStreamToStorage,
+    });
   } catch (e) {
+    clearMountWatchdog();
     mountState.status = "error";
     mountState.lastError =
       "Couldn't start local WebDAV server — " +
@@ -1419,6 +1662,8 @@ async function startMount({ mountPath } = {}) {
     emitMountStatus();
     throw e;
   }
+  if (abortedByWatchdog()) return { status: mountState.status, mountPath: targetPath };
+  pushLog(`Local file server ready (proxy mode ${preferProxy ? "on" : "off"}).`);
 
   // Env-based rclone config. No file is written; rclone reads
   // RCLONE_CONFIG_<NAME>_<FIELD> at runtime. We point it at the WebDAV
@@ -1448,42 +1693,16 @@ async function startMount({ mountPath } = {}) {
   // found) for creates so new files always land on S3.
   // WebDAV root is the server's mountpoint — no bucket path needed since the
   // server already projects team/project/video as the directory tree.
-  let mountTarget = `videoinfra:`;
-  // LAN cache union was built around the old raw-S3 mount where peers served
-  // `bucket/projects/...` over HTTP. The WebDAV remote uses a different path
-  // scheme (team/project/video), so cross-machine HTTP peering needs to be
-  // re-thought before re-enabling. For now we skip it when WebDAV is active.
-  if (false && settings.features?.lanCache?.enabled) {
-    // Wait briefly for mDNS to populate peers — this is a no-op if
-    // the LAN cache loop was already running and has peers ready.
-    await waitForLanCachePeers(3_000);
-    const peers = listLanCachePeers().filter(
-      (p) => p.clientId !== getClientId(),
-    );
-    if (peers.length > 0) {
-      const upstreams = [];
-      peers.forEach((peer, i) => {
-        const name = `lanpeer${i}`;
-        const cachePort = (peer.port || 0) + 1; // by convention, port+1 is the rclone serve
-        env[`RCLONE_CONFIG_${name.toUpperCase()}_TYPE`] = "http";
-        env[`RCLONE_CONFIG_${name.toUpperCase()}_URL`] =
-          `http://${peer.host}:${cachePort}/${s.bucket}/projects/`;
-        // Short timeouts so a slow / dead peer doesn't stall reads.
-        env[`RCLONE_CONFIG_${name.toUpperCase()}_HEADERS`] = "";
-        upstreams.push(`${name}:`);
-      });
-      upstreams.push("videoinfra:" + s.bucket + "/projects");
-      env.RCLONE_CONFIG_LANUNION_TYPE = "union";
-      env.RCLONE_CONFIG_LANUNION_UPSTREAMS = upstreams.join(" ");
-      env.RCLONE_CONFIG_LANUNION_ACTION_POLICY = "epff"; // existing-path-first-found
-      env.RCLONE_CONFIG_LANUNION_SEARCH_POLICY = "ff"; // first-found on reads
-      env.RCLONE_CONFIG_LANUNION_CREATE_POLICY = "epff"; // creates → first writeable
-      mountTarget = "lanunion:";
-      pushLog(`LAN union: ${peers.length} peer(s) ahead of S3 — ${upstreams.join(", ")}`);
-    } else {
-      pushLog(`LAN cache enabled, no peers visible — mounting plain S3.`);
-    }
-  }
+  const mountTarget = `videoinfra:`;
+  // SHELVED: LAN-peer cache union. It was built for the old raw-S3 mount where
+  // peers served `bucket/projects/...` over HTTP; the WebDAV remote uses a
+  // name-based scheme (team/project/video), so the peer-union upstream URLs no
+  // longer line up and the `rclone serve http` peer endpoints would need to
+  // re-project the same WebDAV tree. Intentionally not wired here — the local
+  // VFS cache (below) is the dominant warm-read win and R2 egress is $0, so the
+  // peer union is a latency optimization we can revisit. The mDNS/serve plumbing
+  // still lives under `features.lanCache` for that future work; it just doesn't
+  // feed the mount. Tracked in bench/FINDINGS-AND-PLAN.md.
 
   // Pin the cache dir so the second rclone process (the cache server)
   // knows where to find our cached files to expose to peers.
@@ -1502,11 +1721,11 @@ async function startMount({ mountPath } = {}) {
   //     fail-CLOSED to deny-all if the rule fetch fails.
   let filterFromArgs = [];
   const filterLines = [];
-  // Proxy-mode filter no longer applies under the WebDAV mount: the server
-  // projects each video as a single file (no separate `originals/` subtree),
-  // and the proxy/original swap will happen via a per-video request param
-  // once the proxy pipeline is ported. Keeping the flag wired so the setting
-  // round-trips, but skipping the filter rule.
+  // NOTE: proxy mode is no longer a path FILTER under the WebDAV mount. The
+  // server projects one logical file per video and resolves proxy-vs-original
+  // at GET time (the `preferProxy` flag passed to startWebdavServer →
+  // desktopBrowse), so there's no `originals/` subtree to hide here. Only ACL
+  // rules remain as a --filter-from source.
 
   if (settings.features?.acls?.enabled) {
     try {
@@ -1592,11 +1811,13 @@ async function startMount({ mountPath } = {}) {
   // rclone remote name. macOS truncates very long labels in the sidebar, so
   // we cap to a comfortable width.
   try {
-    const teams = await convexCall(
-      "query",
-      "desktopBrowse:listTeamsForDesktop",
-      {},
-    );
+    // Cosmetic only — never let a slow/hung Convex block the mount. 5s cap.
+    const teams = await Promise.race([
+      convexCall("query", "desktopBrowse:listTeamsForDesktop", {}),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("timed out")), 5_000),
+      ),
+    ]);
     const teamName =
       Array.isArray(teams) && teams[0]?.name ? String(teams[0].name) : "snip";
     const volname = teamName.length > 24 ? teamName.slice(0, 23) + "…" : teamName;
@@ -1605,10 +1826,13 @@ async function startMount({ mountPath } = {}) {
     pushLog(`webdav: couldn't fetch team name for --volname: ${err.message}`);
     args.push("--volname", "snip");
   }
+  if (abortedByWatchdog()) return { status: mountState.status, mountPath: targetPath };
 
   try {
+    pushLog("Starting rclone mount…");
     mountChild = spawn(rclonePath, args, { env });
   } catch (e) {
+    clearMountWatchdog();
     mountState.status = "error";
     mountState.lastError = e instanceof Error ? e.message : String(e);
     emitMountStatus();
@@ -1640,6 +1864,7 @@ async function startMount({ mountPath } = {}) {
       });
   });
   mountChild.on("close", (code) => {
+    clearMountWatchdog();
     pushLog(`rclone exited with code ${code}`);
     mountState.status = code === 0 ? "unmounted" : "error";
     mountState.pid = null;
@@ -1654,6 +1879,7 @@ async function startMount({ mountPath } = {}) {
     emitMountStatus();
   });
   mountChild.on("error", (err) => {
+    clearMountWatchdog();
     mountState.status = "error";
     mountState.lastError = err.message;
     mountChild = null;
@@ -1665,31 +1891,31 @@ async function startMount({ mountPath } = {}) {
     emitMountStatus();
   });
 
-  // Readiness probe — poll the mount point. Once we can stat any subdir,
-  // rclone has the FUSE layer up.
+  // Readiness probe — confirm rclone's FUSE layer is actually ATTACHED, not
+  // just that the placeholder dir is readable (it's readable before FUSE
+  // mounts, which is why the old "alive + 2s" heuristic produced false
+  // "connected" states with an empty Finder window). A real mount shows up as
+  // a device-id change vs the parent dir (classic mountpoint test) and/or a
+  // different statfs filesystem type.
   const startedAt = Date.now();
   const ready = setInterval(async () => {
     if (mountState.status !== "mounting") {
       clearInterval(ready);
       return;
     }
-    try {
-      await fs.readdir(targetPath);
-      // readdir succeeds before FUSE attaches too; use statfs to confirm.
-      // Simplest heuristic: if rclone is still alive and >2s have passed,
-      // call it mounted.
-      if (mountChild && Date.now() - startedAt > 2000) {
-        mountState.status = "mounted";
-        pushLog("Mount appears ready.");
-        emitMountStatus();
-        clearInterval(ready);
-      }
-    } catch {
-      // mount point not present yet
+    if (mountChild && (await isRealMount(targetPath))) {
+      clearMountWatchdog();
+      mountState.status = "mounted";
+      pushLog("Mount ready (FUSE attached).");
+      emitMountStatus();
+      clearInterval(ready);
+      return;
     }
     if (Date.now() - startedAt > 30_000 && mountState.status === "mounting") {
+      clearMountWatchdog();
       mountState.status = "error";
-      mountState.lastError = "Mount timed out after 30s. Check log for details.";
+      mountState.lastError =
+        "Mount didn't attach within 30s. The FUSE layer never came up — check the log, and confirm macFUSE is approved in System Settings → Privacy & Security (a reboot may be required after first install).";
       mountChild?.kill();
       clearInterval(ready);
       emitMountStatus();
@@ -1697,6 +1923,24 @@ async function startMount({ mountPath } = {}) {
   }, 500);
 
   return { status: mountState.status, mountPath: targetPath };
+}
+
+// True once `targetPath` is a real (FUSE) mount, not just an empty placeholder
+// directory. Uses the device-id boundary test (a mounted dir's st_dev differs
+// from its parent's) with a statfs filesystem-type fallback.
+async function isRealMount(targetPath) {
+  try {
+    const parent = path.dirname(targetPath);
+    const [a, b] = await Promise.all([fs.stat(targetPath), fs.stat(parent)]);
+    if (a.dev !== b.dev) return true;
+    if (typeof fs.statfs === "function") {
+      const [fa, fb] = await Promise.all([fs.statfs(targetPath), fs.statfs(parent)]);
+      if (fa.type !== fb.type) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 ipcMain.handle("mount:start", async (_event, args) => startMount(args || {}));
@@ -1792,8 +2036,13 @@ ipcMain.handle("resolve:status", async () => {
 
 ipcMain.handle("resolve:snapshot", async (_event, { message, branch }) => {
   const settings = await loadSettings();
+  // Prefer the live token the renderer pushes; the on-disk fields are empty
+  // under the web-shell architecture.
+  const _live = resolveConvexCreds(settings);
+  settings.convexUrl = _live.url;
+  settings.convexAuthToken = _live.token;
   if (!settings.convexUrl || !settings.convexAuthToken) {
-    throw new Error("Convex URL + auth token must be set in Settings first.");
+    throw new Error("Sign in to the app first — no Convex session available.");
   }
   const tmpDir = path.join(app.getPath("temp"), "snip-resolve");
   await fs.mkdir(tmpDir, { recursive: true });
@@ -2000,8 +2249,13 @@ function numAttr(value) {
 
 ipcMain.handle("premiere:snapshot", async (_event, { filePath, message, branch }) => {
   const settings = await loadSettings();
+  // Prefer the live token the renderer pushes; the on-disk fields are empty
+  // under the web-shell architecture.
+  const _live = resolveConvexCreds(settings);
+  settings.convexUrl = _live.url;
+  settings.convexAuthToken = _live.token;
   if (!settings.convexUrl || !settings.convexAuthToken) {
-    throw new Error("Convex URL + auth token must be set in Settings first.");
+    throw new Error("Sign in to the app first — no Convex session available.");
   }
   if (!settings.activeProjectId) {
     throw new Error("Open a project in the Projects tab so we know where to save the snapshot.");
@@ -2282,6 +2536,15 @@ async function tryAutoMount() {
     // auto-mount (we can't silently install a kernel extension).
     if (!checkMountPrereqs().fuse) {
       console.log("autoMount skipped: FUSE driver not installed");
+      return;
+    }
+    // The WebDAV drive can't resolve a single path without a Convex token, and
+    // only the signed-in renderer can mint one. If it hasn't pushed auth yet,
+    // DEFER — convex:setAuth fires this mount the moment the web app signs in.
+    // (Mounting now would just spin on "Connecting…" while every request 500s.)
+    if (!liveConvexAuth) {
+      pendingAutoMount = { mountPath: settings.rootDir };
+      console.log("autoMount deferred: waiting for the app to sign in");
       return;
     }
     // Defer slightly so the window is up and the renderer is listening
