@@ -142,6 +142,24 @@ async function saveSettings(settings) {
   }
 }
 
+// Live Convex auth pushed from the signed-in renderer (the web app running
+// inside the desktop shell). The renderer mints a short-lived Convex JWT via
+// Clerk and re-pushes it on a timer, so we keep it in MEMORY ONLY — never
+// written to settings.json (a ~60s token isn't worth persisting, and it avoids
+// churning the encrypted settings file every refresh). Every Convex HTTP call
+// in this process prefers it over the legacy on-disk fields.
+let liveConvexAuth = null; // { url: string, token: string } | null
+// Set by tryAutoMount when it wants to mount but no token has arrived yet;
+// the convex:setAuth handler fires the deferred mount once the renderer signs in.
+let pendingAutoMount = null; // { mountPath: string } | null
+
+function resolveConvexCreds(settings) {
+  return {
+    url: liveConvexAuth?.url || settings.convexUrl || "",
+    token: liveConvexAuth?.token || settings.convexAuthToken || "",
+  };
+}
+
 // ---- S3 helpers --------------------------------------------------------------
 
 function makeS3(settings) {
@@ -273,6 +291,31 @@ ipcMain.handle("settings:set", async (_event, next) => {
   return next;
 });
 
+// The signed-in renderer pushes the Convex deployment URL + a fresh
+// Clerk-minted Convex JWT here — on enable and on a ~30s refresh timer. The
+// WebDAV drive calls Convex for every listing / read / upload, so without this
+// the mount can't resolve a single path. (Empty convexUrl/convexAuthToken was
+// THE reason the drive hung forever on "Connecting…": the old enable handler
+// only pushed S3 storage creds, never the Convex pairing the WebDAV server
+// needs.) Memory-only; an empty/partial push clears it.
+ipcMain.handle("convex:setAuth", async (_event, payload) => {
+  const url = typeof payload?.url === "string" ? payload.url : "";
+  const token = typeof payload?.token === "string" ? payload.token : "";
+  if (!url || !token) {
+    liveConvexAuth = null;
+    return { ok: false };
+  }
+  liveConvexAuth = { url, token };
+  // If auto-mount was deferred at launch because no token had arrived yet, fire
+  // it now that we're authenticated.
+  if (pendingAutoMount && !mountChild && mountState.status !== "mounting") {
+    const args = pendingAutoMount;
+    pendingAutoMount = null;
+    startMount(args).catch((e) => console.error("deferred autoMount failed", e));
+  }
+  return { ok: true };
+});
+
 // ---- Convex HTTP helper (for background loops in this file) ------------------
 //
 // The existing call-sites in this file inline the fetch + bearer-token dance;
@@ -282,15 +325,18 @@ ipcMain.handle("settings:set", async (_event, next) => {
 
 async function convexCall(kind, fnPath, args) {
   const settings = await loadSettings();
-  if (!settings.convexUrl || !settings.convexAuthToken) {
-    throw new Error("Convex URL + auth token not configured.");
+  const { url: baseUrl, token } = resolveConvexCreds(settings);
+  if (!baseUrl || !token) {
+    throw new Error(
+      "Not signed in yet — the drive is waiting for the app to finish loading.",
+    );
   }
-  const url = `${settings.convexUrl.replace(/\/$/, "")}/api/${kind}`;
+  const url = `${baseUrl.replace(/\/$/, "")}/api/${kind}`;
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.convexAuthToken}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ path: fnPath, args, format: "json" }),
   });
@@ -409,7 +455,8 @@ async function pushPresenceOnce() {
   try {
     const settings = await loadSettings();
     if (!settings.features?.presence?.enabled) return;
-    if (!settings.convexUrl || !settings.convexAuthToken) return;
+    const presenceCreds = resolveConvexCreds(settings);
+    if (!presenceCreds.url || !presenceCreds.token) return;
     if (mountState.status !== "mounted" || !mountState.mountPath) return;
 
     const files = await listOpenFilesUnderMount(mountState.mountPath);
@@ -1989,8 +2036,13 @@ ipcMain.handle("resolve:status", async () => {
 
 ipcMain.handle("resolve:snapshot", async (_event, { message, branch }) => {
   const settings = await loadSettings();
+  // Prefer the live token the renderer pushes; the on-disk fields are empty
+  // under the web-shell architecture.
+  const _live = resolveConvexCreds(settings);
+  settings.convexUrl = _live.url;
+  settings.convexAuthToken = _live.token;
   if (!settings.convexUrl || !settings.convexAuthToken) {
-    throw new Error("Convex URL + auth token must be set in Settings first.");
+    throw new Error("Sign in to the app first — no Convex session available.");
   }
   const tmpDir = path.join(app.getPath("temp"), "snip-resolve");
   await fs.mkdir(tmpDir, { recursive: true });
@@ -2197,8 +2249,13 @@ function numAttr(value) {
 
 ipcMain.handle("premiere:snapshot", async (_event, { filePath, message, branch }) => {
   const settings = await loadSettings();
+  // Prefer the live token the renderer pushes; the on-disk fields are empty
+  // under the web-shell architecture.
+  const _live = resolveConvexCreds(settings);
+  settings.convexUrl = _live.url;
+  settings.convexAuthToken = _live.token;
   if (!settings.convexUrl || !settings.convexAuthToken) {
-    throw new Error("Convex URL + auth token must be set in Settings first.");
+    throw new Error("Sign in to the app first — no Convex session available.");
   }
   if (!settings.activeProjectId) {
     throw new Error("Open a project in the Projects tab so we know where to save the snapshot.");
@@ -2479,6 +2536,15 @@ async function tryAutoMount() {
     // auto-mount (we can't silently install a kernel extension).
     if (!checkMountPrereqs().fuse) {
       console.log("autoMount skipped: FUSE driver not installed");
+      return;
+    }
+    // The WebDAV drive can't resolve a single path without a Convex token, and
+    // only the signed-in renderer can mint one. If it hasn't pushed auth yet,
+    // DEFER — convex:setAuth fires this mount the moment the web app signs in.
+    // (Mounting now would just spin on "Connecting…" while every request 500s.)
+    if (!liveConvexAuth) {
+      pendingAutoMount = { mountPath: settings.rootDir };
+      console.log("autoMount deferred: waiting for the app to sign in");
       return;
     }
     // Defer slightly so the window is up and the renderer is listening

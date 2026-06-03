@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld("api", {
     get: () => ipcRenderer.invoke("settings:get"),
     set: (next) => ipcRenderer.invoke("settings:set", next),
   },
+  convex: {
+    // The signed-in web app pushes its Convex deployment URL + a fresh
+    // Clerk-minted Convex JWT down so the native WebDAV drive can call Convex.
+    setAuth: (payload) => ipcRenderer.invoke("convex:setAuth", payload),
+  },
   dialog: {
     pickFolder: () => ipcRenderer.invoke("dialog:pick-folder"),
   },
