@@ -1,6 +1,6 @@
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { cn } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
@@ -101,6 +102,13 @@ export default function DashboardPage() {
   const clearDemoData = useMutation(api.demoSeed.clearDemoData);
   const [seeding, setSeeding] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // First-run onboarding. Opens once the user is confirmed team-less and stays
+  // open (independent of team count) until the wizard finishes — step 1 of the
+  // wizard creates a team, which would otherwise unmount it mid-flow.
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  useEffect(() => {
+    if (teams && teams.length === 0) setOnboardingOpen(true);
+  }, [teams]);
 
   const isLoading = teams === undefined;
   // Only show demo affordances on dev builds. `import.meta.env.DEV` is
@@ -165,47 +173,13 @@ export default function DashboardPage() {
     }
   };
 
-  // Empty state — user has no teams at all.
-  if (teams && teams.length === 0) {
+  // First run (or mid-onboarding) → the short onboarding wizard. We gate on
+  // `onboardingOpen` so it survives step 1 creating the first team (which flips
+  // teams.length to 1); the `|| length === 0` half avoids a one-frame flash of
+  // the empty dashboard before the effect above flips onboardingOpen.
+  if (onboardingOpen || (teams && teams.length === 0)) {
     return (
-      <div className="h-full flex flex-col">
-        <DashboardHeader />
-        <div className="flex-1 flex items-center justify-center p-8 animate-in fade-in duration-300">
-          <Card className="max-w-sm w-full text-center">
-            <CardHeader>
-              <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-2">
-                <Folder className="h-6 w-6 text-[#888]" />
-              </div>
-              <CardTitle className="text-lg">Create your workspace</CardTitle>
-              <CardDescription>
-                Spin up a workspace and start a project — collaborators get
-                invited from the team page.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button className="w-full" onClick={() => setCreateTeamOpen(true)}>
-                <Plus className="mr-1.5 h-4 w-4" />
-                Create workspace
-              </Button>
-              {showDemoControls ? (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => void handleSeed()}
-                  disabled={seeding}
-                >
-                  <Sparkles className="mr-1.5 h-4 w-4" />
-                  {seeding ? "Seeding…" : "Or: load demo data"}
-                </Button>
-              ) : null}
-            </CardContent>
-          </Card>
-        </div>
-        <CreateTeamDialog
-          open={createTeamOpen}
-          onOpenChange={setCreateTeamOpen}
-        />
-      </div>
+      <OnboardingWizard onComplete={() => setOnboardingOpen(false)} />
     );
   }
 
