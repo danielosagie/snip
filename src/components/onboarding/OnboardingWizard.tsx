@@ -283,7 +283,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
                         Drag a video into your project to start a review. Want a
                         local drive?{" "}
                         <a
-                          href="/downloads/snip-desktop.dmg"
+                          href="/downloads/snip-desktop.pkg"
                           className="underline hover:text-[#1a1a1a]"
                         >
                           Get the desktop app

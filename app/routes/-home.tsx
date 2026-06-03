@@ -68,9 +68,9 @@ export default function Homepage() {
           <a href="#pricing" className="hover:underline underline-offset-4">Pricing</a>
           <Link to="/compare/frameio" className={`hover:underline underline-offset-4 hidden sm:block`}>Compare</Link>
           <a
-            href="/downloads/snip-desktop.dmg"
+            href="/downloads/snip-desktop.pkg"
             className={`hidden sm:inline-flex items-center gap-1.5 hover:underline underline-offset-4`}
-            title="Download snip Desktop for macOS"
+            title="Download snip Desktop for macOS — guided installer (sets up the cloud drive)"
           >
             <Apple className="h-3.5 w-3.5" />
             <span>Download</span>
