@@ -1782,7 +1782,10 @@ async function startMount({ mountPath } = {}) {
     "--vfs-cache-max-age", "720h",
     "--vfs-cache-min-free-space", "10G",
     "--vfs-fast-fingerprint",
-    "--vfs-write-back", "5s",
+    // Short write-back so drops start uploading (and surface in the app's
+    // upload indicator) almost immediately instead of sitting in the VFS
+    // cache for 5s first.
+    "--vfs-write-back", "1s",
     // Read tuning
     "--vfs-read-ahead", "256M",
     "--vfs-read-chunk-size", "32M",

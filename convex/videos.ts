@@ -115,6 +115,44 @@ export const create = mutation({
 });
 
 /**
+ * Global "uploads in flight" for the signed-in user — powers the dashboard
+ * upload activity indicator. Returns the user's own videos still in
+ * "uploading"/"processing" status (drive drops included, since
+ * createUploadForDesktop → videos.create stamps uploadedByClerkId + status
+ * "uploading"). Reactive: rows drop off as Mux ingest flips them to "ready".
+ */
+export const listMyActiveUploads = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    const clerkId = identity.subject;
+
+    const collected: Doc<"videos">[] = [];
+    for (const status of ["uploading", "processing"] as const) {
+      const rows = await ctx.db
+        .query("videos")
+        .withIndex("by_uploader_and_status", (q) =>
+          q.eq("uploadedByClerkId", clerkId).eq("status", status),
+        )
+        .order("desc")
+        .take(25);
+      collected.push(...rows);
+    }
+
+    const out = collected.map((v) => ({
+      _id: v._id,
+      title: v.title,
+      status: v.status,
+      fileSize: v.fileSize ?? null,
+      createdAt: v._creationTime,
+    }));
+    out.sort((a, b) => b.createdAt - a.createdAt);
+    return out;
+  },
+});
+
+/**
  * Coalesce a batch of just-uploaded image-sequence frames into a single
  * `image_sequence` video. The upload manager auto-detects N≥3 files
  * matching `name.####.ext` in the same drop and calls this after every

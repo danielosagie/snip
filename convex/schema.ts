@@ -429,6 +429,10 @@ export default defineSchema({
     .index("by_stream_uid", ["streamUid"])
     .index("by_lineage", ["lineageId"])
     .index("by_folder", ["folderId"])
+    // "My uploads in flight" — the global upload activity indicator queries
+    // this for the signed-in user's videos still uploading/processing (most
+    // importantly drive uploads, which otherwise surface no global feedback).
+    .index("by_uploader_and_status", ["uploadedByClerkId", "status"])
     // Cold-eviction scan walks videos in ascending lastViewedAt order.
     // Never-viewed rows sort first (undefined < any number in Convex),
     // and the in-handler activity check falls back to _creationTime so

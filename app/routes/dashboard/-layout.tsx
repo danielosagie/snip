@@ -40,6 +40,7 @@ import { prewarmTeam } from "./-team.data";
 import { useVideoUploadManager } from "./-useVideoUploadManager";
 import { DashboardUploadProvider } from "@/lib/dashboardUploadContext";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
+import { UploadActivityIndicator } from "@/components/UploadActivityIndicator";
 import { SidebarProvider } from "@/lib/sidebarContext";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { DesktopUninstallModal } from "@/components/desktop/DesktopUninstallModal";
@@ -296,6 +297,9 @@ export default function DashboardLayout() {
           <Outlet />
         </DashboardUploadProvider>
       </main>
+
+      {/* Global upload activity — surfaces drive + browser uploads in flight. */}
+      <UploadActivityIndicator />
 
       {isGlobalDragActive && (
         <div className="pointer-events-none fixed inset-0 z-40">
