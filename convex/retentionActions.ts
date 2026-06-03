@@ -84,3 +84,74 @@ export const runColdEviction = internalAction({
     return { evicted, skipped };
   },
 });
+
+// One-off remediation for the duplicate-upload storm: free the orphaned R2
+// objects (original + any proxies) and Mux assets of videos stuck in
+// "uploading", then soft-delete the rows. Dry-run unless `apply` is true. Run:
+//   npx convex run retentionActions:purgeStuckDriveUploads '{"apply":true}'
+export const purgeStuckDriveUploads = internalAction({
+  args: { apply: v.optional(v.boolean()), olderThanMs: v.optional(v.number()) },
+  returns: v.object({
+    targets: v.number(),
+    r2Deleted: v.number(),
+    muxDeleted: v.number(),
+    rowsPurged: v.number(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    targets: number;
+    r2Deleted: number;
+    muxDeleted: number;
+    rowsPurged: number;
+  }> => {
+    const targets: Array<{
+      videoId: Id<"videos">;
+      s3Key: string | null;
+      muxAssetId: string | null;
+      proxyKeys: string[];
+    }> = await ctx.runQuery(internal.desktopBrowse.listStuckDriveUploads, {
+      olderThanMs: args.olderThanMs,
+    });
+    let r2Deleted = 0;
+    let muxDeleted = 0;
+    let rowsPurged = 0;
+    if (!args.apply) {
+      return { targets: targets.length, r2Deleted, muxDeleted, rowsPurged };
+    }
+    const s3 = getS3Client();
+    for (const t of targets) {
+      const keys = [t.s3Key, ...t.proxyKeys].filter(
+        (k): k is string => typeof k === "string" && k.length > 0,
+      );
+      for (const key of keys) {
+        try {
+          await s3.send(
+            new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
+          );
+          r2Deleted++;
+        } catch (error) {
+          console.warn(`purge: R2 delete failed for ${key}:`, error);
+        }
+      }
+      if (t.muxAssetId) {
+        try {
+          await deleteMuxAsset(t.muxAssetId);
+          muxDeleted++;
+        } catch (error) {
+          console.warn(`purge: Mux delete failed for ${t.muxAssetId}:`, error);
+        }
+      }
+      try {
+        await ctx.runMutation(internal.desktopBrowse.markDriveUploadPurged, {
+          videoId: t.videoId,
+        });
+        rowsPurged++;
+      } catch (error) {
+        console.warn(`purge: mark failed for ${t.videoId}:`, error);
+      }
+    }
+    return { targets: targets.length, r2Deleted, muxDeleted, rowsPurged };
+  },
+});

@@ -895,6 +895,51 @@ export const cleanupStuckDriveDuplicates = internalMutation({
   },
 });
 
+// Purge targets for the duplicate-upload storm cleanup: videos stuck in
+// "uploading" for a while (deleted or not), with the R2/Mux refs we must free.
+export const listStuckDriveUploads = internalQuery({
+  args: { olderThanMs: v.optional(v.number()), limit: v.optional(v.number()) },
+  returns: v.array(
+    v.object({
+      videoId: v.id("videos"),
+      s3Key: v.union(v.string(), v.null()),
+      muxAssetId: v.union(v.string(), v.null()),
+      proxyKeys: v.array(v.string()),
+    }),
+  ),
+  handler: async (ctx: QueryCtx, args) => {
+    const cutoff = Date.now() - (args.olderThanMs ?? 30 * 60 * 1000);
+    const rows = await ctx.db.query("videos").take(args.limit ?? 8000);
+    return rows
+      .filter((vd) => vd.status === "uploading" && vd._creationTime < cutoff)
+      .map((vd) => ({
+        videoId: vd._id,
+        s3Key: vd.s3Key ?? null,
+        muxAssetId: vd.muxAssetId ?? null,
+        proxyKeys: (vd.staticRenditions ?? [])
+          .map((r) => r.r2Key)
+          .filter((k): k is string => typeof k === "string"),
+      }));
+  },
+});
+
+// Soft-delete + fail a stuck upload after its R2/Mux bytes have been freed, so
+// it leaves the grid and the active-uploads indicator and can't be reused.
+export const markDriveUploadPurged = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const vd = await ctx.db.get(args.videoId);
+    if (vd) {
+      await ctx.db.patch(args.videoId, {
+        deletedAt: Date.now(),
+        status: "failed",
+      });
+    }
+    return null;
+  },
+});
+
 /**
  * Mark the upload as complete. Delegates to `videoActions.markUploadComplete`
  * which does the HEAD check + Mux handoff for video MIME types.
