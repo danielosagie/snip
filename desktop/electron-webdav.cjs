@@ -312,11 +312,16 @@ async function handlePropfind(req, res, segments, depth, { convexCall, pushLog, 
   const [teamSlug, projectName, ...folderPath] = segments;
   let node;
   try {
+    // NOTE: we intentionally do NOT send `preferProxy`. The deployed prod
+    // Convex browse/download validators don't (yet) accept it and strict-reject
+    // unknown args. Once the proxy-aware functions are deployed, their handler
+    // defaults `preferProxy ?? true`, so proxy-first activates server-side with
+    // no desktop change. Re-add the arg only after confirming prod accepts it
+    // (and to surface the user's proxy-off toggle).
     node = await convexCall("query", "desktopBrowse:browsePathForDesktop", {
       teamSlug,
       projectName,
       folderPath,
-      preferProxy,
     });
   } catch (err) {
     pushLog?.(
@@ -385,7 +390,8 @@ async function handleGet(req, res, segments, headOnly, { convexCall, pushLog, pr
   const result = await convexCall(
     "action",
     "desktopBrowse:getDownloadUrlForDesktop",
-    { teamSlug, projectName, folderPath, fileName, preferProxy },
+    // preferProxy intentionally omitted — see the note in handlePropfind.
+    { teamSlug, projectName, folderPath, fileName },
   );
   if (!result) return notFound(res);
   // rclone follows redirects; we hand back the presigned S3 URL so bytes
