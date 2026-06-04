@@ -272,10 +272,47 @@ export const globalSearch = query({
     const allowed = new Set(memberships.map((m) => m.teamId));
     if (allowed.size === 0) return [];
 
-    const hits = await ctx.db
+    const qLower = q.toLowerCase();
+
+    // Fuzzy: Convex full-text — relevance-ranked, typo-tolerant, prefix.
+    const fuzzy = await ctx.db
       .query("searchableContent")
       .withSearchIndex("by_text", (s) => s.search("text", q))
       .take(40);
+
+    // Exact: the fuzzy index can't reliably match exact words, filenames (with
+    // _ . etc.), or multi-word phrases — so ALSO scan each team's rows and keep
+    // true substring hits (title or body). Bounded so a keystroke stays cheap;
+    // covers the most recent ~budget rows per team.
+    const exact: typeof fuzzy = [];
+    let budget = 2400;
+    for (const teamId of allowed) {
+      if (budget <= 0) break;
+      const rows = await ctx.db
+        .query("searchableContent")
+        .withIndex("by_team", (qq) => qq.eq("teamId", teamId))
+        .order("desc")
+        .take(Math.min(budget, 1600));
+      budget -= rows.length;
+      for (const r of rows) {
+        if (
+          r.text.toLowerCase().includes(qLower) ||
+          r.title.toLowerCase().includes(qLower)
+        ) {
+          exact.push(r);
+        }
+      }
+    }
+
+    // Merge exact-first (most precise), then fuzzy; dedupe by source row.
+    const seen = new Set<string>();
+    const hits: typeof fuzzy = [];
+    for (const h of [...exact, ...fuzzy]) {
+      const key = `${h.kind}:${h.refId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push(h);
+    }
 
     return hits
       .filter((h) => allowed.has(h.teamId))
@@ -394,5 +431,35 @@ export const reindexProject = mutation({
     }
 
     return { indexed };
+  },
+});
+
+// Diagnostic: how much is actually indexed, by kind. Reveals an empty index
+// (nothing dual-written / reindexed) or a missing visual layer (frame == 0,
+// i.e. the Gemini caption pipeline never ran).
+export const searchStats = internalQuery({
+  args: {},
+  returns: v.object({
+    total: v.number(),
+    video: v.number(),
+    document: v.number(),
+    comment: v.number(),
+    frame: v.number(),
+    transcript: v.number(),
+  }),
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("searchableContent").take(20000);
+    const out = {
+      total: rows.length,
+      video: 0,
+      document: 0,
+      comment: 0,
+      frame: 0,
+      transcript: 0,
+    };
+    for (const r of rows) {
+      if (r.kind in out) out[r.kind as "video"]++;
+    }
+    return out;
   },
 });

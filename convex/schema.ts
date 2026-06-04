@@ -1271,6 +1271,10 @@ export default defineSchema({
   })
     .index("by_ref", ["kind", "refId"])
     .index("by_video", ["videoId"])
+    // Scoped scan for EXACT substring/phrase matching — Convex's fuzzy
+    // searchIndex tokenizes + ranks and can't reliably hit exact words,
+    // filenames, or phrases, so globalSearch also scans a team's rows here.
+    .index("by_team", ["teamId"])
     .searchIndex("by_text", {
       searchField: "text",
       filterFields: ["teamId", "kind"],
