@@ -53,6 +53,10 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.on("drive:activity", listener);
       return () => ipcRenderer.off("drive:activity", listener);
     },
+    // Force the mounted drive to re-read a path NOW (rclone vfs/refresh) so
+    // web-app deletes/renames show in Finder instantly instead of after the
+    // dir-cache TTL. `args.path` = "<teamSlug>/<projectName>" (omit = whole mount).
+    refresh: (args) => ipcRenderer.invoke("drive:refresh", args),
   },
   dialog: {
     pickFolder: () => ipcRenderer.invoke("dialog:pick-folder"),

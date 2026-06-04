@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } fro
 import { DropZone } from "@/components/upload/DropZone";
 import { formatDuration, formatRelativeTime } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
+import { useDriveAutoRefresh } from "@/lib/useDriveAutoRefresh";
 import {
   Play,
   MoreVertical,
@@ -220,6 +221,23 @@ export default function ProjectPage({
     videos,
     folders,
   } = useProjectData({ teamSlug, projectId, folderId: currentFolderId });
+
+  // Desktop: when this project's drive-visible tree changes (files added /
+  // removed / renamed / moved, or folders change), push an instant rclone
+  // vfs/refresh so the mounted drive updates in Finder without waiting out the
+  // dir cache. No-op in the browser.
+  const driveTreeSignature = useMemo(
+    () =>
+      [
+        ...(videos ?? []).map((v) => `${v._id}:${v.title}:${v.folderId ?? ""}`),
+        ...(folders ?? []).map(
+          (f) => `f:${f._id}:${f.name}:${f.parentFolderId ?? ""}`,
+        ),
+      ].join("|"),
+    [videos, folders],
+  );
+  useDriveAutoRefresh(resolvedTeamSlug, project?.name, driveTreeSignature);
+
   const projectPresenceCounts = useQuery(
     api.videoPresence.listProjectOnlineCounts,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",

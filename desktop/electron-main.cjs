@@ -1799,7 +1799,10 @@ async function startMount({ mountPath } = {}) {
     "--multi-thread-streams", "8",
     "--multi-thread-cutoff", "100M",
     // Dir + listing tuning
-    "--dir-cache-time", "5m",
+    // Short dir-cache so changes made elsewhere (a teammate, the web app on
+    // another device) surface within ~30s; LOCAL web-app changes are pushed
+    // instantly via the rc vfs/refresh path (window.api.drive.refresh).
+    "--dir-cache-time", "30s",
     "--poll-interval", "30s",
     "--no-modtime",
     "--no-checksum",
@@ -1950,6 +1953,7 @@ async function startMount({ mountPath } = {}) {
 // instant a drop is queued — before the byte transfer even starts.
 let driveQueueTimer = null;
 let lastDriveQueueKey = "";
+let driveRcPort = null; // rclone --rc port; set while mounted, for cache refresh
 
 function getFreePort() {
   const net = require("node:net");
@@ -1972,6 +1976,7 @@ function sendDriveActivity(uploading) {
 
 function startDriveQueuePoll(rcPort) {
   stopDriveQueuePoll();
+  driveRcPort = rcPort;
   lastDriveQueueKey = "";
   const url = `http://127.0.0.1:${rcPort}/vfs/queue`;
   driveQueueTimer = setInterval(async () => {
@@ -2008,9 +2013,36 @@ function stopDriveQueuePoll() {
     clearInterval(driveQueueTimer);
     driveQueueTimer = null;
   }
+  driveRcPort = null;
   lastDriveQueueKey = "";
   sendDriveActivity([]);
 }
+
+// Invalidate the rclone VFS dir cache for a path so web-app deletes/renames
+// show in the mounted drive ~instantly instead of only after --dir-cache-time.
+// The renderer calls this (window.api.drive.refresh) when its reactive video
+// list changes; vfs/refresh re-reads the dir AND triggers a FUSE invalidation
+// so Finder reflects the new listing without the user navigating away.
+async function refreshDriveDir(dir) {
+  if (!driveRcPort) return;
+  const clean = String(dir || "").replace(/^\/+|\/+$/g, "");
+  try {
+    await fetch(`http://127.0.0.1:${driveRcPort}/vfs/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        clean ? { dir: clean, recursive: "true" } : { recursive: "true" },
+      ),
+    });
+  } catch {
+    // best-effort — the dir-cache-time backstop still catches it eventually
+  }
+}
+
+ipcMain.handle("drive:refresh", async (_event, args) => {
+  await refreshDriveDir(args && args.path);
+  return { ok: Boolean(driveRcPort) };
+});
 
 // True once `targetPath` is a real (FUSE) mount, not just an empty placeholder
 // directory. Uses the device-id boundary test (a mounted dir's st_dev differs
