@@ -27,6 +27,7 @@ import { Doc, Id } from "./_generated/dataModel";
 import { getUser, requireProjectAccess, requireTeamAccess } from "./auth";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { getS3Client, BUCKET_NAME } from "./s3";
 
 const ID_SUFFIX_LEN = 6;
 
@@ -64,29 +65,13 @@ function disambiguate<
   });
 }
 
-function getS3Client(): S3Client {
-  const endpoint = process.env.R2_S3_ENDPOINT ?? process.env.RAILWAY_S3_ENDPOINT;
-  const region = process.env.R2_REGION ?? process.env.RAILWAY_REGION ?? "auto";
-  const accessKeyId =
-    process.env.R2_ACCESS_KEY_ID ?? process.env.RAILWAY_ACCESS_KEY_ID;
-  const secretAccessKey =
-    process.env.R2_SECRET_ACCESS_KEY ?? process.env.RAILWAY_SECRET_ACCESS_KEY;
-  if (!endpoint || !accessKeyId || !secretAccessKey) {
-    throw new Error("Object storage credentials not configured.");
-  }
-  return new S3Client({
-    endpoint,
-    region,
-    credentials: { accessKeyId, secretAccessKey },
-    forcePathStyle: true,
-  });
-}
-
-function getBucketName(): string {
-  const name = process.env.R2_BUCKET_NAME ?? process.env.RAILWAY_BUCKET_NAME;
-  if (!name) throw new Error("Bucket name not configured.");
-  return name;
-}
+// Storage client + bucket name come from the canonical ./s3 helpers (imported
+// above). This file USED to define its own getS3Client/getBucketName that read
+// R2_S3_ENDPOINT / RAILWAY_S3_ENDPOINT — env names that don't exist in prod
+// (the real ones are R2_ENDPOINT / RAILWAY_ENDPOINT). So every drive PUT/GET
+// presign threw "Object storage credentials not configured", which orphaned a
+// no-s3Key "uploading" row on each upload. Using the shared helpers fixes it
+// and keeps R2-vs-Railway detection in one place.
 
 function extractExt(name: string | undefined): string | null {
   if (!name) return null;
@@ -677,7 +662,7 @@ export const getDownloadUrlForDesktop = action({
     if (!target) return null;
     const s3 = getS3Client();
     const cmd = new GetObjectCommand({
-      Bucket: getBucketName(),
+      Bucket: BUCKET_NAME,
       Key: target.s3Key,
       ResponseContentType: target.contentType,
     });
@@ -765,7 +750,7 @@ export const createUploadForDesktop = action({
       const reuseUrl = await getSignedUrl(
         getS3Client(),
         new PutObjectCommand({
-          Bucket: getBucketName(),
+          Bucket: BUCKET_NAME,
           Key: inflight.s3Key,
           ContentType: args.contentType,
         }),
@@ -788,7 +773,7 @@ export const createUploadForDesktop = action({
     const key = `projects/${args.teamSlug}/${target.projectId}/originals/${videoId}/${Date.now()}.${ext}`;
     const s3 = getS3Client();
     const cmd = new PutObjectCommand({
-      Bucket: getBucketName(),
+      Bucket: BUCKET_NAME,
       Key: key,
       ContentType: args.contentType,
     });
@@ -937,6 +922,29 @@ export const markDriveUploadPurged = internalMutation({
       });
     }
     return null;
+  },
+});
+
+// TEMP diagnostic: recent videos with upload-completion fields, to see why
+// drive uploads stall. No s3Key ⇒ createUploadForDesktop died before
+// setUploadInfo; uploadError ⇒ a byte/ingest failure with the reason.
+export const inspectRecentVideos = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(v.any()),
+  handler: async (ctx: QueryCtx, args) => {
+    const rows = await ctx.db
+      .query("videos")
+      .order("desc")
+      .take(args.limit ?? 24);
+    return rows.map((vd) => ({
+      title: vd.title.slice(0, 34),
+      status: vd.status,
+      hasS3Key: typeof vd.s3Key === "string" && vd.s3Key.length > 0,
+      hasMux: Boolean(vd.muxAssetId),
+      uploadError: vd.uploadError ?? null,
+      contentType: vd.contentType ?? null,
+      deleted: Boolean(vd.deletedAt),
+    }));
   },
 });
 
