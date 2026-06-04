@@ -937,12 +937,12 @@ export const inspectRecentVideos = internalQuery({
       .order("desc")
       .take(args.limit ?? 24);
     return rows.map((vd) => ({
-      title: vd.title.slice(0, 34),
+      title: vd.title.slice(0, 24),
       status: vd.status,
+      muxPlayback: vd.muxPlaybackId ? "yes" : "no",
+      muxAssetStatus: vd.muxAssetStatus ?? null,
+      thumb: vd.thumbnailUrl ? vd.thumbnailUrl.slice(0, 38) : null,
       hasS3Key: typeof vd.s3Key === "string" && vd.s3Key.length > 0,
-      hasMux: Boolean(vd.muxAssetId),
-      uploadError: vd.uploadError ?? null,
-      contentType: vd.contentType ?? null,
       deleted: Boolean(vd.deletedAt),
     }));
   },
