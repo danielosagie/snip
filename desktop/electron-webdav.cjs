@@ -440,13 +440,17 @@ async function handlePut(req, res, segments, { convexCall, pushLog, uploadObject
     return forbidden(res, err.message);
   }
 
-  // Prefer the desktop's MULTIPART uploader: a single presigned PUT caps at
-  // 5 GB (S3/R2), which ProRes masters blow past. The uploader streams the
-  // request body to S3 in 64 MB parts using the desktop's own scoped creds, so
-  // there's no size ceiling and no OOM (backpressure flows through the stream).
-  // Falls back to the presigned single PUT when no uploader was injected.
+  // Upload routing. The presigned single PUT (minted by createUploadForDesktop)
+  // is signed with CONVEX's creds, so it ALWAYS targets the bucket Convex
+  // expects — even if the desktop's cached storage creds are stale (e.g. after
+  // a Railway→R2 switch, which once stranded uploads in the old bucket). So
+  // prefer it for everything it can handle. A single PUT caps at 5 GB (S3/R2);
+  // only ABOVE that do we fall back to the desktop's MULTIPART uploader, which
+  // streams in 64 MB parts but uses the DESKTOP's own creds — those must match
+  // the active backend (reconnect the drive after a storage switch to refresh).
+  const SINGLE_PUT_MAX = 5 * 1024 * 1024 * 1024;
   try {
-    if (uploadObject) {
+    if (uploadObject && declaredSize > SINGLE_PUT_MAX) {
       await uploadObject({ key: upload.s3Key, body: req, contentType });
     } else {
       const putRes = await fetch(upload.uploadUrl, {
