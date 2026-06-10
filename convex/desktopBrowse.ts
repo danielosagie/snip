@@ -734,32 +734,71 @@ export const createUploadForDesktop = action({
     if (target.role === "viewer") {
       throw new Error("Viewer role can't upload to this project.");
     }
-    // Idempotency. rclone re-PUTs the same drop repeatedly under
-    // vfs-cache-mode full (it can't confirm the upload "took" — we serve no
-    // mtime), so without this each retry spawned a fresh video row + a new
-    // ~full-size R2 upload + Mux ingest. Reuse the in-flight row + object key.
-    const inflight = await ctx.runQuery(
-      internal.desktopBrowse.findInflightUpload,
+    // A PUT to an existing path is an OVERWRITE, never a sibling row (WebDAV
+    // semantics). Three cases, all converging on one row per path:
+    //  1. Row still "uploading" → an rclone retry of an in-flight drop (it
+    //     can't always confirm the upload "took"). Reuse row + object key.
+    //  2. Completed row, same byte count → near-certainly the same bytes
+    //     re-PUT after completion (the gap the in-flight-only matcher
+    //     missed — each of these minted a fresh duplicate). Reuse row + key;
+    //     completeUploadForDesktop sees a non-"uploading" row and skips
+    //     re-ingest, so no second Mux asset is billed. (A genuinely new file
+    //     with the exact same byte count slips through as "identical" — the
+    //     raw object still updates, only the encoded ladder goes stale.)
+    //  3. Completed row, different byte count → genuinely new content saved
+    //     over the file. Re-key, reset playback state, re-process, and GC
+    //     the replaced assets in the background.
+    const existing = await ctx.runQuery(
+      internal.desktopBrowse.findUploadTarget,
       {
         projectId: target.projectId,
         folderId: target.folderId ?? undefined,
         title: args.fileName,
       },
     );
-    if (inflight) {
-      const reuseUrl = await getSignedUrl(
+    if (existing) {
+      const reuseKey =
+        existing.s3Key &&
+        (existing.status === "uploading" || existing.fileSize === args.size)
+          ? existing.s3Key
+          : null;
+      if (reuseKey) {
+        const reuseUrl = await getSignedUrl(
+          getS3Client(),
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: reuseKey,
+            ContentType: args.contentType,
+          }),
+          { expiresIn: 3600 },
+        );
+        return {
+          videoId: existing.videoId,
+          uploadUrl: reuseUrl,
+          s3Key: reuseKey,
+        };
+      }
+      const overwriteExt = extractExt(args.fileName) ?? "bin";
+      const overwriteKey = `projects/${args.teamSlug}/${target.projectId}/originals/${existing.videoId}/${Date.now()}.${overwriteExt}`;
+      await ctx.runMutation(internal.desktopBrowse.resetVideoForOverwrite, {
+        videoId: existing.videoId,
+        s3Key: overwriteKey,
+        fileSize: args.size,
+        contentType: args.contentType,
+      });
+      const overwriteUrl = await getSignedUrl(
         getS3Client(),
         new PutObjectCommand({
           Bucket: BUCKET_NAME,
-          Key: inflight.s3Key,
+          Key: overwriteKey,
           ContentType: args.contentType,
         }),
         { expiresIn: 3600 },
       );
       return {
-        videoId: inflight.videoId,
-        uploadUrl: reuseUrl,
-        s3Key: inflight.s3Key,
+        videoId: existing.videoId,
+        uploadUrl: overwriteUrl,
+        s3Key: overwriteKey,
       };
     }
     const videoId: Id<"videos"> = await ctx.runMutation(api.videos.create, {
@@ -788,17 +827,25 @@ export const createUploadForDesktop = action({
   },
 });
 
-// Find the user's still-uploading video of the same name in the same folder, so
-// a re-PUT of the same drop reuses that row + object instead of duplicating it.
-// Oldest match wins so concurrent retries all converge on one row.
-export const findInflightUpload = internalQuery({
+// The one live row a drive PUT to this path should write into, if any —
+// regardless of status. Matching only "uploading" rows (the original
+// idempotency fix) left a hole: a re-PUT landing AFTER the row completed
+// fell through and minted a duplicate sibling. Oldest match wins so retries
+// and legacy duplicates all converge on the row whose plain name the listing
+// shows (disambiguate is oldest-wins).
+export const findUploadTarget = internalQuery({
   args: {
     projectId: v.id("projects"),
     folderId: v.optional(v.id("folders")),
     title: v.string(),
   },
   returns: v.union(
-    v.object({ videoId: v.id("videos"), s3Key: v.string() }),
+    v.object({
+      videoId: v.id("videos"),
+      s3Key: v.union(v.string(), v.null()),
+      status: v.string(),
+      fileSize: v.union(v.number(), v.null()),
+    }),
     v.null(),
   ),
   handler: async (ctx: QueryCtx, args) => {
@@ -817,14 +864,102 @@ export const findInflightUpload = internalQuery({
           vd.projectId === args.projectId &&
           (args.folderId ? vd.folderId === args.folderId : !vd.folderId) &&
           vd.title === args.title &&
-          vd.status === "uploading" &&
-          !vd.deletedAt &&
-          typeof vd.s3Key === "string",
+          !vd.deletedAt,
       )
       .sort((a, b) => a._creationTime - b._creationTime)[0];
     return match
-      ? { videoId: match._id, s3Key: match.s3Key as string }
+      ? {
+          videoId: match._id,
+          s3Key: typeof match.s3Key === "string" ? match.s3Key : null,
+          status: match.status,
+          fileSize: typeof match.fileSize === "number" ? match.fileSize : null,
+        }
       : null;
+  },
+});
+
+// In-place overwrite for a drive PUT over an existing completed file: point
+// the row at the new object key and clear every derivative of the old bytes
+// (playback IDs, previews, renditions, thumbnails) so markUploadComplete
+// re-processes from scratch. The replaced original + encoded assets are GC'd
+// best-effort in the background — a leaked object is a COGS leak, not a
+// correctness bug. Comments/timelines stay attached to the row, same as any
+// filesystem overwrite.
+export const resetVideoForOverwrite = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    s3Key: v.string(),
+    fileSize: v.number(),
+    contentType: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const vd = await ctx.db.get(args.videoId);
+    if (!vd) throw new Error("Video row vanished mid-overwrite.");
+    const replacedObjectKeys = [
+      ...(typeof vd.s3Key === "string" && vd.s3Key !== args.s3Key
+        ? [vd.s3Key]
+        : []),
+      ...(vd.staticRenditions ?? [])
+        .map((r) => r.r2Key)
+        .filter((k): k is string => Boolean(k)),
+      ...(vd.imagePreviewS3Key ? [vd.imagePreviewS3Key] : []),
+    ];
+    const replacedMuxAssetIds = [
+      ...(vd.muxAssetId ? [vd.muxAssetId] : []),
+      ...(vd.muxPreviewAssetId ? [vd.muxPreviewAssetId] : []),
+    ];
+    const replacedStreamUid = vd.streamUid;
+    await ctx.db.patch(args.videoId, {
+      s3Key: args.s3Key,
+      fileSize: args.fileSize,
+      contentType: args.contentType,
+      status: "uploading",
+      uploadError: undefined,
+      muxUploadId: undefined,
+      muxAssetId: undefined,
+      muxPlaybackId: undefined,
+      muxSignedPlaybackId: undefined,
+      muxAssetStatus: "preparing",
+      muxCaptionsTrackId: undefined,
+      muxPreviewAssetId: undefined,
+      muxPreviewPlaybackId: undefined,
+      muxPreviewAssetStatus: undefined,
+      muxPreviewAssetError: undefined,
+      muxPreviewAssetUpdatedAt: undefined,
+      staticRenditions: undefined,
+      streamUid: undefined,
+      encodingDeferred: undefined,
+      thumbnailUrl: undefined,
+      imagePreviewS3Key: undefined,
+      imagePreviewStatus: undefined,
+    });
+    if (
+      replacedObjectKeys.length > 0 ||
+      replacedMuxAssetIds.length > 0 ||
+      replacedStreamUid
+    ) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.retentionActions.purgeReplacedAssets,
+        {
+          s3Keys: replacedObjectKeys,
+          muxAssetIds: replacedMuxAssetIds,
+          streamUid: replacedStreamUid,
+        },
+      );
+    }
+    return null;
+  },
+});
+
+// Status probe for completeUploadForDesktop's idempotency guard.
+export const getVideoStatusForDesktop = internalQuery({
+  args: { videoId: v.id("videos") },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx: QueryCtx, args) => {
+    const vd = await ctx.db.get(args.videoId);
+    return vd && !vd.deletedAt ? vd.status : null;
   },
 });
 
@@ -880,6 +1015,137 @@ export const cleanupStuckDriveDuplicates = internalMutation({
   },
 });
 
+// Second-wave remediation: the storm also left COMPLETED duplicates — rows
+// that finished processing before the idempotent-PUT fix landed, plus
+// post-completion re-PUTs the in-flight-only matcher missed. Collapse
+// same-named completed rows whose byte count matches the kept (oldest) row,
+// soft-deleting the rest. The byte-count match keeps this conservative: two
+// genuinely different files sharing a name are left alone. Dry-run unless
+// `apply` is true. Run via
+// `npx convex run desktopBrowse:cleanupCompletedDriveDuplicates '{"apply":true}'`.
+export const cleanupCompletedDriveDuplicates = internalMutation({
+  args: {
+    projectId: v.optional(v.id("projects")),
+    apply: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    scanned: v.number(),
+    dupGroups: v.number(),
+    removed: v.number(),
+    kept: v.number(),
+    skippedSizeMismatch: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const cap = Math.min(args.limit ?? 8000, 16000);
+    const all = args.projectId
+      ? await ctx.db
+          .query("videos")
+          .withIndex("by_project", (q) =>
+            q.eq("projectId", args.projectId as Id<"projects">),
+          )
+          .take(cap)
+      : await ctx.db.query("videos").take(cap);
+    const live = all.filter(
+      (vd) => !vd.deletedAt && vd.status !== "uploading",
+    );
+    const byKey = new Map<string, Doc<"videos">[]>();
+    for (const vd of live) {
+      const k = `${vd.projectId}::${vd.folderId ?? "root"}::${vd.title}`;
+      const g = byKey.get(k) ?? [];
+      g.push(vd);
+      byKey.set(k, g);
+    }
+    let dupGroups = 0;
+    let removed = 0;
+    let kept = 0;
+    let skippedSizeMismatch = 0;
+    const now = Date.now();
+    for (const g of byKey.values()) {
+      if (g.length <= 1) continue;
+      dupGroups++;
+      g.sort((a, b) => a._creationTime - b._creationTime);
+      kept++; // the oldest owns the plain name in the drive listing
+      for (const dup of g.slice(1)) {
+        if (dup.fileSize !== g[0].fileSize) {
+          skippedSizeMismatch++;
+          continue;
+        }
+        removed++;
+        if (args.apply) await ctx.db.patch(dup._id, { deletedAt: now });
+      }
+    }
+    return { scanned: all.length, dupGroups, removed, kept, skippedSizeMismatch };
+  },
+});
+
+// Storage/encoding refs held by soft-deleted rows that are byte-identical
+// duplicates of a still-live row (same project/folder/title/fileSize) — the
+// rows cleanupCompletedDriveDuplicates trashes. Their assets are pure
+// redundancy: the kept row serves the same bytes. Also returns every ref any
+// LIVE row uses so the purge can refuse to delete anything still served.
+// (Restoring one of these from trash would yield a row with no assets — but
+// it's an exact copy of a live file, so there's nothing to restore it FOR.)
+export const listDeletedDuplicateRefs = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  returns: v.object({
+    deleted: v.array(
+      v.object({
+        videoId: v.id("videos"),
+        muxAssetIds: v.array(v.string()),
+        streamUid: v.union(v.string(), v.null()),
+        objectKeys: v.array(v.string()),
+      }),
+    ),
+    liveMuxAssetIds: v.array(v.string()),
+    liveStreamUids: v.array(v.string()),
+    liveObjectKeys: v.array(v.string()),
+  }),
+  handler: async (ctx: QueryCtx, args) => {
+    const cap = Math.min(args.limit ?? 8000, 16000);
+    const all = await ctx.db.query("videos").take(cap);
+    const live = all.filter((vd) => !vd.deletedAt);
+    const liveKeySet = new Set(
+      live.map(
+        (vd) => `${vd.projectId}::${vd.folderId ?? "root"}::${vd.title}::${vd.fileSize ?? -1}`,
+      ),
+    );
+    const refsOf = (vd: Doc<"videos">) => ({
+      muxAssetIds: [
+        ...(vd.muxAssetId ? [vd.muxAssetId] : []),
+        ...(vd.muxPreviewAssetId ? [vd.muxPreviewAssetId] : []),
+      ],
+      streamUid: vd.streamUid ?? null,
+      objectKeys: [
+        ...(typeof vd.s3Key === "string" ? [vd.s3Key] : []),
+        ...(vd.staticRenditions ?? [])
+          .map((r) => r.r2Key)
+          .filter((k): k is string => Boolean(k)),
+        ...(vd.imagePreviewS3Key ? [vd.imagePreviewS3Key] : []),
+      ],
+    });
+    const deleted = all
+      .filter(
+        (vd) =>
+          vd.deletedAt &&
+          vd.status !== "uploading" &&
+          liveKeySet.has(
+            `${vd.projectId}::${vd.folderId ?? "root"}::${vd.title}::${vd.fileSize ?? -1}`,
+          ),
+      )
+      .map((vd) => ({ videoId: vd._id, ...refsOf(vd) }));
+    const liveRefs = live.map(refsOf);
+    return {
+      deleted,
+      liveMuxAssetIds: liveRefs.flatMap((r) => r.muxAssetIds),
+      liveStreamUids: liveRefs
+        .map((r) => r.streamUid)
+        .filter((s): s is string => Boolean(s)),
+      liveObjectKeys: liveRefs.flatMap((r) => r.objectKeys),
+    };
+  },
+});
+
 // Purge targets for the duplicate-upload storm cleanup: videos stuck in
 // "uploading" for a while (deleted or not), with the R2/Mux refs we must free.
 export const listStuckDriveUploads = internalQuery({
@@ -910,6 +1176,32 @@ export const listStuckDriveUploads = internalQuery({
 
 // Soft-delete + fail a stuck upload after its R2/Mux bytes have been freed, so
 // it leaves the grid and the active-uploads indicator and can't be reused.
+// Drops every storage/encoding ref from an already-soft-deleted row after
+// its assets were purged, so re-running the purge (and any future GC) sees
+// nothing left to do. Refuses to touch live rows.
+export const clearPurgedAssetRefs = internalMutation({
+  args: { videoId: v.id("videos") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const vd = await ctx.db.get(args.videoId);
+    if (!vd || !vd.deletedAt) return null;
+    await ctx.db.patch(args.videoId, {
+      s3Key: undefined,
+      muxUploadId: undefined,
+      muxAssetId: undefined,
+      muxPlaybackId: undefined,
+      muxSignedPlaybackId: undefined,
+      muxCaptionsTrackId: undefined,
+      muxPreviewAssetId: undefined,
+      muxPreviewPlaybackId: undefined,
+      staticRenditions: undefined,
+      streamUid: undefined,
+      imagePreviewS3Key: undefined,
+    });
+    return null;
+  },
+});
+
 export const markDriveUploadPurged = internalMutation({
   args: { videoId: v.id("videos") },
   returns: v.null(),
@@ -951,11 +1243,25 @@ export const inspectRecentVideos = internalQuery({
 /**
  * Mark the upload as complete. Delegates to `videoActions.markUploadComplete`
  * which does the HEAD check + Mux handoff for video MIME types.
+ *
+ * Idempotent: rclone re-PUTs (and the same-bytes reuse path in
+ * createUploadForDesktop) re-fire this after the row already completed or
+ * while ingest is mid-flight. markUploadComplete unconditionally re-runs
+ * startEncoding, which would bill a second Mux asset — so only fresh uploads
+ * ("uploading") and retryable failures ("failed") proceed.
  */
 export const completeUploadForDesktop = action({
   args: { videoId: v.id("videos") },
   returns: v.object({ success: v.boolean() }),
   handler: async (ctx, args): Promise<{ success: boolean }> => {
+    const status: string | null = await ctx.runQuery(
+      internal.desktopBrowse.getVideoStatusForDesktop,
+      { videoId: args.videoId },
+    );
+    if (status === null) return { success: false };
+    if (status !== "uploading" && status !== "failed") {
+      return { success: true };
+    }
     const result: { success: boolean } = await ctx.runAction(
       api.videoActions.markUploadComplete,
       { videoId: args.videoId },

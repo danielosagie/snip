@@ -38,6 +38,159 @@ async function deleteProxyObjects(keys: string[]): Promise<void> {
 }
 
 /**
+ * Best-effort GC for assets replaced by a drive overwrite
+ * (desktopBrowse.resetVideoForOverwrite): the old original object, encoded
+ * Mux/Stream assets, preview asset, mirrored renditions. Every failure is
+ * logged and swallowed — the row already points at the new upload, so a
+ * leaked object is a COGS leak, not a correctness bug.
+ */
+export const purgeReplacedAssets = internalAction({
+  args: {
+    s3Keys: v.array(v.string()),
+    muxAssetIds: v.array(v.string()),
+    streamUid: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (_ctx, args) => {
+    for (const assetId of args.muxAssetIds) {
+      try {
+        await deleteMuxAsset(assetId);
+      } catch (error) {
+        console.warn(
+          `overwrite-gc: failed to delete Mux asset ${assetId}:`,
+          error,
+        );
+      }
+    }
+    if (args.streamUid) {
+      try {
+        await deleteStreamAsset(args.streamUid);
+      } catch (error) {
+        console.warn(
+          `overwrite-gc: failed to delete Stream asset ${args.streamUid}:`,
+          error,
+        );
+      }
+    }
+    await deleteProxyObjects(args.s3Keys);
+    return null;
+  },
+});
+
+/**
+ * Frees the storage + encoding assets held by soft-deleted rows that are
+ * byte-identical duplicates of a live row (what
+ * desktopBrowse.cleanupCompletedDriveDuplicates trashes). Refuses to touch
+ * any ref a live row still uses. Dry-run unless `apply` is true:
+ * `npx convex run retentionActions:purgeDeletedDuplicateAssets '{"apply":true}'`
+ */
+export const purgeDeletedDuplicateAssets = internalAction({
+  args: { apply: v.optional(v.boolean()) },
+  returns: v.object({
+    rows: v.number(),
+    muxAssetsDeleted: v.number(),
+    streamAssetsDeleted: v.number(),
+    objectsDeleted: v.number(),
+    skippedLiveRefs: v.number(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    rows: number;
+    muxAssetsDeleted: number;
+    streamAssetsDeleted: number;
+    objectsDeleted: number;
+    skippedLiveRefs: number;
+  }> => {
+    const refs: {
+      deleted: Array<{
+        videoId: Id<"videos">;
+        muxAssetIds: string[];
+        streamUid: string | null;
+        objectKeys: string[];
+      }>;
+      liveMuxAssetIds: string[];
+      liveStreamUids: string[];
+      liveObjectKeys: string[];
+    } = await ctx.runQuery(
+      internal.desktopBrowse.listDeletedDuplicateRefs,
+      {},
+    );
+    const liveMux = new Set(refs.liveMuxAssetIds);
+    const liveStream = new Set(refs.liveStreamUids);
+    const liveObjects = new Set(refs.liveObjectKeys);
+    let muxAssetsDeleted = 0;
+    let streamAssetsDeleted = 0;
+    let objectsDeleted = 0;
+    let skippedLiveRefs = 0;
+    const s3 = getS3Client();
+    for (const row of refs.deleted) {
+      for (const assetId of row.muxAssetIds) {
+        if (liveMux.has(assetId)) {
+          skippedLiveRefs++;
+          continue;
+        }
+        if (args.apply) {
+          try {
+            await deleteMuxAsset(assetId);
+          } catch (error) {
+            console.warn(`dup-purge: Mux asset ${assetId}:`, error);
+            continue;
+          }
+        }
+        muxAssetsDeleted++;
+      }
+      if (row.streamUid) {
+        if (liveStream.has(row.streamUid)) {
+          skippedLiveRefs++;
+        } else {
+          if (args.apply) {
+            try {
+              await deleteStreamAsset(row.streamUid);
+              streamAssetsDeleted++;
+            } catch (error) {
+              console.warn(`dup-purge: Stream ${row.streamUid}:`, error);
+            }
+          } else {
+            streamAssetsDeleted++;
+          }
+        }
+      }
+      for (const key of row.objectKeys) {
+        if (liveObjects.has(key)) {
+          skippedLiveRefs++;
+          continue;
+        }
+        if (args.apply) {
+          try {
+            await s3.send(
+              new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
+            );
+          } catch (error) {
+            console.warn(`dup-purge: object ${key}:`, error);
+            continue;
+          }
+        }
+        objectsDeleted++;
+      }
+      if (args.apply) {
+        await ctx.runMutation(internal.desktopBrowse.clearPurgedAssetRefs, {
+          videoId: row.videoId,
+        });
+      }
+    }
+    return {
+      rows: refs.deleted.length,
+      muxAssetsDeleted,
+      streamAssetsDeleted,
+      objectsDeleted,
+      skippedLiveRefs,
+    };
+  },
+});
+
+/**
  * Daily cold-eviction sweep (wired into convex/crons.ts). Reclaims the
  * encoded ladder for videos that have gone cold, leaving the source in
  * place for lazy re-encode. Idempotent and self-throttling: processes one
