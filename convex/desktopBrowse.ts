@@ -1228,15 +1228,23 @@ export const inspectRecentVideos = internalQuery({
       .query("videos")
       .order("desc")
       .take(args.limit ?? 24);
-    return rows.map((vd) => ({
-      title: vd.title.slice(0, 24),
-      status: vd.status,
-      muxPlayback: vd.muxPlaybackId ? "yes" : "no",
-      muxAssetStatus: vd.muxAssetStatus ?? null,
-      thumb: vd.thumbnailUrl ? vd.thumbnailUrl.slice(0, 38) : null,
-      hasS3Key: typeof vd.s3Key === "string" && vd.s3Key.length > 0,
-      deleted: Boolean(vd.deletedAt),
-    }));
+    return rows
+      .filter((vd) => !vd.deletedAt)
+      .map((vd) => ({
+        title: vd.title.slice(0, 24),
+        status: vd.status,
+        kind: vd.kind ?? "video",
+        muxPlayback: vd.muxPlaybackId ? "yes" : "no",
+        muxAssetStatus: vd.muxAssetStatus ?? null,
+        captions: vd.muxCaptionsTrackId ? "yes" : "no",
+        previewAsset: vd.muxPreviewAssetStatus ?? null,
+        previewError: vd.muxPreviewAssetError
+          ? vd.muxPreviewAssetError.slice(0, 60)
+          : null,
+        evictedAt: vd.renditionEvictedAt ?? null,
+        deferred: Boolean(vd.encodingDeferred),
+        hasS3Key: typeof vd.s3Key === "string" && vd.s3Key.length > 0,
+      }));
   },
 });
 

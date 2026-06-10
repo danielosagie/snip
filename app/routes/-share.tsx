@@ -966,8 +966,12 @@ export default function SharePage() {
   // signed playback id whose VTT would need its own signed token, and the
   // watermarked preview asset carries a different track — not worth wiring up
   // here. Free/public share links get captions just like the /watch page.
+  // Captions ride the MAIN asset's public playback id. Pre-payment on a
+  // paywalled share we withhold them — the VTT is the full spoken content
+  // of the full video, which would leak past the 360p watermarked preview.
+  // Once paid (or on free links) they're on.
   const shareCaptionsVttUrl =
-    !isPaywalled && video?.muxPlaybackId && video?.muxCaptionsTrackId
+    (!isPaywalled || isPaid) && video?.muxPlaybackId && video?.muxCaptionsTrackId
       ? `https://stream.mux.com/${video.muxPlaybackId}/text/${video.muxCaptionsTrackId}.vtt`
       : undefined;
 

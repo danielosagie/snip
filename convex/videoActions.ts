@@ -12,6 +12,7 @@ import { action, ActionCtx, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import {
+  addGeneratedSubtitles,
   buildMuxPlaybackUrl,
   buildMuxPreviewUrl,
   buildMuxRenditionDownloadUrl,
@@ -577,6 +578,56 @@ export const markUploadComplete = action({
     }
 
     return { success: true };
+  },
+});
+
+/**
+ * Backfill Mux auto-generated captions for ready videos whose asset was
+ * created before `generated_subtitles` was requested at create time (those
+ * have a Mux asset but no captions track). Requesting the track is all
+ * that's needed: when Mux finishes, the existing `video.asset.track.ready`
+ * webhook sets `muxCaptionsTrackId` AND indexes the transcript for search —
+ * the backfill rides the same pipeline as fresh uploads. Dry-run unless
+ * `apply` is true:
+ * `npx convex run videoActions:backfillGeneratedCaptions '{"apply":true}'`
+ */
+export const backfillGeneratedCaptions = internalAction({
+  args: {
+    apply: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    candidates: v.number(),
+    requested: v.number(),
+    failed: v.number(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ candidates: number; requested: number; failed: number }> => {
+    const rows: Array<{ videoId: Id<"videos">; muxAssetId: string; title: string }> =
+      await ctx.runQuery(internal.videos.listCaptionBackfillCandidates, {
+        limit: args.limit,
+      });
+    let requested = 0;
+    let failed = 0;
+    for (const row of rows) {
+      if (!args.apply) continue;
+      try {
+        await addGeneratedSubtitles(row.muxAssetId);
+        requested++;
+      } catch (error) {
+        // Most common benign failure: the asset already has a subtitle
+        // track Mux won't duplicate, or the asset has no audio to
+        // transcribe. Log + continue; nothing here is load-bearing.
+        console.warn(
+          `caption-backfill: ${row.title} (${row.muxAssetId}):`,
+          error,
+        );
+        failed++;
+      }
+    }
+    return { candidates: rows.length, requested, failed };
   },
 });
 

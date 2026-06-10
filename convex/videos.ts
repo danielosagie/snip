@@ -1133,6 +1133,38 @@ export const restore = mutation({
  * used. Refuses if the video hasn't been trashed first so accidental
  * "permanent delete" clicks are scoped to the trash UI.
  */
+// Ready Mux videos with no captions track — assets created before
+// generated_subtitles was requested at create time. Feeds
+// videoActions.backfillGeneratedCaptions.
+export const listCaptionBackfillCandidates = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(
+    v.object({
+      videoId: v.id("videos"),
+      muxAssetId: v.string(),
+      title: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("videos")
+      .take(Math.min(args.limit ?? 2000, 8000));
+    return rows
+      .filter(
+        (vd) =>
+          !vd.deletedAt &&
+          vd.status === "ready" &&
+          typeof vd.muxAssetId === "string" &&
+          !vd.muxCaptionsTrackId,
+      )
+      .map((vd) => ({
+        videoId: vd._id,
+        muxAssetId: vd.muxAssetId as string,
+        title: vd.title.slice(0, 40),
+      }));
+  },
+});
+
 export const purge = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
