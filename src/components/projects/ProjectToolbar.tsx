@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import {
   ChevronRight,
   Search,
@@ -11,7 +11,13 @@ import {
   LayoutList,
   Columns3,
   Check,
+  ListFilter,
 } from "lucide-react";
+import {
+  FILE_KIND_BUCKETS,
+  FILE_KIND_BUCKET_LABEL,
+  type FileKindBucket,
+} from "@/lib/fileTypes";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import {
@@ -51,6 +57,11 @@ interface Props {
   onSortChange: (sort: ProjectSortMode) => void;
   search: string;
   onSearchChange: (q: string) => void;
+  /** Selected kind buckets. Empty set = show all kinds. */
+  kindFilter: Set<FileKindBucket>;
+  onKindFilterChange: (next: Set<FileKindBucket>) => void;
+  /** Buckets present in the current folder — only these are offered. */
+  availableKindBuckets: Set<FileKindBucket>;
   /**
    * Optional handler invoked when a video is dropped onto a breadcrumb
    * segment. `targetFolderId` is `null` for the root segment.
@@ -75,9 +86,23 @@ export function ProjectToolbar({
   onSortChange,
   search,
   onSearchChange,
+  kindFilter,
+  onKindFilterChange,
+  availableKindBuckets,
   onDropVideoOnBreadcrumb,
   onDropFolderOnBreadcrumb,
 }: Props) {
+  const toggleKind = (bucket: FileKindBucket) => {
+    const next = new Set(kindFilter);
+    if (next.has(bucket)) next.delete(bucket);
+    else next.add(bucket);
+    onKindFilterChange(next);
+  };
+  // Only buckets that exist in this folder, in canonical order.
+  const offeredBuckets = FILE_KIND_BUCKETS.filter((b) =>
+    availableKindBuckets.has(b),
+  );
+  const activeKindCount = kindFilter.size;
   const navigate = useNavigate();
   const breadcrumbs = useQuery(
     api.folders.breadcrumbs,
@@ -193,6 +218,64 @@ export function ProjectToolbar({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Kind filter — only rendered when there's more than one kind to
+              choose between (a single-kind folder needs no filter). Multi-
+              select: each click toggles a bucket; empty = show all. */}
+          {offeredBuckets.length > 1 ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-colors flex-shrink-0",
+                    activeKindCount > 0
+                      ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                      : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                  )}
+                  aria-label="Filter by kind"
+                >
+                  <ListFilter className="h-3.5 w-3.5" />
+                  <span className="font-mono normal-case hidden md:inline">
+                    {activeKindCount > 0 ? `Kind · ${activeKindCount}` : "Kind"}
+                  </span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[180px]">
+                {offeredBuckets.map((bucket) => {
+                  const on = kindFilter.has(bucket);
+                  return (
+                    <DropdownMenuItem
+                      key={bucket}
+                      onSelect={(e) => {
+                        // Keep the menu open so several kinds can be toggled
+                        // in one pass.
+                        e.preventDefault();
+                        toggleKind(bucket);
+                      }}
+                      className={cn("font-mono", on ? "font-bold" : "")}
+                    >
+                      {on ? (
+                        <Check className="mr-2 h-4 w-4" />
+                      ) : (
+                        <span className="mr-2 inline-block w-4" />
+                      )}
+                      {FILE_KIND_BUCKET_LABEL[bucket]}
+                    </DropdownMenuItem>
+                  );
+                })}
+                {activeKindCount > 0 ? (
+                  <DropdownMenuItem
+                    onClick={() => onKindFilterChange(new Set())}
+                    className="font-mono text-[#888] border-t border-[#ccc] mt-1 pt-1"
+                  >
+                    <span className="mr-2 inline-block w-4" />
+                    Clear filter
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
 
         {/* View-mode toggle — own group, pinned to the far right of
