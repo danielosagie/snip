@@ -204,7 +204,13 @@ export default function VideoPage() {
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [originalPlaybackUrl, setOriginalPlaybackUrl] = useState<string | null>(null);
   const [isLoadingOriginalPlayback, setIsLoadingOriginalPlayback] = useState(false);
-  const [preferredSource, setPreferredSource] = useState<"mux720" | "original">("original");
+  // Default to the Mux adaptive stream once it's ready: it's CORS-clean and
+  // carries the caption track, so captions show by default and playback never
+  // trips the bucket-CORS check. While the asset is still encoding `playbackUrl`
+  // is null and `activePlaybackUrl` falls back to the original upload, so the
+  // video is still watchable instantly. Users can pin the full-res "Original"
+  // source from the quality menu.
+  const [preferredSource, setPreferredSource] = useState<"mux720" | "original">("mux720");
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const isPlayable = video?.status === "ready" && Boolean(video?.muxPlaybackId);
   const playbackUrl = playbackSession?.url ?? null;

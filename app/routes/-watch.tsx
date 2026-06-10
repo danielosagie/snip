@@ -19,6 +19,9 @@ export default function WatchPage() {
 
   const createComment = useMutation(api.comments.createForPublic);
   const getPlaybackSession = useAction(api.videoActions.getPublicPlaybackSession);
+  const getOriginalPlaybackUrl = useAction(
+    api.videoActions.getPublicOriginalPlaybackUrl,
+  );
   const getDownloadUrl = useAction(api.videoActions.getPublicDownloadUrl);
 
   const { videoData, comments } = useWatchData({ publicId });
@@ -26,6 +29,9 @@ export default function WatchPage() {
     url: string;
     posterUrl: string;
   } | null>(null);
+  // Instant-play fallback: the signed URL of the original upload, used while
+  // Mux is still encoding (before muxPlaybackId exists).
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -65,6 +71,50 @@ export default function WatchPage() {
       cancelled = true;
     };
   }, [getPlaybackSession, publicId, videoData?.video?.muxPlaybackId]);
+
+  // Instant playback while Mux is still encoding: as soon as the upload lands
+  // in storage we stream the original file directly. Once muxPlaybackId appears
+  // we clear this and the Mux-session effect above takes over (the player
+  // prefers the adaptive stream).
+  useEffect(() => {
+    const v = videoData?.video;
+    // getByPublicId only ever returns ready/processing videos, so the only
+    // gate here is: we have an original file (s3Key) and Mux isn't ready yet.
+    if (!v || !v.s3Key || v.muxPlaybackId) {
+      setOriginalUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    void getOriginalPlaybackUrl({ publicId })
+      .then((result) => {
+        if (cancelled) return;
+        setOriginalUrl(result.url);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOriginalUrl(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    getOriginalPlaybackUrl,
+    publicId,
+    videoData?.video?.s3Key,
+    videoData?.video?.muxPlaybackId,
+  ]);
+
+  // Reflect the video name in the browser tab instead of the static
+  // "Watch video | snip" route default.
+  useEffect(() => {
+    const title = videoData?.video?.title;
+    if (title) document.title = `${title} | snip`;
+    return () => {
+      document.title = "snip";
+    };
+  }, [videoData?.video?.title]);
 
   useEffect(() => {
     setIsDownloading(false);
@@ -164,6 +214,16 @@ export default function WatchPage() {
   }
 
   const video = videoData.video;
+  // Prefer the Mux adaptive stream; fall back to the original upload while the
+  // asset is still encoding so the video is watchable the instant it's posted.
+  const activePlaybackUrl = playbackSession?.url ?? originalUrl;
+  // Mux auto-captions, available once the track is ready. The player only
+  // attaches them on the Mux (HLS) source, so they're simply absent during the
+  // original-file fallback.
+  const captionsVttUrl =
+    video.muxPlaybackId && video.muxCaptionsTrackId
+      ? `https://stream.mux.com/${video.muxPlaybackId}/text/${video.muxCaptionsTrackId}.vtt`
+      : undefined;
 
   return (
     <div className="h-[100dvh] flex flex-col bg-[#f0f0e8]">
@@ -227,11 +287,12 @@ export default function WatchPage() {
             </div>
           ) : null}
 
-          {playbackSession?.url ? (
+          {activePlaybackUrl ? (
             <VideoPlayer
               ref={playerRef}
-              src={playbackSession.url}
-              poster={playbackSession.posterUrl}
+              src={activePlaybackUrl}
+              poster={playbackSession?.posterUrl ?? video.thumbnailUrl ?? undefined}
+              captionsVttUrl={captionsVttUrl}
               comments={flattenedComments}
               onTimeUpdate={setCurrentTime}
               allowDownload={false}

@@ -416,11 +416,17 @@ export const getByPublicId = query({
       .withIndex("by_public_id", (q) => q.eq("publicId", args.publicId))
       .unique();
 
+    // Allow "processing" videos through so the /watch page can play the
+    // original upload instantly while Mux finishes encoding. Only block
+    // pre-upload ("uploading") and "failed" states. The page swaps to the
+    // Mux adaptive stream the moment muxPlaybackId lands (the query is
+    // reactive). `status` is returned so the client knows which source to use.
     if (
       !video ||
       video.deletedAt ||
       video.visibility !== "public" ||
-      video.status !== "ready"
+      video.status === "uploading" ||
+      video.status === "failed"
     ) {
       return null;
     }
@@ -434,8 +440,10 @@ export const getByPublicId = query({
         thumbnailUrl: video.thumbnailUrl,
         muxAssetId: video.muxAssetId,
         muxPlaybackId: video.muxPlaybackId,
+        muxCaptionsTrackId: video.muxCaptionsTrackId,
         contentType: video.contentType,
         s3Key: video.s3Key,
+        status: video.status,
       },
     };
   },
@@ -541,10 +549,15 @@ export const getByShareGrant = query({
         thumbnailUrl: video.thumbnailUrl,
         muxAssetId: video.muxAssetId,
         muxPlaybackId: video.muxPlaybackId,
+        muxCaptionsTrackId: video.muxCaptionsTrackId,
         contentType: video.contentType,
         s3Key: video.s3Key,
       },
       grantExpiresAt: resolved.grant.expiresAt,
+      // Paywall context so callers serving full-res playback can fail-closed:
+      // a paywalled share must NEVER come back through an ungated public path.
+      paywall: resolved.shareLink.paywall ?? null,
+      grantPaidAt: resolved.grant.paidAt ?? null,
     };
   },
 });
@@ -580,6 +593,7 @@ export const getByShareGrantForDownload = query({
         contentType: video.contentType,
         s3Key: video.s3Key,
         status: video.status,
+        fileSize: video.fileSize,
         // Proxy (static-rendition) download support. Signed id is preferred for
         // gated downloads; public id is the fallback for non-paywalled shares.
         muxPlaybackId: video.muxPlaybackId,
@@ -2161,6 +2175,7 @@ export const getByShareGrantWithPaywall = query({
         s3Key: video.s3Key,
         muxAssetId: video.muxAssetId,
         muxPlaybackId: video.muxPlaybackId,
+        muxCaptionsTrackId: video.muxCaptionsTrackId,
         muxSignedPlaybackId: video.muxSignedPlaybackId,
         muxPreviewAssetId: video.muxPreviewAssetId,
         muxPreviewPlaybackId: video.muxPreviewPlaybackId,

@@ -113,9 +113,6 @@ export default function SharePage() {
   const [rightTab, setRightTab] = useState<"comments" | "info">("comments");
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const playerSectionRef = useRef<HTMLDivElement | null>(null);
-  const paywallSectionRef = useRef<HTMLDivElement | null>(null);
-  const paywallPulseTimerRef = useRef<number | null>(null);
-  const [paywallPulse, setPaywallPulse] = useState(false);
 
   // Live unlock-state subscription. Convex reactivity flips this from
   // paid:false to paid:true the instant the Stripe webhook fires, with no
@@ -169,6 +166,40 @@ export default function SharePage() {
     () => summary?.bundle?.folders ?? [],
     [summary],
   );
+
+  // Single-video shares: file size + ready proxies so the export sheet can
+  // offer the same quality picker a bundle gets (bundles carry these
+  // per-item on the summary already).
+  const singleDownloadInfo = useQuery(
+    api.videos.getByShareGrantForDownload,
+    grantToken && summary && !isBundle ? { grantToken } : "skip",
+  );
+
+  // One items list for the export sheet regardless of share shape — the
+  // Canva-style download flow (pick quality → download, or unlock inline
+  // when paywalled) is identical for a single file and a bundle.
+  const sheetItems = useMemo(() => {
+    if (isBundle) {
+      return bundleItems.map((i) => ({
+        _id: i._id as string,
+        title: i.title,
+        fileSize: i.fileSize ?? null,
+        proxies: i.proxies ?? [],
+      }));
+    }
+    const vd = singleDownloadInfo?.video;
+    if (!vd) return [];
+    return [
+      {
+        _id: vd._id as string,
+        title: vd.title,
+        fileSize: vd.fileSize ?? null,
+        proxies: (vd.staticRenditions ?? [])
+          .filter((r) => r.status === "ready")
+          .map((r) => ({ name: r.name, resolution: r.resolution })),
+      },
+    ];
+  }, [isBundle, bundleItems, singleDownloadInfo]);
 
   // Metadata for the focused item (Metadata/Info tab). Sourced from the bundle
   // item or the single-video summary.
@@ -302,6 +333,16 @@ export default function SharePage() {
     setHasAttemptedAutoGrant(true);
     void acquireGrant();
   }, [acquireGrant, grantToken, hasAttemptedAutoGrant, shareInfo]);
+
+  // Show the video name in the browser tab instead of the static
+  // "Shared video | snip" route default.
+  useEffect(() => {
+    const title = videoData?.video?.title;
+    if (title) document.title = `${title} | snip`;
+    return () => {
+      document.title = "snip";
+    };
+  }, [videoData?.video?.title]);
 
   // Load (and re-load) the playback session. Re-runs when unlockState.paid
   // flips so payment immediately swaps preview → full-res. Also re-runs as
@@ -713,29 +754,6 @@ export default function SharePage() {
     }
   }, []);
 
-  const surfacePaywall = useCallback(() => {
-    const node = paywallSectionRef.current;
-    if (node) {
-      node.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-    setPaywallPulse(true);
-    if (paywallPulseTimerRef.current !== null) {
-      window.clearTimeout(paywallPulseTimerRef.current);
-    }
-    paywallPulseTimerRef.current = window.setTimeout(() => {
-      setPaywallPulse(false);
-      paywallPulseTimerRef.current = null;
-    }, 1200);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (paywallPulseTimerRef.current !== null) {
-        window.clearTimeout(paywallPulseTimerRef.current);
-      }
-    };
-  }, []);
-
   const handleDownload = useCallback(async () => {
     if (!grantToken || isDownloading) return;
 
@@ -802,6 +820,28 @@ export default function SharePage() {
               </Button>
             </Link>
           </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // The link is valid, the video is just still encoding (the owner shared it
+  // right after upload). getByToken is reactive, so this flips to the player
+  // automatically the moment Mux finishes — no reload needed.
+  if (shareInfo.status === "processing") {
+    return (
+      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#888]/40 border-t-[#1a1a1a]" />
+            </div>
+            <CardTitle>Still processing</CardTitle>
+            <CardDescription>
+              This video is still being prepared. The link works — it'll start
+              playing here automatically as soon as it's ready.
+            </CardDescription>
+          </CardHeader>
         </Card>
       </div>
     );
@@ -921,6 +961,15 @@ export default function SharePage() {
   // banner on the playback session's media kind.
   const isVideoPlayback = playbackSession?.kind === "video";
   const downloadAllowed = !isPaywalled || isPaid;
+  // Mux auto-captions for the share player. The player attaches them only on
+  // the Mux (HLS) source. Skipped for paywalled shares: those stream via a
+  // signed playback id whose VTT would need its own signed token, and the
+  // watermarked preview asset carries a different track — not worth wiring up
+  // here. Free/public share links get captions just like the /watch page.
+  const shareCaptionsVttUrl =
+    !isPaywalled && video?.muxPlaybackId && video?.muxCaptionsTrackId
+      ? `https://stream.mux.com/${video.muxPlaybackId}/text/${video.muxCaptionsTrackId}.vtt`
+      : undefined;
 
   if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
     return (
@@ -952,47 +1001,36 @@ export default function SharePage() {
           >
             snip
           </Link>
+          {/* Canva-style export: this button ALWAYS opens the download
+              sheet — quality picker, item list, and (when paywalled) the
+              inline unlock CTA all live there, so paying and downloading
+              are one continuous surface instead of a disabled button. */}
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              if (!isBundle && !downloadAllowed) {
-                surfacePaywall();
-                return;
-              }
-              if (isBundle) {
-                setDownloadSheetOpen(true);
-              } else {
-                void handleDownload();
-              }
-            }}
-            disabled={
-              !grantToken ||
-              (isBundle ? bundleItems.length === 0 : isDownloading)
-            }
+            onClick={() => setDownloadSheetOpen(true)}
+            disabled={!grantToken || sheetItems.length === 0}
             title={
-              !isBundle && !downloadAllowed ? "Pay to unlock download" : undefined
+              paywall && !isPaid
+                ? "Preview free — pay once to unlock downloads"
+                : undefined
             }
           >
             <Download className="h-4 w-4" />
-            {isBundle
-              ? "Download"
-              : !downloadAllowed && paywall
-                ? `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`
-                : isDownloading
-                  ? "Preparing..."
-                  : "Download"}
+            {paywall && !isPaid
+              ? `Download — ${formatPrice(paywall.priceCents, paywall.currency)}`
+              : "Download"}
           </Button>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto p-6 space-y-6">
-        {downloadError ? (
+        {downloadError || checkoutError ? (
           <div
             role="alert"
             className="border-2 border-[#dc2626] bg-[#dc2626]/10 px-4 py-3 text-sm text-[#7f1d1d]"
           >
-            {downloadError}
+            {downloadError ?? checkoutError}
           </div>
         ) : null}
 
@@ -1114,57 +1152,10 @@ export default function SharePage() {
           </section>
         ) : null}
 
-        {paywall && !isPaid && !isOwner ? (
-          <section
-            ref={paywallSectionRef}
-            className={`border-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8] p-4 sm:p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shadow-[4px_4px_0px_0px_#1a1a1a] scroll-mt-24 transition-transform ${
-              paywallPulse ? "scale-[1.02]" : ""
-            }`}
-          >
-            <div className="min-w-0">
-              <div className="text-xs font-mono uppercase tracking-widest opacity-80">
-                {demoStatus && !demoStatus.stripeConfigured
-                  ? "Demo mode — simulated payment"
-                  : isPreviewPending
-                    ? "Preview rendering — you can pay now"
-                    : "Preview only — paywalled delivery"}
-              </div>
-              <div className="font-black text-2xl sm:text-3xl tracking-tight break-words">
-                {formatPrice(paywall.priceCents, paywall.currency)} to unlock full
-                quality
-              </div>
-              {paywall.description ? (
-                <div className="text-sm opacity-90 mt-1 break-words">
-                  {paywall.description}
-                </div>
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-2 w-full sm:w-auto sm:items-end sm:shrink-0">
-              <Button
-                onClick={() => void handlePay()}
-                disabled={
-                  isCreatingCheckout || !grantToken || demoStatus === undefined
-                }
-                className="bg-[#f0f0e8] text-[#1a1a1a] hover:bg-white w-full sm:w-auto border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] hover:shadow-[2px_2px_0px_0px_#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px] transition-all font-black uppercase tracking-wide"
-              >
-                {demoStatus === undefined
-                  ? "Loading…"
-                  : isCreatingCheckout
-                    ? demoStatus && !demoStatus.stripeConfigured
-                      ? "Unlocking…"
-                      : "Opening checkout…"
-                    : demoStatus && !demoStatus.stripeConfigured
-                      ? `Simulate paying ${formatPrice(paywall.priceCents, paywall.currency)}`
-                      : `Pay ${formatPrice(paywall.priceCents, paywall.currency)}`}
-              </Button>
-              {checkoutError ? (
-                <div className="text-xs text-[#ffd1d1] text-left sm:text-right sm:max-w-xs break-words">
-                  {checkoutError}
-                </div>
-              ) : null}
-            </div>
-          </section>
-        ) : null}
+        {/* The paywall pitch + pay CTA live in the download sheet (header
+            Download button) — no banner above the player. The viewer watches
+            the watermarked preview undisturbed and pays when they go to
+            export, Canva-style. */}
 
         {paywall && isPaid ? (
           <section className="border-2 border-[#1a1a1a] bg-[#FFB380] text-[#1a1a1a] px-5 py-3 flex items-center gap-2 font-bold">
@@ -1184,6 +1175,7 @@ export default function SharePage() {
                 ref={playerRef}
                 src={playbackSession.url}
                 poster={playbackSession.posterUrl}
+                captionsVttUrl={shareCaptionsVttUrl}
                 comments={flattenedComments}
                 onTimeUpdate={setCurrentTime}
                 onMarkerClick={(c) =>
@@ -1259,9 +1251,8 @@ export default function SharePage() {
                 </div>
                 {playbackSession.mode === "locked" ? (
                   <p className="text-sm text-[#1a1a1a] max-w-md">
-                    Preview locked until paid. Pay above to unlock the file —
-                    you can download or open it inline once the grant flips
-                    to paid.
+                    This file is locked until paid — use the Download button
+                    in the header to pay and unlock it.
                   </p>
                 ) : downloadAllowed ? (
                   <Button onClick={() => void handleDownload()}>
@@ -1566,27 +1557,22 @@ export default function SharePage() {
         </div>
       </footer>
 
-      {isBundle ? (
-        <ShareDownloadSheet
-          open={downloadSheetOpen}
-          onOpenChange={setDownloadSheetOpen}
-          items={bundleItems.map((i) => ({
-            _id: i._id,
-            title: i.title,
-            fileSize: i.fileSize ?? null,
-            proxies: i.proxies ?? [],
-          }))}
-          grantToken={grantToken}
-          canDownload={canDownloadGrant}
-          isPaywalled={isPaywalled}
-          isPaid={isPaid}
-          paywallPriceLabel={
-            paywall ? formatPrice(paywall.priceCents, paywall.currency) : null
-          }
-          onPay={() => void handlePay()}
-          isPaying={isCreatingCheckout}
-        />
-      ) : null}
+      {/* Export sheet — mounts for BOTH share shapes (single video and
+          bundle); the Canva-style flow is the same either way. */}
+      <ShareDownloadSheet
+        open={downloadSheetOpen}
+        onOpenChange={setDownloadSheetOpen}
+        items={sheetItems}
+        grantToken={grantToken}
+        canDownload={canDownloadGrant}
+        isPaywalled={isPaywalled}
+        isPaid={isPaid}
+        paywallPriceLabel={
+          paywall ? formatPrice(paywall.priceCents, paywall.currency) : null
+        }
+        onPay={() => void handlePay()}
+        isPaying={isCreatingCheckout}
+      />
     </div>
   );
 }

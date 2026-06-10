@@ -100,7 +100,10 @@ export const recordVideoCheckoutCreated = internalMutation({
     amountCents: v.number(),
     currency: v.string(),
     stripeCheckoutSessionId: v.string(),
-    stripeConnectAccountId: v.string(),
+    stripeConnectAccountId: v.optional(v.string()),
+    settlement: v.optional(
+      v.union(v.literal("connect"), v.literal("platform")),
+    ),
     applicationFeeAmountCents: v.optional(v.number()),
   },
   returns: v.id("payments"),
@@ -113,6 +116,7 @@ export const recordVideoCheckoutCreated = internalMutation({
       currency: args.currency,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
       stripeConnectAccountId: args.stripeConnectAccountId,
+      settlement: args.settlement,
       applicationFeeAmountCents: args.applicationFeeAmountCents,
       status: "pending",
     });
@@ -129,7 +133,10 @@ export const recordCheckoutCreated = internalMutation({
     amountCents: v.number(),
     currency: v.string(),
     stripeCheckoutSessionId: v.string(),
-    stripeConnectAccountId: v.string(),
+    stripeConnectAccountId: v.optional(v.string()),
+    settlement: v.optional(
+      v.union(v.literal("connect"), v.literal("platform")),
+    ),
     applicationFeeAmountCents: v.optional(v.number()),
   },
   returns: v.id("payments"),
@@ -144,6 +151,7 @@ export const recordCheckoutCreated = internalMutation({
       currency: args.currency,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
       stripeConnectAccountId: args.stripeConnectAccountId,
+      settlement: args.settlement,
       applicationFeeAmountCents: args.applicationFeeAmountCents,
       status: "pending",
     });

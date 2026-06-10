@@ -130,6 +130,16 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const [selectedQualityLevel, setSelectedQualityLevel] = useState<number>(AUTO_QUALITY_LEVEL);
   const [captionsOn, setCaptionsOn] = useState(false);
 
+  // Captions are only wired up when the active source is the Mux HLS stream.
+  // The VTT track lives on stream.mux.com (cross-origin), so the <track>
+  // requires crossOrigin="anonymous" on the <video> — but that also forces a
+  // CORS check on the *media itself*. The Mux HLS manifest is CORS-clean; the
+  // original upload served straight from the storage bucket may not be, and
+  // attaching captions there would silently block playback. Mux captions only
+  // exist once the HLS stream is ready, so gating on an HLS source loses
+  // nothing while keeping the original-file fallback playable.
+  const captionsActive = Boolean(captionsVttUrl) && isHlsSource(src);
+
   const hideControlsTimeoutRef = useRef<number | null>(null);
   const wasPlayingBeforeScrubRef = useRef(false);
   const scrubTimeRef = useRef(0);
@@ -265,7 +275,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   // captions enabled globally — mirror that here on first ready.
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !captionsVttUrl) return;
+    if (!video || !captionsActive) return;
     const tracks = video.textTracks;
     if (tracks.length === 0) return;
     const handler = () => {
@@ -275,7 +285,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     handler();
     tracks.addEventListener("change", handler);
     return () => tracks.removeEventListener("change", handler);
-  }, [captionsVttUrl, isMediaReady]);
+  }, [captionsActive, isMediaReady]);
 
   const toggleCaptions = useCallback(() => {
     const video = videoRef.current;
@@ -896,7 +906,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
             {playbackRate}x
           </button>
 
-          {captionsVttUrl && (
+          {captionsActive && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); toggleCaptions(); }}
@@ -1127,13 +1137,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           )}
           playsInline
           preload="auto"
-          crossOrigin={captionsVttUrl ? "anonymous" : undefined}
+          crossOrigin={captionsActive ? "anonymous" : undefined}
           onClick={(e) => {
             e.stopPropagation();
             togglePlay();
           }}
         >
-          {captionsVttUrl && (
+          {captionsActive && (
             <track
               kind="captions"
               srcLang="en"

@@ -1,9 +1,48 @@
 import { v } from "convex/values";
-import { internalQuery } from "./_generated/server";
+import { internalQuery, type QueryCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import {
   isEvictionCandidate,
   resolveLadderProvider,
 } from "./retentionPolicy";
+import { resolveBundleVideos } from "./shareBundles";
+
+/**
+ * Every video currently reachable through an ACTIVE (non-expired) paywalled
+ * share link — single-video links AND bundle/folder/project links — so the
+ * cold-eviction sweep never strands a paid client deliverable's ladder.
+ *
+ * `isEvictionCandidate` already guards per-video paywalls (`video.paywall` /
+ * `muxSignedPlaybackId`), but the paywall on a BUNDLE share lives on the
+ * shareLink, not on each video it covers — so without this a video inside a
+ * paid folder/project share looks evictable. An external client can't trigger
+ * a re-encode (that needs member access), so they'd hit a dead player.
+ *
+ * Built once per eviction run. Paywalled shares are a niche slice of all
+ * links, so the link scan stays cheap; bundle expansion reuses the same
+ * resolver the share page uses.
+ */
+async function collectPaywalledVideoIds(
+  ctx: QueryCtx,
+): Promise<Set<string>> {
+  const now = Date.now();
+  const protectedIds = new Set<string>();
+  const links = await ctx.db.query("shareLinks").collect();
+  for (const link of links) {
+    if (!link.paywall) continue;
+    if (link.expiresAt && link.expiresAt < now) continue; // lapsed → unprotect
+    if (link.videoId) {
+      protectedIds.add(link.videoId);
+    }
+    if (link.bundleId) {
+      const bundle = await ctx.db.get(link.bundleId);
+      if (!bundle) continue;
+      const videos = await resolveBundleVideos(ctx, bundle);
+      for (const vd of videos) protectedIds.add(vd._id);
+    }
+  }
+  return protectedIds;
+}
 
 /**
  * Hot/cold retention — the COGS half of the storage pricing model.
@@ -53,8 +92,18 @@ export const listEvictionCandidates = internalQuery({
       .withIndex("by_last_viewed", (q) => q.lt("lastViewedAt", args.cutoffMs))
       .take(cap * 3);
 
-    const candidates = scanned.filter((v) =>
+    const perVideoCandidates = scanned.filter((v) =>
       isEvictionCandidate(v, args.cutoffMs),
+    );
+
+    // Second pass: drop anything reachable through an active paywalled bundle
+    // share. Only computed when there's at least one candidate to test.
+    const protectedIds =
+      perVideoCandidates.length > 0
+        ? await collectPaywalledVideoIds(ctx)
+        : new Set<string>();
+    const candidates = perVideoCandidates.filter(
+      (v) => !protectedIds.has(v._id),
     );
 
     return candidates.slice(0, cap).map((video) => ({

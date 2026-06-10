@@ -91,6 +91,36 @@ async function reconcileConnectStatus(
   }
 }
 
+/**
+ * Where should this checkout's funds land? Connect destination charge when
+ * the team's Connect account is active (reconciling a stale cached status
+ * against Stripe first), platform collection otherwise. Platform collection
+ * is what makes the buyer's flow Canva-like: pay → unlock, regardless of
+ * whether the seller ever finished payout onboarding.
+ */
+async function resolveSettlement(
+  ctx: ActionCtx,
+  stripe: Stripe,
+  team: {
+    _id: Id<"teams">;
+    stripeConnectAccountId?: string | null;
+    stripeConnectStatus?: "pending" | "active" | "restricted" | "disabled" | null;
+  },
+): Promise<{ mode: "connect"; accountId: string } | { mode: "platform" }> {
+  if (!team.stripeConnectAccountId) return { mode: "platform" };
+  let status: "pending" | "active" | "restricted" | "disabled" =
+    team.stripeConnectStatus ?? "pending";
+  if (status !== "active") {
+    status = await reconcileConnectStatus(ctx, stripe, {
+      _id: team._id,
+      stripeConnectAccountId: team.stripeConnectAccountId,
+    });
+  }
+  return status === "active"
+    ? { mode: "connect", accountId: team.stripeConnectAccountId }
+    : { mode: "platform" };
+}
+
 export const createCheckoutForGrant = action({
   args: {
     grantToken: v.string(),
@@ -149,28 +179,13 @@ export const createCheckoutForGrant = action({
     if (!lookup.shareLink.paywall) {
       return { status: "noPaywall", url: null };
     }
-    if (!lookup.team.stripeConnectAccountId) {
-      return {
-        status: "teamNotConnected",
-        url: null,
-        reason: "This team hasn't connected Stripe yet.",
-      };
-    }
-    let connectStatus: "pending" | "active" | "restricted" | "disabled" =
-      lookup.team.stripeConnectStatus ?? "pending";
-    if (connectStatus !== "active") {
-      connectStatus = await reconcileConnectStatus(ctx, stripe, {
-        _id: lookup.team._id,
-        stripeConnectAccountId: lookup.team.stripeConnectAccountId,
-      });
-    }
-    if (connectStatus !== "active") {
-      return {
-        status: "teamNotConnected",
-        url: null,
-        reason: "This team's Stripe account isn't ready to accept payments yet.",
-      };
-    }
+    // Settlement routing — Canva model: the BUYER's path never blocks on the
+    // seller's payout plumbing. Connect active → destination charge to the
+    // team's account (as before). Otherwise → the PLATFORM account collects
+    // and the row is stamped settlement:"platform" (operator owes the team a
+    // manual payout; new checkouts switch to Connect automatically the moment
+    // onboarding completes, via the same reconcile-on-checkout below).
+    const settlement = await resolveSettlement(ctx, stripe, lookup.team);
 
     const paywall = lookup.shareLink.paywall;
     const amountCents = paywall.priceCents;
@@ -180,7 +195,8 @@ export const createCheckoutForGrant = action({
       (lookup.bundleName
         ? `Final delivery: ${lookup.bundleName}`
         : `Final delivery: ${lookup.video.title}`);
-    const applicationFeeAmount = computeApplicationFee(amountCents);
+    const applicationFeeAmount =
+      settlement.mode === "connect" ? computeApplicationFee(amountCents) : 0;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -201,7 +217,9 @@ export const createCheckoutForGrant = action({
         ...(applicationFeeAmount > 0
           ? { application_fee_amount: applicationFeeAmount }
           : {}),
-        transfer_data: { destination: lookup.team.stripeConnectAccountId },
+        ...(settlement.mode === "connect"
+          ? { transfer_data: { destination: settlement.accountId } }
+          : {}),
         metadata: {
           grantId: lookup.grant._id,
           shareLinkId: lookup.shareLink._id,
@@ -226,7 +244,9 @@ export const createCheckoutForGrant = action({
       amountCents,
       currency,
       stripeCheckoutSessionId: session.id,
-      stripeConnectAccountId: lookup.team.stripeConnectAccountId,
+      stripeConnectAccountId:
+        settlement.mode === "connect" ? settlement.accountId : undefined,
+      settlement: settlement.mode,
       applicationFeeAmountCents: applicationFeeAmount,
     });
 
@@ -288,33 +308,16 @@ export const createCheckoutForVideo = action({
     });
     if (!lookup) return { status: "videoNotFound", url: null };
     if (!lookup.video.paywall) return { status: "noPaywall", url: null };
-    if (!lookup.team.stripeConnectAccountId) {
-      return {
-        status: "teamNotConnected",
-        url: null,
-        reason: "This team hasn't connected Stripe yet.",
-      };
-    }
-    let connectStatus: "pending" | "active" | "restricted" | "disabled" =
-      lookup.team.stripeConnectStatus ?? "pending";
-    if (connectStatus !== "active") {
-      connectStatus = await reconcileConnectStatus(ctx, stripe, {
-        _id: lookup.team._id,
-        stripeConnectAccountId: lookup.team.stripeConnectAccountId,
-      });
-    }
-    if (connectStatus !== "active") {
-      return {
-        status: "teamNotConnected",
-        url: null,
-        reason: "This team's Stripe account isn't ready to accept payments yet.",
-      };
-    }
+    // Same Canva-model settlement routing as createCheckoutForGrant.
+    const settlement = await resolveSettlement(ctx, stripe, lookup.team);
 
     const paywall = lookup.video.paywall;
     const productName =
       paywall.description ?? `Download: ${lookup.video.title}`;
-    const applicationFeeAmount = computeApplicationFee(paywall.priceCents);
+    const applicationFeeAmount =
+      settlement.mode === "connect"
+        ? computeApplicationFee(paywall.priceCents)
+        : 0;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -335,7 +338,9 @@ export const createCheckoutForVideo = action({
         ...(applicationFeeAmount > 0
           ? { application_fee_amount: applicationFeeAmount }
           : {}),
-        transfer_data: { destination: lookup.team.stripeConnectAccountId },
+        ...(settlement.mode === "connect"
+          ? { transfer_data: { destination: settlement.accountId } }
+          : {}),
         metadata: {
           videoId: lookup.video._id,
           teamId: lookup.team._id,
@@ -355,7 +360,9 @@ export const createCheckoutForVideo = action({
       amountCents: paywall.priceCents,
       currency: paywall.currency,
       stripeCheckoutSessionId: session.id,
-      stripeConnectAccountId: lookup.team.stripeConnectAccountId,
+      stripeConnectAccountId:
+        settlement.mode === "connect" ? settlement.accountId : undefined,
+      settlement: settlement.mode,
       applicationFeeAmountCents: applicationFeeAmount,
     });
 

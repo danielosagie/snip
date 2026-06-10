@@ -709,6 +709,43 @@ export const getOriginalPlaybackUrl = action({
   },
 });
 
+export const getPublicOriginalPlaybackUrl = action({
+  args: { publicId: v.string() },
+  returns: v.object({
+    url: v.string(),
+    contentType: v.string(),
+  }),
+  handler: async (ctx, args): Promise<{ url: string; contentType: string }> => {
+    // Instant playback for a public video while Mux is still encoding: serve
+    // the original uploaded file straight from the bucket. The same file is
+    // already exposed via getPublicDownloadUrl, so playing it during
+    // processing doesn't widen access. The /watch page swaps to the Mux
+    // adaptive stream the moment muxPlaybackId lands.
+    const result = await ctx.runQuery(api.videos.getByPublicIdForDownload, {
+      publicId: args.publicId,
+    });
+
+    if (!result?.video?.s3Key) {
+      throw new Error("Original bucket file not found for this video");
+    }
+    if (
+      result.video.status === "uploading" ||
+      result.video.status === "failed"
+    ) {
+      throw new Error("Video not available");
+    }
+
+    const contentType = result.video.contentType ?? "video/mp4";
+    return {
+      url: await buildSignedBucketObjectUrl(result.video.s3Key, {
+        expiresIn: 600,
+        contentType,
+      }),
+      contentType,
+    };
+  },
+});
+
 export const getPublicPlaybackSession = action({
   args: { publicId: v.string() },
   returns: v.object({
@@ -756,6 +793,17 @@ export const getSharedPlaybackSession = action({
 
     if (!result?.video?.muxPlaybackId) {
       throw new Error("Video not found or not ready");
+    }
+
+    // Fail-closed: this path serves an UNSIGNED public Mux URL. A paywalled
+    // share must never resolve here — even when paid, it has to go through
+    // getSharedPaywalledPlayback so the stream is signed + short-TTL and the
+    // token issuance is logged for forensics. Refuse loudly instead of
+    // leaking full-res to anyone holding the grant token.
+    if (result.paywall) {
+      throw new Error(
+        "This is a paywalled share — use getSharedPaywalledPlayback.",
+      );
     }
 
     await ctx.runMutation(internal.videos.recordPlayback, {
