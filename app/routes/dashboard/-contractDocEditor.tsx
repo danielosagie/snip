@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+import { Link, Navigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
 import type { Editor } from "@tiptap/react";
@@ -14,7 +14,7 @@ import { ContractSectionOutline } from "@/components/contracts/ContractSectionOu
 import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
 import { ContractWizardFullScreen } from "@/components/contracts/ContractWizardFullScreen";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { projectPath } from "@/lib/routes";
+import { contractPath, documentPath, projectPath } from "@/lib/routes";
 import {
   ArrowLeft,
   AtSign,
@@ -75,12 +75,6 @@ const FIELDS_FILLABLE: FieldDoc["type"][] = [
 ];
 const FIELDS_AUTO: FieldDoc["type"][] = ["date"];
 
-export const Route = createFileRoute(
-  "/dashboard/$teamSlug/$projectId/contract/$contractId",
-)({
-  component: ContractEditorPage,
-});
-
 const KIND_LABELS: Record<string, string> = {
   master: "Master agreement",
   sow: "Statement of work",
@@ -98,7 +92,19 @@ const STATUS_STYLES: Record<string, string> = {
   expired: "border-[#888] text-[#888] bg-[#f0f0e8]",
 };
 
-function ContractEditorPage() {
+/**
+ * Shared editor page behind two routes: /…/contract/$contractId
+ * (mode "contract") and /…/doc/$contractId (mode "document"). `mode`
+ * comes from the route, not the row — when the row's docType disagrees
+ * (direct URL to the wrong kind, or the user flips the type toggle in
+ * the header) we redirect to the matching route, so a document is
+ * never presented under a contract URL and vice versa.
+ */
+export function ContractDocEditorPage({
+  mode,
+}: {
+  mode: "contract" | "document";
+}) {
   const params = useParams({ strict: false });
   const teamSlug = typeof params.teamSlug === "string" ? params.teamSlug : "";
   const projectId = params.projectId as Id<"projects">;
@@ -192,12 +198,34 @@ function ContractEditorPage() {
   if (data === null) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Contract not found.</div>
+        <div className="text-[#888]">
+          {mode === "document" ? "Document not found." : "Contract not found."}
+        </div>
       </div>
     );
   }
 
-  const isDocument = (data.contract.docType ?? "contract") === "document";
+  // Route ⇄ row mismatch: send the user to the URL that matches what
+  // the row actually is. Covers direct links to a document under
+  // /contract/ (and vice versa) and the header type toggle below.
+  const actualType: "contract" | "document" =
+    (data.contract.docType ?? "contract") === "document"
+      ? "document"
+      : "contract";
+  if (actualType !== mode) {
+    return (
+      <Navigate
+        to={
+          actualType === "document"
+            ? documentPath(teamSlug, projectId, contractId)
+            : contractPath(teamSlug, projectId, contractId)
+        }
+        replace
+      />
+    );
+  }
+
+  const isDocument = mode === "document";
 
   return (
     <div className="h-full flex flex-col bg-[#f0f0e8]">
@@ -213,7 +241,11 @@ function ContractEditorPage() {
           </Link>
           <div className="flex items-baseline gap-2 min-w-0">
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-              {KIND_LABELS[data.contract.kind] ?? data.contract.kind}
+              {/* `kind` is contract taxonomy (SOW, NDA…) — meaningless
+                  for a plain document, so just say what it is. */}
+              {isDocument
+                ? "Document"
+                : KIND_LABELS[data.contract.kind] ?? data.contract.kind}
             </span>
             <h1 className="text-base font-black tracking-tighter uppercase text-[#1a1a1a] truncate">
               {data.contract.title}

@@ -1,13 +1,12 @@
 
 import { useAuth } from "@clerk/tanstack-react-start";
-import { useConvex, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import {
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type CSSProperties,
 } from "react";
 import { api } from "@convex/_generated/api";
@@ -15,17 +14,10 @@ import type { Id } from "@convex/_generated/dataModel";
 
 import {
   Outlet,
-  Link,
   useLocation,
   useParams,
 } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
-import {
-  dashboardHomePath,
-  teamHomePath,
-  teamSettingsPath,
-} from "@/lib/routes";
-import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import {
   Dialog,
   DialogContent,
@@ -34,9 +26,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { UploadProgress } from "@/components/upload/UploadProgress";
-import { prewarmDashboardIndex } from "./-index.data";
-import { prewarmSettings } from "./-settings.data";
-import { prewarmTeam } from "./-team.data";
 import { useVideoUploadManager } from "./-useVideoUploadManager";
 import { DashboardUploadProvider } from "@/lib/dashboardUploadContext";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
@@ -71,7 +60,6 @@ export default function DashboardLayout() {
   const location = useLocation();
   const { pathname, searchStr } = location;
   const params = useParams({ strict: false });
-  const convex = useConvex();
   const isDesktop = useIsDesktop();
   const teamSlug =
     typeof params.teamSlug === "string" ? params.teamSlug : undefined;
@@ -85,8 +73,6 @@ export default function DashboardLayout() {
     api.videos.getPublicIdByVideoId,
     routeVideoId ? { videoId: routeVideoId } : "skip",
   );
-  const teamHome = teamSlug ? teamHomePath(teamSlug) : null;
-  const settingsPath = teamSlug ? teamSettingsPath(teamSlug) : null;
   const uploadTargets = useQuery(
     api.projects.listUploadTargets,
     teamSlug ? { teamSlug } : {},
@@ -176,11 +162,13 @@ export default function DashboardLayout() {
   }, []);
 
   // Routes where the global "drop a file to upload" overlay is
-  // disabled. The contract editor handles its own paste/drop via
-  // Tiptap, and the wizard would just swallow the file anyway.
-  // Match on path suffix so any nested route under /contract counts.
+  // disabled. The contract/document editors handle their own
+  // paste/drop via Tiptap, and the wizard would just swallow the file
+  // anyway. Match on path suffix so any nested route counts.
   const isDropDisabledRoute =
-    pathname.endsWith("/contract") || pathname.includes("/contract/");
+    pathname.endsWith("/contract") ||
+    pathname.includes("/contract/") ||
+    pathname.includes("/doc/");
 
   useEffect(() => {
     const handleDragEnter = (event: DragEvent) => {
