@@ -9,6 +9,7 @@ import {
   Download,
   Trash2,
   ExternalLink,
+  FolderPlus,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -48,6 +49,9 @@ interface FileTileProps {
    *  downloading (used for image/gif/pdf, which have a real detail view).
    *  The explicit hover download button still downloads. */
   onOpen?: () => void;
+  /** Finder-style combine: dropping a dragged video onto this file tile
+   *  creates a new folder containing both. Self-drops are ignored. */
+  onCombine?: (draggedVideoId: Id<"videos">) => void;
 }
 
 export function FileTile({
@@ -62,6 +66,7 @@ export function FileTile({
   draggable,
   onDelete,
   onOpen,
+  onCombine,
 }: FileTileProps) {
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
   const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
@@ -69,6 +74,7 @@ export function FileTile({
   const [error, setError] = useState<string | null>(null);
   const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+  const [combineActive, setCombineActive] = useState(false);
 
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
@@ -110,19 +116,53 @@ export function FileTile({
   return (
     <article
       onClick={() => (onOpen ? onOpen() : void handleDownload())}
+      onContextMenu={(e) => e.stopPropagation()}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("application/x-snip-video", videoId);
       }}
+      onDragOver={
+        onCombine
+          ? (e) => {
+              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+                return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "copy";
+              if (!combineActive) setCombineActive(true);
+            }
+          : undefined
+      }
+      onDragLeave={onCombine ? () => setCombineActive(false) : undefined}
+      onDrop={
+        onCombine
+          ? (e) => {
+              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+                return;
+              e.preventDefault();
+              e.stopPropagation();
+              setCombineActive(false);
+              const draggedId = e.dataTransfer.getData(
+                "application/x-snip-video",
+              );
+              if (draggedId && draggedId !== videoId) {
+                onCombine(draggedId as Id<"videos">);
+              }
+            }
+          : undefined
+      }
       className={cn(
         "group flex flex-col cursor-pointer",
         !isReady && "opacity-70",
       )}
     >
       <div
-        className="relative aspect-video overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all flex items-center justify-center"
+        className={cn(
+          "relative aspect-video overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all flex items-center justify-center",
+          combineActive && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
+        )}
         style={{ background: meta.tileBg }}
         onMouseEnter={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
         onMouseMove={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
@@ -143,12 +183,19 @@ export function FileTile({
             (object-contain) view of the file that follows the cursor. */}
         <FloatingImagePreview src={thumbnailSrc} alt={title} pos={hoverPos} />
 
-        {/* Top-left file-type chip — mirrors Drive's red "PDF" badge */}
-        <div
-          className="absolute top-2 left-2 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-[#1a1a1a] text-[#f0f0e8]"
-        >
-          {meta.label}
-        </div>
+        {/* Top-left file-type chip — mirrors Drive's red "PDF" badge.
+            Swaps to the orange "New folder" combine cue while a video is
+            being dragged over this tile. */}
+        {combineActive ? (
+          <div className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-[#FF6600] text-[#f0f0e8] border-2 border-[#1a1a1a]">
+            <FolderPlus className="h-3 w-3" />
+            New folder
+          </div>
+        ) : (
+          <div className="absolute top-2 left-2 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-[#1a1a1a] text-[#f0f0e8]">
+            {meta.label}
+          </div>
+        )}
 
         {/* Status chip when not ready */}
         {!isReady ? (
@@ -247,12 +294,14 @@ export function FileListRow({
   draggable,
   onDelete,
   onOpen,
+  onCombine,
 }: FileTileProps) {
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
   const getOriginalPlaybackUrl = useAction(api.videoActions.getOriginalPlaybackUrl);
   const [downloading, setDownloading] = useState(false);
   const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+  const [combineActive, setCombineActive] = useState(false);
 
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
@@ -288,13 +337,48 @@ export function FileListRow({
   return (
     <div
       onClick={() => (onOpen ? onOpen() : void handleDownload())}
+      onContextMenu={(e) => e.stopPropagation()}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("application/x-snip-video", videoId);
       }}
-      className="group flex items-center gap-3 px-3 py-2 border-b border-[#ccc] hover:bg-[#e8e8e0] cursor-pointer"
+      onDragOver={
+        onCombine
+          ? (e) => {
+              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+                return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "copy";
+              if (!combineActive) setCombineActive(true);
+            }
+          : undefined
+      }
+      onDragLeave={onCombine ? () => setCombineActive(false) : undefined}
+      onDrop={
+        onCombine
+          ? (e) => {
+              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+                return;
+              e.preventDefault();
+              e.stopPropagation();
+              setCombineActive(false);
+              const draggedId = e.dataTransfer.getData(
+                "application/x-snip-video",
+              );
+              if (draggedId && draggedId !== videoId) {
+                onCombine(draggedId as Id<"videos">);
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        "group flex items-center gap-3 px-3 py-2 border-b border-[#ccc] hover:bg-[#e8e8e0] cursor-pointer",
+        combineActive &&
+          "bg-[#FFEDD5] ring-2 ring-inset ring-[#FF6600]",
+      )}
     >
       <div
         className="flex-shrink-0 w-9 h-9 flex items-center justify-center border-2 border-[#1a1a1a] overflow-hidden"
@@ -312,10 +396,17 @@ export function FileListRow({
       <FloatingImagePreview src={thumbnailSrc} alt={title} pos={hoverPos} />
       <div className="flex-1 min-w-0">
         <div className="font-bold text-sm text-[#1a1a1a] truncate">{title}</div>
-        <div className="text-[11px] text-[#888] font-mono">
-          {meta.label} · {uploaderName} · {formatRelativeTime(createdAt)}
-          {fileSize != null ? ` · ${formatBytes(fileSize)}` : ""}
-        </div>
+        {combineActive ? (
+          <div className="inline-flex items-center gap-1 text-[11px] font-mono font-bold uppercase tracking-wider text-[#FF6600]">
+            <FolderPlus className="h-3 w-3" />
+            New folder
+          </div>
+        ) : (
+          <div className="text-[11px] text-[#888] font-mono">
+            {meta.label} · {uploaderName} · {formatRelativeTime(createdAt)}
+            {fileSize != null ? ` · ${formatBytes(fileSize)}` : ""}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         <button

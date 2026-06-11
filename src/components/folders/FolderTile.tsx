@@ -2,7 +2,7 @@
 
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Folder, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
@@ -33,6 +33,10 @@ interface Props {
     droppedFolderId: Id<"folders">,
     targetFolderId: Id<"folders">,
   ) => void;
+  /** When true, this tile opens directly into inline rename on mount —
+   *  used right after a fresh folder is created so the user names it. */
+  autoRename?: boolean;
+  onAutoRenameConsumed?: () => void;
 }
 
 export function FolderTile({
@@ -44,6 +48,8 @@ export function FolderTile({
   canEdit,
   onDropVideo,
   onDropFolder,
+  autoRename,
+  onAutoRenameConsumed,
 }: Props) {
   const navigate = useNavigate();
   const renameFolder = useMutation(api.folders.rename);
@@ -51,6 +57,21 @@ export function FolderTile({
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(name);
   const [dropActive, setDropActive] = useState(false);
+
+  // Enter inline rename when the parent flags this freshly-created folder.
+  // Select-all so the placeholder name ("New Folder") is replaced as the
+  // user types — the input is autoFocus, so we only need to set state here.
+  useEffect(() => {
+    // Only react to the autoRename signal flipping on. The other reads
+    // (name/editing/callback) are intentionally not deps so a later render
+    // can't re-trigger rename; this project's ESLint doesn't run the
+    // react-hooks deps rule, so no disable directive is needed.
+    if (autoRename && canEdit && !editing) {
+      setDraftName(name);
+      setEditing(true);
+      onAutoRenameConsumed?.();
+    }
+  }, [autoRename, canEdit]);
 
   const open = () => {
     // TanStack's typed navigate doesn't know about this route's search
@@ -93,6 +114,7 @@ export function FolderTile({
   return (
     <article
       onClick={open}
+      onContextMenu={(e) => e.stopPropagation()}
       draggable={canEdit && !editing}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -151,6 +173,7 @@ export function FolderTile({
             }}
             onClick={(e) => e.stopPropagation()}
             onBlur={() => void handleRename()}
+            onFocus={(e) => e.currentTarget.select()}
             autoFocus
             className="w-full px-1 py-0.5 text-sm font-bold border border-[#1a1a1a] bg-[#f0f0e8]"
           />
