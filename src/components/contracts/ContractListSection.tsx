@@ -4,7 +4,7 @@ import { useQuery } from "convex/react";
 import { Link } from "@tanstack/react-router";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
-import { contractPath } from "@/lib/routes";
+import { contractPath, documentPath } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { Check, FileSignature, FileText } from "lucide-react";
 
@@ -45,7 +45,16 @@ export function ContractListSection({
   projectId,
   teamSlug,
 }: ContractListSectionProps) {
-  const contracts = useQuery(api.contractsTable.list, { projectId });
+  // Each group fetches its own kind server-side — documents never ride
+  // along in a "contracts" payload and vice versa.
+  const contractRows = useQuery(api.contractsTable.list, {
+    projectId,
+    docType: "contract",
+  });
+  const documentRows = useQuery(api.contractsTable.list, {
+    projectId,
+    docType: "document",
+  });
   // Legacy embedded contract (the wizard-backed singleton on
   // projects.contract). Surfaced as a synthetic row at the top of the
   // list so a project that pre-dates the multi-contract table still
@@ -54,16 +63,15 @@ export function ContractListSection({
   const project = useQuery(api.projects.get, { projectId });
   const legacyContract = project?.contract ?? null;
 
-  if (contracts === undefined || project === undefined) {
+  if (
+    contractRows === undefined ||
+    documentRows === undefined ||
+    project === undefined
+  ) {
     return null;
   }
-  const contractRows = contracts.filter(
-    (c) => (c.docType ?? "contract") !== "document",
-  );
-  const documentRows = contracts.filter(
-    (c) => (c.docType ?? "contract") === "document",
-  );
-  const totalCount = contracts.length + (legacyContract ? 1 : 0);
+  const totalCount =
+    contractRows.length + documentRows.length + (legacyContract ? 1 : 0);
   if (totalCount === 0) {
     return null;
   }
@@ -182,7 +190,7 @@ export function ContractListSection({
             {documentRows.map((d) => (
               <Link
                 key={d._id}
-                to={contractPath(teamSlug, projectId, d._id)}
+                to={documentPath(teamSlug, projectId, d._id)}
                 className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
               >
                 <FileText

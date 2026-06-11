@@ -42,7 +42,8 @@ import { Route as DashboardTeamSlugSettingsPayoutsRouteImport } from './routes/d
 import { Route as DashboardTeamSlugSettingsFoldersRouteImport } from './routes/dashboard/$teamSlug.settings.folders'
 import { Route as DashboardTeamSlugProjectIdContractRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract'
 import { Route as DashboardTeamSlugProjectIdVideoIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.$videoId'
-import { Route as DashboardTeamSlugProjectIdContractContractIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract.$contractId'
+import { Route as DashboardTeamSlugProjectIdDocContractIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.doc.$contractId'
+import { Route as DashboardTeamSlugProjectIdContractContractIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract_.$contractId'
 
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
@@ -217,11 +218,17 @@ const DashboardTeamSlugProjectIdVideoIdRoute =
     path: '/$videoId',
     getParentRoute: () => DashboardTeamSlugProjectIdRoute,
   } as any)
+const DashboardTeamSlugProjectIdDocContractIdRoute =
+  DashboardTeamSlugProjectIdDocContractIdRouteImport.update({
+    id: '/doc/$contractId',
+    path: '/doc/$contractId',
+    getParentRoute: () => DashboardTeamSlugProjectIdRoute,
+  } as any)
 const DashboardTeamSlugProjectIdContractContractIdRoute =
   DashboardTeamSlugProjectIdContractContractIdRouteImport.update({
-    id: '/$contractId',
-    path: '/$contractId',
-    getParentRoute: () => DashboardTeamSlugProjectIdContractRoute,
+    id: '/contract_/$contractId',
+    path: '/contract/$contractId',
+    getParentRoute: () => DashboardTeamSlugProjectIdRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -253,12 +260,13 @@ export interface FileRoutesByFullPath {
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
-  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRouteWithChildren
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
   '/dashboard/$teamSlug/settings/': typeof DashboardTeamSlugSettingsIndexRoute
   '/dashboard/$teamSlug/$projectId/contract/$contractId': typeof DashboardTeamSlugProjectIdContractContractIdRoute
+  '/dashboard/$teamSlug/$projectId/doc/$contractId': typeof DashboardTeamSlugProjectIdDocContractIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -285,12 +293,13 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardIndexRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
-  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRouteWithChildren
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdIndexRoute
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsIndexRoute
   '/dashboard/$teamSlug/$projectId/contract/$contractId': typeof DashboardTeamSlugProjectIdContractContractIdRoute
+  '/dashboard/$teamSlug/$projectId/doc/$contractId': typeof DashboardTeamSlugProjectIdDocContractIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -322,12 +331,13 @@ export interface FileRoutesById {
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
-  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRouteWithChildren
+  '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
   '/dashboard/$teamSlug/settings/': typeof DashboardTeamSlugSettingsIndexRoute
-  '/dashboard/$teamSlug/$projectId/contract/$contractId': typeof DashboardTeamSlugProjectIdContractContractIdRoute
+  '/dashboard/$teamSlug/$projectId/contract_/$contractId': typeof DashboardTeamSlugProjectIdContractContractIdRoute
+  '/dashboard/$teamSlug/$projectId/doc/$contractId': typeof DashboardTeamSlugProjectIdDocContractIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -366,6 +376,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/$projectId/'
     | '/dashboard/$teamSlug/settings/'
     | '/dashboard/$teamSlug/$projectId/contract/$contractId'
+    | '/dashboard/$teamSlug/$projectId/doc/$contractId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -398,6 +409,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/$projectId'
     | '/dashboard/$teamSlug/settings'
     | '/dashboard/$teamSlug/$projectId/contract/$contractId'
+    | '/dashboard/$teamSlug/$projectId/doc/$contractId'
   id:
     | '__root__'
     | '/'
@@ -433,7 +445,8 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
     | '/dashboard/$teamSlug/settings/'
-    | '/dashboard/$teamSlug/$projectId/contract/$contractId'
+    | '/dashboard/$teamSlug/$projectId/contract_/$contractId'
+    | '/dashboard/$teamSlug/$projectId/doc/$contractId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -689,35 +702,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardTeamSlugProjectIdVideoIdRouteImport
       parentRoute: typeof DashboardTeamSlugProjectIdRoute
     }
-    '/dashboard/$teamSlug/$projectId/contract/$contractId': {
-      id: '/dashboard/$teamSlug/$projectId/contract/$contractId'
-      path: '/$contractId'
+    '/dashboard/$teamSlug/$projectId/doc/$contractId': {
+      id: '/dashboard/$teamSlug/$projectId/doc/$contractId'
+      path: '/doc/$contractId'
+      fullPath: '/dashboard/$teamSlug/$projectId/doc/$contractId'
+      preLoaderRoute: typeof DashboardTeamSlugProjectIdDocContractIdRouteImport
+      parentRoute: typeof DashboardTeamSlugProjectIdRoute
+    }
+    '/dashboard/$teamSlug/$projectId/contract_/$contractId': {
+      id: '/dashboard/$teamSlug/$projectId/contract_/$contractId'
+      path: '/contract/$contractId'
       fullPath: '/dashboard/$teamSlug/$projectId/contract/$contractId'
       preLoaderRoute: typeof DashboardTeamSlugProjectIdContractContractIdRouteImport
-      parentRoute: typeof DashboardTeamSlugProjectIdContractRoute
+      parentRoute: typeof DashboardTeamSlugProjectIdRoute
     }
   }
 }
 
-interface DashboardTeamSlugProjectIdContractRouteChildren {
-  DashboardTeamSlugProjectIdContractContractIdRoute: typeof DashboardTeamSlugProjectIdContractContractIdRoute
-}
-
-const DashboardTeamSlugProjectIdContractRouteChildren: DashboardTeamSlugProjectIdContractRouteChildren =
-  {
-    DashboardTeamSlugProjectIdContractContractIdRoute:
-      DashboardTeamSlugProjectIdContractContractIdRoute,
-  }
-
-const DashboardTeamSlugProjectIdContractRouteWithChildren =
-  DashboardTeamSlugProjectIdContractRoute._addFileChildren(
-    DashboardTeamSlugProjectIdContractRouteChildren,
-  )
-
 interface DashboardTeamSlugProjectIdRouteChildren {
   DashboardTeamSlugProjectIdVideoIdRoute: typeof DashboardTeamSlugProjectIdVideoIdRoute
-  DashboardTeamSlugProjectIdContractRoute: typeof DashboardTeamSlugProjectIdContractRouteWithChildren
+  DashboardTeamSlugProjectIdContractRoute: typeof DashboardTeamSlugProjectIdContractRoute
   DashboardTeamSlugProjectIdIndexRoute: typeof DashboardTeamSlugProjectIdIndexRoute
+  DashboardTeamSlugProjectIdContractContractIdRoute: typeof DashboardTeamSlugProjectIdContractContractIdRoute
+  DashboardTeamSlugProjectIdDocContractIdRoute: typeof DashboardTeamSlugProjectIdDocContractIdRoute
 }
 
 const DashboardTeamSlugProjectIdRouteChildren: DashboardTeamSlugProjectIdRouteChildren =
@@ -725,8 +732,12 @@ const DashboardTeamSlugProjectIdRouteChildren: DashboardTeamSlugProjectIdRouteCh
     DashboardTeamSlugProjectIdVideoIdRoute:
       DashboardTeamSlugProjectIdVideoIdRoute,
     DashboardTeamSlugProjectIdContractRoute:
-      DashboardTeamSlugProjectIdContractRouteWithChildren,
+      DashboardTeamSlugProjectIdContractRoute,
     DashboardTeamSlugProjectIdIndexRoute: DashboardTeamSlugProjectIdIndexRoute,
+    DashboardTeamSlugProjectIdContractContractIdRoute:
+      DashboardTeamSlugProjectIdContractContractIdRoute,
+    DashboardTeamSlugProjectIdDocContractIdRoute:
+      DashboardTeamSlugProjectIdDocContractIdRoute,
   }
 
 const DashboardTeamSlugProjectIdRouteWithChildren =
