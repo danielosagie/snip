@@ -10,6 +10,7 @@ import {
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { identityName, requireProjectAccess, requireUser } from "./auth";
+import { prefEnabled } from "./notifications";
 import { generateUniqueToken } from "./security";
 import {
   generateClausesFromAnswers,
@@ -566,6 +567,24 @@ export const sendForSignature = mutation({
         hashAlgorithm: "SHA-256",
       }),
     });
+    // Email each recipient their signing link. Tokens are refreshed first so
+    // a recipient added long before "send" doesn't carry a stale expiry —
+    // the signing window starts NOW, matching the contract's expiresAt.
+    // Best-effort: no-ops without RESEND_API_KEY/APP_URL, and the copy-link
+    // UI remains the manual fallback either way.
+    const tokenExpiresAt = now + 30 * 24 * 60 * 60 * 1000;
+    for (const r of recipients) {
+      await ctx.db.patch(r._id, { tokenExpiresAt });
+      await ctx.scheduler.runAfter(0, internal.email.sendSignatureRequest, {
+        to: r.email,
+        recipientName: r.name,
+        role: r.role,
+        senderName: identityName(user),
+        contractTitle: contract.title,
+        token: r.token,
+        expiresAt: tokenExpiresAt,
+      });
+    }
     return { ok: true, contentHash };
   },
 });
@@ -782,6 +801,32 @@ export const sign = internalMutation({
       userAgent: args.userAgent,
     });
 
+    // Notify opted-in team members that this recipient signed (mirrors the
+    // legacy projects.signContract flow). Best-effort + pref-gated; no-ops
+    // without RESEND_API_KEY/APP_URL.
+    try {
+      const team = await ctx.db.get(contract.teamId);
+      if (team) {
+        const members = await ctx.db
+          .query("teamMembers")
+          .withIndex("by_team", (q) => q.eq("teamId", contract.teamId))
+          .collect();
+        for (const m of members) {
+          if (!m.userEmail) continue;
+          if (!(await prefEnabled(ctx, m.userClerkId, "contractSigned")))
+            continue;
+          await ctx.scheduler.runAfter(0, internal.email.sendContractSigned, {
+            to: m.userEmail,
+            projectName: contract.title,
+            signedByName: recipient.name,
+            path: `/dashboard/${team.slug}/${contract.projectId}/contract/${contract._id}`,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("contract sign notification failed", e);
+    }
+
     // Check whether ALL signers have now signed. Approvers are
     // optional gates; viewers/cc are notification-only.
     const allRecipients = await ctx.db
@@ -809,6 +854,16 @@ export const sign = internalMutation({
         internal.contractSigning.finalizeSignedPackage,
         { contractId: recipient.contractId },
       );
+      // Completion receipts: every recipient gets a link to their token
+      // page, which now renders the executed contract + signed package.
+      for (const r of allRecipients) {
+        await ctx.scheduler.runAfter(0, internal.email.sendContractCompleted, {
+          to: r.email,
+          recipientName: r.name,
+          contractTitle: contract.title,
+          token: r.token,
+        });
+      }
     }
     return { completed: signersDone && approversDone };
   },

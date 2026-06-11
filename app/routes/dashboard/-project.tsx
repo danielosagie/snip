@@ -23,6 +23,10 @@ import {
   Tags,
 } from "lucide-react";
 import { FileTile, FileListRow } from "@/components/files/FileTile";
+import {
+  fileKindBucketFromContent,
+  type FileKindBucket,
+} from "@/lib/fileTypes";
 import { FloatingImagePreview } from "@/components/FloatingImagePreview";
 import {
   ContextMenu,
@@ -255,6 +259,12 @@ export default function ProjectPage({
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sort, setSort] = useState<ProjectSortMode>("newest");
   const [search, setSearch] = useState("");
+  // Empty set = no filter (show every kind). Otherwise show only items whose
+  // coarse kind bucket is selected. Folders are always shown — a kind filter
+  // narrows files, not navigation.
+  const [kindFilter, setKindFilter] = useState<Set<FileKindBucket>>(
+    () => new Set(),
+  );
   const [shareToast, setShareToast] = useState<ShareToastState | null>(null);
   const shareToastTimeoutRef = useRef<number | null>(null);
 
@@ -763,12 +773,27 @@ export default function ProjectPage({
   // folderId, so we're only filtering by title and reordering.
   // NOTE: these useMemo calls must stay above the early-return guards
   // below — React requires the same hook order on every render.
+  // Which kind buckets actually exist in this folder — so the filter menu
+  // only offers buckets with at least one item, instead of dead options.
+  const availableKindBuckets = useMemo(() => {
+    const present = new Set<FileKindBucket>();
+    for (const v of videos ?? []) {
+      present.add(fileKindBucketFromContent(v.contentType, v.title));
+    }
+    return present;
+  }, [videos]);
+
   const filteredVideos = useMemo(() => {
     if (!videos) return videos;
     const q = search.trim().toLowerCase();
-    const filtered = q
+    let filtered = q
       ? videos.filter((v) => v.title.toLowerCase().includes(q))
       : videos.slice();
+    if (kindFilter.size > 0) {
+      filtered = filtered.filter((v) =>
+        kindFilter.has(fileKindBucketFromContent(v.contentType, v.title)),
+      );
+    }
     filtered.sort((a, b) => {
       switch (sort) {
         case "name":
@@ -785,7 +810,7 @@ export default function ProjectPage({
       }
     });
     return filtered;
-  }, [videos, search, sort]);
+  }, [videos, search, sort, kindFilter]);
 
   // Single source of truth for modifier-click selection. Cmd/Ctrl toggles
   // a single item. Shift extends the range from the last clicked item.
@@ -1129,6 +1154,9 @@ export default function ProjectPage({
           onSortChange={setSort}
           search={search}
           onSearchChange={setSearch}
+          kindFilter={kindFilter}
+          onKindFilterChange={setKindFilter}
+          availableKindBuckets={availableKindBuckets}
           onDropVideoOnBreadcrumb={(videoId, targetFolderId) =>
             void handleMoveVideo(videoId, targetFolderId)
           }

@@ -93,14 +93,21 @@ export async function createMuxAssetFromInputUrl(videoId: string, inputUrl: stri
  * predate generated_subtitles being requested at create time.
  */
 export async function addGeneratedSubtitles(assetId: string) {
-  // The SDK's AssetCreateTrackParams (v12) has no `generated_subtitles`
-  // field even though the REST endpoint supports it, so call the API
-  // directly with Basic auth.
+  // On an EXISTING asset, generated subtitles hang off its AUDIO track:
+  // POST /assets/{id}/tracks/{audio_track_id}/generate-subtitles. The bare
+  // /tracks endpoint only ingests caption FILES and rejects
+  // generated_subtitles with "Missing track 'type'". The SDK (v12) has no
+  // method for this endpoint, so call the REST API directly.
+  const asset = await getMuxAsset(assetId);
+  const audioTrack = (asset.tracks ?? []).find((t) => t.type === "audio");
+  if (!audioTrack?.id) {
+    throw new Error("Asset has no audio track to transcribe.");
+  }
   const auth = btoa(
     `${requireEnv("MUX_TOKEN_ID")}:${requireEnv("MUX_TOKEN_SECRET")}`,
   );
   const resp = await fetch(
-    `https://api.mux.com/video/v1/assets/${assetId}/tracks`,
+    `https://api.mux.com/video/v1/assets/${assetId}/tracks/${audioTrack.id}/generate-subtitles`,
     {
       method: "POST",
       headers: {

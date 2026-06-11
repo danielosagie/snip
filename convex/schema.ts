@@ -636,7 +636,16 @@ export default defineSchema({
     currency: v.string(),
     stripeCheckoutSessionId: v.string(),
     stripePaymentIntentId: v.optional(v.string()),
-    stripeConnectAccountId: v.string(),
+    // Absent when the platform collected directly (no Connect account yet).
+    stripeConnectAccountId: v.optional(v.string()),
+    // How funds settled. "connect" = destination charge straight to the
+    // team's Connect account; "platform" = the platform account collected
+    // because the team hasn't finished Connect onboarding — the operator
+    // owes the team a manual payout for these rows. Missing = legacy row,
+    // which was always a Connect destination charge.
+    settlement: v.optional(
+      v.union(v.literal("connect"), v.literal("platform")),
+    ),
     applicationFeeAmountCents: v.optional(v.number()),
     status: v.union(
       v.literal("pending"),

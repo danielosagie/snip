@@ -20,6 +20,10 @@ import {
 const shareLinkStatusValidator = v.union(
   v.literal("missing"),
   v.literal("expired"),
+  // The link is valid but its video is still encoding. Distinct from
+  // "missing" so the share page can say "still processing" instead of
+  // "expired or invalid".
+  v.literal("processing"),
   v.literal("requiresPassword"),
   v.literal("requiresAccess"),
   v.literal("ok"),
@@ -569,13 +573,21 @@ export const getByToken = query({
       return { status: "expired" as const };
     }
 
-    // Single-video links require the referenced video to be in the ready
-    // state. Bundle links are valid as long as the bundle row exists — the
-    // share page itself handles empty/in-progress items gracefully.
+    // Single-video links: distinguish a genuinely broken link (deleted /
+    // missing video) from one whose video is simply still encoding. The
+    // latter is a valid link the owner just created right after upload —
+    // surfacing it as "processing" lets the share page say "check back
+    // shortly" instead of the alarming "expired or invalid". This query is
+    // reactive, so it flips to "ok" on its own once Mux finishes. Bundle
+    // links are valid as long as the bundle row exists — the share page
+    // handles empty/in-progress items gracefully.
     if (link.videoId) {
       const video = await ctx.db.get(link.videoId);
-      if (!video || video.status !== "ready") {
+      if (!video || video.deletedAt) {
         return { status: "missing" as const };
+      }
+      if (video.status !== "ready") {
+        return { status: "processing" as const };
       }
     } else if (link.bundleId) {
       const bundle = await ctx.db.get(link.bundleId);
@@ -602,6 +614,49 @@ export const getByToken = query({
     }
 
     return { status: "ok" as const };
+  },
+});
+
+/**
+ * Title (+ description) for link-unfurl cards — OG/Twitter meta — resolved from
+ * the token ALONE, with no access grant issued and no side effects. Used by the
+ * /share route's `head` loader.
+ *
+ * Privacy-gated: only openly accessible ("anyone") links without a password
+ * reveal their title. Password- and invite-protected links return null so a
+ * leaked URL can't expose the content's name in a chat preview. Paywalled links
+ * ARE "anyone" access (pay-to-watch, not hidden), so they unfurl normally.
+ */
+export const getUnfurlByToken = query({
+  args: { token: v.string() },
+  returns: v.union(
+    v.object({
+      title: v.string(),
+      description: v.union(v.string(), v.null()),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    const link = await findShareLinkByToken(ctx, args.token);
+    if (!link) return null;
+    if (link.expiresAt && link.expiresAt < Date.now()) return null;
+    if ((link.generalAccess ?? "anyone") !== "anyone") return null;
+    if (hasPasswordProtection(link)) return null;
+
+    if (link.videoId) {
+      const video = await ctx.db.get(link.videoId);
+      if (!video || video.deletedAt) return null;
+      return { title: video.title, description: video.description ?? null };
+    }
+    if (link.bundleId) {
+      const bundle = await ctx.db.get(link.bundleId);
+      if (!bundle) return null;
+      return {
+        title: bundle.headerTitle ?? bundle.name,
+        description: bundle.headerDescription ?? null,
+      };
+    }
+    return null;
   },
 });
 

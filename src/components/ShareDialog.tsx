@@ -247,41 +247,6 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
             : "Only people with a link you create below."}
         </p>
 
-        {/* Public tab only — the no-link watch URL. The tracked/paywalled
-            share-link creator still lives below and works in both modes. */}
-        {video?.visibility === "public" && publicWatchPath ? (
-          <div className="space-y-3 border-2 border-[#1a1a1a] p-4 bg-[#f0f0e8]">
-            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-              Public URL
-            </div>
-            <code className="block text-sm bg-[#e8e8e0] border border-[#1a1a1a] px-2 py-1.5 font-mono truncate">
-              {publicWatchPath}
-            </code>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={handleCopyPublicLink}
-              >
-                {copiedId === "public" ? (
-                  <Check className="mr-2 h-4 w-4" />
-                ) : (
-                  <Copy className="mr-2 h-4 w-4" />
-                )}
-                Copy URL
-              </Button>
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => window.open(publicWatchPath, "_blank")}
-              >
-                <ExternalLink className="mr-2 h-4 w-4" />
-                Open
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
         {/* Link settings — shown for BOTH public and private. The tabs
             above only change who can open the link; expiry, password,
             download, and paywall apply either way. */}
@@ -507,19 +472,65 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
           </Button>
         </section>
 
-        {shareLinks && shareLinks.length > 0 ? (
+        {(video?.visibility === "public" && publicWatchPath) ||
+        (shareLinks && shareLinks.length > 0) ? (
         <>
         <Separator />
 
         <section className="space-y-3">
           <div className="font-bold text-sm text-[#1a1a1a] flex items-center justify-between uppercase tracking-wider">
             <span>Links</span>
-            <span className="text-[10px] font-mono font-normal text-[#888]">
-              {shareLinks.length}
-            </span>
+            {shareLinks && shareLinks.length > 0 ? (
+              <span className="text-[10px] font-mono font-normal text-[#888]">
+                {shareLinks.length}
+              </span>
+            ) : null}
           </div>
           <div className="space-y-2">
-              {shareLinks.map((link) => (
+              {/* The frictionless public watch link — always available for a
+                  public video, with no tracking, expiry, or paywall. */}
+              {video?.visibility === "public" && publicWatchPath ? (
+                <div className="border-2 border-[#1a1a1a]">
+                  <div className="flex items-center justify-between p-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <code className="text-sm bg-[#e8e8e0] px-2 py-0.5 font-mono truncate max-w-[200px]">
+                          {publicWatchPath}
+                        </code>
+                        <Badge variant="outline">Public</Badge>
+                      </div>
+                      <div className="mt-1 text-xs text-[#888]">
+                        Anyone with the link can watch
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Copy public link"
+                        onClick={handleCopyPublicLink}
+                      >
+                        {copiedId === "public" ? (
+                          <Check className="h-4 w-4 text-[#FF6600]" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Open"
+                        onClick={() => window.open(publicWatchPath, "_blank")}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Tracked / paywalled / expiring links from "Create link". */}
+              {shareLinks?.map((link) => (
                 <div key={link._id} className="border-2 border-[#1a1a1a]">
                   <div className="flex items-center justify-between p-3">
                     <div className="flex-1 min-w-0">

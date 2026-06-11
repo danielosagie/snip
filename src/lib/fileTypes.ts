@@ -220,6 +220,63 @@ export function fileTypeFromContent(
   return { kind, ...REGISTRY[kind] };
 }
 
+/**
+ * Coarse buckets for the folder "Kind" filter. The full FileKind taxonomy
+ * (12 kinds) is too granular for a filter menu — a user thinks "show me the
+ * documents", not "show me the spreadsheets AND the presentations AND the
+ * PDFs". These five buckets are the practical groupings; the per-tile icon +
+ * label still uses the fine-grained kind.
+ */
+export type FileKindBucket =
+  | "video"
+  | "image"
+  | "audio"
+  | "document"
+  | "other";
+
+export const FILE_KIND_BUCKET_LABEL: Record<FileKindBucket, string> = {
+  video: "Videos",
+  image: "Images",
+  audio: "Audio",
+  document: "Documents",
+  other: "Other files",
+};
+
+// Stable display order for the filter menu.
+export const FILE_KIND_BUCKETS: FileKindBucket[] = [
+  "video",
+  "image",
+  "audio",
+  "document",
+  "other",
+];
+
+export function fileKindBucket(kind: FileKind): FileKindBucket {
+  switch (kind) {
+    case "video":
+      return "video";
+    case "image":
+      return "image";
+    case "audio":
+      return "audio";
+    case "pdf":
+    case "doc":
+    case "spreadsheet":
+    case "presentation":
+    case "contract":
+      return "document";
+    default:
+      return "other";
+  }
+}
+
+export function fileKindBucketFromContent(
+  contentType: string | undefined | null,
+  filename?: string | null,
+): FileKindBucket {
+  return fileKindBucket(fileKindFromContentType(contentType, filename));
+}
+
 export function formatBytes(n: number | undefined | null): string {
   if (n == null) return "";
   if (n < 1024) return `${n} B`;

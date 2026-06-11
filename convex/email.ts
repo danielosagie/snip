@@ -186,6 +186,84 @@ export const sendCommentReply = internalAction({
   },
 });
 
+/**
+ * The signing invitation — sent to every recipient when the author clicks
+ * "Send for signature". Signers/approvers get a "Review & sign" CTA;
+ * viewers/cc get "View contract". The /sign/$token link is the same one the
+ * UI surfaces for manual copy, so email stays a purely additive channel.
+ */
+export const sendSignatureRequest = internalAction({
+  args: {
+    to: v.string(),
+    recipientName: v.string(),
+    role: v.string(),
+    senderName: v.string(),
+    contractTitle: v.string(),
+    token: v.string(),
+    expiresAt: v.number(),
+  },
+  handler: async (_ctx, args) => {
+    const link = linkOrSkip(`/sign/${args.token}`);
+    if (!link) return;
+    const isSigner = args.role === "signer" || args.role === "approver";
+    const subject = isSigner
+      ? `${args.senderName} sent you "${args.contractTitle}" to sign`
+      : `${args.senderName} shared "${args.contractTitle}" with you`;
+    const days = Math.max(
+      1,
+      Math.round((args.expiresAt - Date.now()) / (24 * 60 * 60 * 1000)),
+    );
+    const cta = isSigner ? "Review & sign" : "View contract";
+    const action = isSigner
+      ? "has sent you a contract to review and sign"
+      : "has shared a contract with you";
+    const text =
+      `Hi ${args.recipientName},\n\n${args.senderName} ${action}: "${args.contractTitle}".\n\n` +
+      `${cta}: ${link}\n\nThis link expires in ${days} days. ` +
+      `If you weren't expecting this, you can ignore this email.`;
+    const html = shell(
+      `<p style="margin:0 0 16px;">Hi <strong>${args.recipientName}</strong>,</p>` +
+        `<p style="margin:0 0 16px;"><strong>${args.senderName}</strong> ${action}: ` +
+        `<strong>${args.contractTitle}</strong>.</p>` +
+        `<p style="margin:0 0 24px;">${button(link, cta)}</p>` +
+        `<p style="margin:0;color:#888;font-size:13px;">Or paste this link: <br/>` +
+        `<span style="font-family:monospace;word-break:break-all;">${link}</span></p>` +
+        `<p style="margin:20px 0 0;color:#888;font-size:12px;">This link expires in ${days} days. ` +
+        `If you weren't expecting this, you can ignore this email.</p>`,
+    );
+    await sendViaResend({ to: args.to, subject, html, text });
+  },
+});
+
+/**
+ * Completion receipt — every signer + approver finished, the contract is
+ * executed. Sent to each recipient; their token page now renders the
+ * completed state with the signed-package download.
+ */
+export const sendContractCompleted = internalAction({
+  args: {
+    to: v.string(),
+    recipientName: v.string(),
+    contractTitle: v.string(),
+    token: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const link = linkOrSkip(`/sign/${args.token}`);
+    if (!link) return;
+    const subject = `Fully signed: "${args.contractTitle}"`;
+    const text =
+      `Hi ${args.recipientName},\n\nEveryone has signed "${args.contractTitle}" — it's now fully executed.\n\n` +
+      `View the signed contract: ${link}`;
+    const html = shell(
+      `<p style="margin:0 0 16px;">Hi <strong>${args.recipientName}</strong>,</p>` +
+        `<p style="margin:0 0 16px;">Everyone has signed <strong>${args.contractTitle}</strong> — ` +
+        `it's now fully executed.</p>` +
+        `<p style="margin:0 0 8px;">${button(link, "View signed contract")}</p>`,
+    );
+    await sendViaResend({ to: args.to, subject, html, text });
+  },
+});
+
 export const sendContractSigned = internalAction({
   args: {
     to: v.string(),

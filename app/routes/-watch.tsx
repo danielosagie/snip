@@ -7,6 +7,7 @@ import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player/V
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { DelayedAppear } from "@/components/ui/delayed-appear";
 import { triggerDownload } from "@/lib/download";
 import { formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
 import { AlertCircle, MessageSquare, Clock, Download, X } from "lucide-react";
@@ -19,6 +20,9 @@ export default function WatchPage() {
 
   const createComment = useMutation(api.comments.createForPublic);
   const getPlaybackSession = useAction(api.videoActions.getPublicPlaybackSession);
+  const getOriginalPlaybackUrl = useAction(
+    api.videoActions.getPublicOriginalPlaybackUrl,
+  );
   const getDownloadUrl = useAction(api.videoActions.getPublicDownloadUrl);
 
   const { videoData, comments } = useWatchData({ publicId });
@@ -26,6 +30,9 @@ export default function WatchPage() {
     url: string;
     posterUrl: string;
   } | null>(null);
+  // Instant-play fallback: the signed URL of the original upload, used while
+  // Mux is still encoding (before muxPlaybackId exists).
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -65,6 +72,50 @@ export default function WatchPage() {
       cancelled = true;
     };
   }, [getPlaybackSession, publicId, videoData?.video?.muxPlaybackId]);
+
+  // Instant playback while Mux is still encoding: as soon as the upload lands
+  // in storage we stream the original file directly. Once muxPlaybackId appears
+  // we clear this and the Mux-session effect above takes over (the player
+  // prefers the adaptive stream).
+  useEffect(() => {
+    const v = videoData?.video;
+    // getByPublicId only ever returns ready/processing videos, so the only
+    // gate here is: we have an original file (s3Key) and Mux isn't ready yet.
+    if (!v || !v.s3Key || v.muxPlaybackId) {
+      setOriginalUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    void getOriginalPlaybackUrl({ publicId })
+      .then((result) => {
+        if (cancelled) return;
+        setOriginalUrl(result.url);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOriginalUrl(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    getOriginalPlaybackUrl,
+    publicId,
+    videoData?.video?.s3Key,
+    videoData?.video?.muxPlaybackId,
+  ]);
+
+  // Reflect the video name in the browser tab instead of the static
+  // "Watch video | snip" route default.
+  useEffect(() => {
+    const title = videoData?.video?.title;
+    if (title) document.title = `${title} | snip`;
+    return () => {
+      document.title = "snip";
+    };
+  }, [videoData?.video?.title]);
 
   useEffect(() => {
     setIsDownloading(false);
@@ -135,7 +186,9 @@ export default function WatchPage() {
   if (videoData === undefined) {
     return (
       <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center">
-        <div className="text-[#888]">Loading...</div>
+        <DelayedAppear>
+          <div className="text-[#888]">Opening…</div>
+        </DelayedAppear>
       </div>
     );
   }
@@ -164,6 +217,16 @@ export default function WatchPage() {
   }
 
   const video = videoData.video;
+  // Prefer the Mux adaptive stream; fall back to the original upload while the
+  // asset is still encoding so the video is watchable the instant it's posted.
+  const activePlaybackUrl = playbackSession?.url ?? originalUrl;
+  // Mux auto-captions, available once the track is ready. The player only
+  // attaches them on the Mux (HLS) source, so they're simply absent during the
+  // original-file fallback.
+  const captionsVttUrl =
+    video.muxPlaybackId && video.muxCaptionsTrackId
+      ? `https://stream.mux.com/${video.muxPlaybackId}/text/${video.muxCaptionsTrackId}.vtt`
+      : undefined;
 
   return (
     <div className="h-[100dvh] flex flex-col bg-[#f0f0e8]">
@@ -196,7 +259,7 @@ export default function WatchPage() {
             aria-label={isDownloading ? "Preparing download" : "Download video"}
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">{isDownloading ? "Preparing..." : "Download"}</span>
+            <span className="hidden sm:inline">{isDownloading ? "Preparing…" : "Download"}</span>
           </Button>
           <Button
             variant="outline"
@@ -227,11 +290,12 @@ export default function WatchPage() {
             </div>
           ) : null}
 
-          {playbackSession?.url ? (
+          {activePlaybackUrl ? (
             <VideoPlayer
               ref={playerRef}
-              src={playbackSession.url}
-              poster={playbackSession.posterUrl}
+              src={activePlaybackUrl}
+              poster={playbackSession?.posterUrl ?? video.thumbnailUrl ?? undefined}
+              captionsVttUrl={captionsVttUrl}
               comments={flattenedComments}
               onTimeUpdate={setCurrentTime}
               allowDownload={false}
@@ -242,7 +306,7 @@ export default function WatchPage() {
               <div className="flex flex-col items-center gap-3 text-white">
                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
                  <p className="text-sm font-medium text-white/85">
-                   {playbackError ?? (isLoadingPlayback ? "Loading stream..." : "Preparing stream...")}
+                   {playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
                  </p>
               </div>
             </div>
@@ -264,9 +328,15 @@ export default function WatchPage() {
           
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {comments === undefined ? (
-              <p className="text-sm text-[#888]">Loading comments...</p>
+              <DelayedAppear>
+                <p className="text-sm text-[#888]">Loading comments…</p>
+              </DelayedAppear>
             ) : comments.length === 0 ? (
-              <p className="text-sm text-[#888]">No comments yet.</p>
+              <p className="text-sm text-[#888]">
+                {isUserLoaded && user
+                  ? "No comments yet — yours will pin to the exact frame you're watching."
+                  : "No comments yet."}
+              </p>
             ) : (
               <div className="space-y-3">
                 {comments.map((comment) => (
@@ -319,13 +389,13 @@ export default function WatchPage() {
                 <Textarea
                   value={commentText}
                   onChange={(event) => setCommentText(event.target.value)}
-                  placeholder="Leave a comment..."
+                  placeholder="Leave a comment…"
                   className="min-h-[90px] text-sm"
                 />
                 {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
                 <Button type="submit" size="sm" disabled={!commentText.trim() || isSubmittingComment} className="w-full">
                   <MessageSquare className="mr-1.5 h-4 w-4" />
-                  {isSubmittingComment ? "Posting..." : "Post comment"}
+                  {isSubmittingComment ? "Posting…" : "Post comment"}
                 </Button>
               </form>
             ) : (
@@ -367,9 +437,15 @@ export default function WatchPage() {
           
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {comments === undefined ? (
-              <p className="text-sm text-[#888]">Loading comments...</p>
+              <DelayedAppear>
+                <p className="text-sm text-[#888]">Loading comments…</p>
+              </DelayedAppear>
             ) : comments.length === 0 ? (
-              <p className="text-sm text-[#888]">No comments yet.</p>
+              <p className="text-sm text-[#888]">
+                {isUserLoaded && user
+                  ? "No comments yet — yours will pin to the exact frame you're watching."
+                  : "No comments yet."}
+              </p>
             ) : (
               <div className="space-y-3">
                 {comments.map((comment) => (
@@ -428,13 +504,13 @@ export default function WatchPage() {
                 <Textarea
                   value={commentText}
                   onChange={(event) => setCommentText(event.target.value)}
-                  placeholder="Leave a comment..."
+                  placeholder="Leave a comment…"
                   className="min-h-[90px] text-sm"
                 />
                 {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
                 <Button type="submit" size="sm" disabled={!commentText.trim() || isSubmittingComment} className="w-full">
                   <MessageSquare className="mr-1.5 h-4 w-4" />
-                  {isSubmittingComment ? "Posting..." : "Post comment"}
+                  {isSubmittingComment ? "Posting…" : "Post comment"}
                 </Button>
               </form>
             ) : (

@@ -12,6 +12,7 @@ import { action, ActionCtx, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import {
+  addGeneratedSubtitles,
   buildMuxPlaybackUrl,
   buildMuxPreviewUrl,
   buildMuxRenditionDownloadUrl,
@@ -580,6 +581,56 @@ export const markUploadComplete = action({
   },
 });
 
+/**
+ * Backfill Mux auto-generated captions for ready videos whose asset was
+ * created before `generated_subtitles` was requested at create time (those
+ * have a Mux asset but no captions track). Requesting the track is all
+ * that's needed: when Mux finishes, the existing `video.asset.track.ready`
+ * webhook sets `muxCaptionsTrackId` AND indexes the transcript for search —
+ * the backfill rides the same pipeline as fresh uploads. Dry-run unless
+ * `apply` is true:
+ * `npx convex run videoActions:backfillGeneratedCaptions '{"apply":true}'`
+ */
+export const backfillGeneratedCaptions = internalAction({
+  args: {
+    apply: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    candidates: v.number(),
+    requested: v.number(),
+    failed: v.number(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ candidates: number; requested: number; failed: number }> => {
+    const rows: Array<{ videoId: Id<"videos">; muxAssetId: string; title: string }> =
+      await ctx.runQuery(internal.videos.listCaptionBackfillCandidates, {
+        limit: args.limit,
+      });
+    let requested = 0;
+    let failed = 0;
+    for (const row of rows) {
+      if (!args.apply) continue;
+      try {
+        await addGeneratedSubtitles(row.muxAssetId);
+        requested++;
+      } catch (error) {
+        // Most common benign failure: the asset already has a subtitle
+        // track Mux won't duplicate, or the asset has no audio to
+        // transcribe. Log + continue; nothing here is load-bearing.
+        console.warn(
+          `caption-backfill: ${row.title} (${row.muxAssetId}):`,
+          error,
+        );
+        failed++;
+      }
+    }
+    return { candidates: rows.length, requested, failed };
+  },
+});
+
 export const markUploadFailed = action({
   args: {
     videoId: v.id("videos"),
@@ -709,6 +760,43 @@ export const getOriginalPlaybackUrl = action({
   },
 });
 
+export const getPublicOriginalPlaybackUrl = action({
+  args: { publicId: v.string() },
+  returns: v.object({
+    url: v.string(),
+    contentType: v.string(),
+  }),
+  handler: async (ctx, args): Promise<{ url: string; contentType: string }> => {
+    // Instant playback for a public video while Mux is still encoding: serve
+    // the original uploaded file straight from the bucket. The same file is
+    // already exposed via getPublicDownloadUrl, so playing it during
+    // processing doesn't widen access. The /watch page swaps to the Mux
+    // adaptive stream the moment muxPlaybackId lands.
+    const result = await ctx.runQuery(api.videos.getByPublicIdForDownload, {
+      publicId: args.publicId,
+    });
+
+    if (!result?.video?.s3Key) {
+      throw new Error("Original bucket file not found for this video");
+    }
+    if (
+      result.video.status === "uploading" ||
+      result.video.status === "failed"
+    ) {
+      throw new Error("Video not available");
+    }
+
+    const contentType = result.video.contentType ?? "video/mp4";
+    return {
+      url: await buildSignedBucketObjectUrl(result.video.s3Key, {
+        expiresIn: 600,
+        contentType,
+      }),
+      contentType,
+    };
+  },
+});
+
 export const getPublicPlaybackSession = action({
   args: { publicId: v.string() },
   returns: v.object({
@@ -756,6 +844,17 @@ export const getSharedPlaybackSession = action({
 
     if (!result?.video?.muxPlaybackId) {
       throw new Error("Video not found or not ready");
+    }
+
+    // Fail-closed: this path serves an UNSIGNED public Mux URL. A paywalled
+    // share must never resolve here — even when paid, it has to go through
+    // getSharedPaywalledPlayback so the stream is signed + short-TTL and the
+    // token issuance is logged for forensics. Refuse loudly instead of
+    // leaking full-res to anyone holding the grant token.
+    if (result.paywall) {
+      throw new Error(
+        "This is a paywalled share — use getSharedPaywalledPlayback.",
+      );
     }
 
     await ctx.runMutation(internal.videos.recordPlayback, {
