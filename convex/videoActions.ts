@@ -2478,3 +2478,89 @@ export const requestEncoding = action({
     }
   },
 });
+
+/**
+ * Link-unfurl preview for a /share/:token link. Returns the title +
+ * description and a WATERMARKED preview-frame image URL for og:image, so
+ * pasting a share link into iMessage / Slack / Discord shows the video
+ * (watermarked), not a generic card.
+ *
+ * Security: prefers the signed watermarked preview asset — exactly what we
+ * want a public crawler to fetch (low-res, watermarked, never the clean
+ * original). A paywalled share whose preview isn't ready yet returns no image
+ * (falls back to the default OG card) rather than ever leaking a clean frame.
+ * Non-paywalled shares, which have no watermarked source, may use the real
+ * public poster. Gating (anyone-access / no password / not expired) is
+ * enforced by getUnfurlMedia, mirroring the title unfurl.
+ */
+function buildUnfurlThumb(playbackId: string, token?: string): string {
+  const u = new URL(`https://image.mux.com/${playbackId}/thumbnail.jpg`);
+  u.searchParams.set("width", "1200");
+  u.searchParams.set("height", "630");
+  u.searchParams.set("fit_mode", "smartcrop");
+  u.searchParams.set("time", "0");
+  if (token) u.searchParams.set("token", token);
+  return u.toString();
+}
+
+export const getShareUnfurl = action({
+  args: { token: v.string() },
+  returns: v.union(
+    v.object({
+      title: v.string(),
+      description: v.union(v.string(), v.null()),
+      image: v.union(v.string(), v.null()),
+      watermarked: v.boolean(),
+    }),
+    v.null(),
+  ),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    title: string;
+    description: string | null;
+    image: string | null;
+    watermarked: boolean;
+  } | null> => {
+    const meta = await ctx.runQuery(internal.shareLinks.getUnfurlMedia, {
+      token: args.token,
+    });
+    if (!meta) return null;
+
+    // Watermarked preview asset (signed) — the preferred unfurl frame.
+    if (meta.previewReady && meta.previewPlaybackId) {
+      let image: string | null = null;
+      try {
+        const token = await signThumbnailToken(meta.previewPlaybackId, "30d");
+        image = buildUnfurlThumb(meta.previewPlaybackId, token);
+      } catch {
+        image = null;
+      }
+      return {
+        title: meta.title,
+        description: meta.description,
+        image,
+        watermarked: true,
+      };
+    }
+
+    // No watermarked source. Non-paywalled links can show the real frame;
+    // paywalled-but-not-ready shows nothing (never the clean original).
+    if (!meta.isPaywalled && meta.publicPlaybackId) {
+      return {
+        title: meta.title,
+        description: meta.description,
+        image: buildUnfurlThumb(meta.publicPlaybackId),
+        watermarked: false,
+      };
+    }
+
+    return {
+      title: meta.title,
+      description: meta.description,
+      image: null,
+      watermarked: false,
+    };
+  },
+});
