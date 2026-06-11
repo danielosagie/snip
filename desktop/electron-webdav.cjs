@@ -36,7 +36,7 @@ const { Readable } = require("stream");
 const DAV_HEADERS = {
   DAV: "1",
   "MS-Author-Via": "DAV",
-  Allow: "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL",
+  Allow: "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL, DELETE, MOVE",
 };
 
 function xmlEscape(s) {
@@ -232,6 +232,12 @@ async function handle(req, res, { convexCall, pushLog, preferProxy, uploadObject
   }
   if (method === "MKCOL") {
     return handleMkcol(req, res, segments, { convexCall, pushLog });
+  }
+  if (method === "DELETE") {
+    return handleDelete(req, res, segments, { convexCall, pushLog });
+  }
+  if (method === "MOVE") {
+    return handleMove(req, res, segments, { convexCall, pushLog });
   }
 
   res.writeHead(405, { ...DAV_HEADERS, "content-type": "text/plain" });
@@ -513,6 +519,122 @@ async function handleMkcol(req, res, segments, { convexCall, pushLog }) {
   }
   res.writeHead(201, { "content-type": "text/plain" });
   return res.end("created");
+}
+
+async function handleDelete(req, res, segments, { convexCall, pushLog }) {
+  // Finder issues DELETE when a file or folder is dragged to the Trash. The
+  // target must sit inside a project: /team/project/<folder…|file>. Anything
+  // shallower (a team or project, or the root) is not a drive-deletable node.
+  if (segments.length < 3) {
+    res.writeHead(403, { "content-type": "text/plain" });
+    return res.end("Only files and folders inside a project can be deleted.");
+  }
+  const [teamSlug, projectName, ...folderPath] = segments;
+  let result;
+  try {
+    // removePathForDesktop resolves the trailing segments to a file (soft-
+    // delete) or a folder (empty-only delete) the same way PROPFIND does, then
+    // mutates Convex. It carries the paired user's identity, so the user's
+    // real permissions still gate the delete (viewers are refused).
+    result = await convexCall("mutation", "desktopBrowse:removePathForDesktop", {
+      teamSlug,
+      projectName,
+      folderPath,
+    });
+  } catch (err) {
+    pushLog?.(
+      `webdav: DELETE ${segments.join("/")} failed: ${err.message}`,
+    );
+    res.writeHead(500, { "content-type": "text/plain" });
+    return res.end(err.message);
+  }
+  const status = result?.status;
+  if (status === "deleted") {
+    res.writeHead(204);
+    return res.end();
+  }
+  if (status === "not_found") return notFound(res);
+  if (status === "not_empty") {
+    // 409 Conflict is the WebDAV-correct answer for "collection not empty".
+    res.writeHead(409, { "content-type": "text/plain" });
+    return res.end("Folder isn't empty. Move or delete its contents first.");
+  }
+  // forbidden (viewer role, or the project root) → 403.
+  return forbidden(res, "You don't have permission to delete this.");
+}
+
+async function handleMove(req, res, segments, { convexCall, pushLog }) {
+  // Finder issues MOVE on a rename (same parent, new leaf name) or a drag
+  // between folders (new parent). Both source and destination must sit inside
+  // a project, and the Destination header is a URL we resolve the same way as
+  // the request path.
+  if (segments.length < 3) {
+    res.writeHead(403, { "content-type": "text/plain" });
+    return res.end("Only files and folders inside a project can be moved.");
+  }
+  const destHeader = req.headers["destination"];
+  if (!destHeader) {
+    res.writeHead(400, { "content-type": "text/plain" });
+    return res.end("MOVE requires a Destination header.");
+  }
+  // The Destination header is an absolute or absolute-path URL; pull its path
+  // and run it through the SAME parsePath the request URL uses so the segments
+  // line up (mountpoint prefix stripped, each segment decoded).
+  let destPathname;
+  try {
+    destPathname = destHeader.toString().startsWith("/")
+      ? destHeader.toString()
+      : new URL(destHeader.toString()).pathname;
+  } catch {
+    res.writeHead(400, { "content-type": "text/plain" });
+    return res.end("Malformed Destination header.");
+  }
+  const { segments: destSegments } = parsePath(destPathname);
+  if (destSegments.some(isHidden)) {
+    // Finder/AppleDouble junk destination — nothing to do, but don't 500.
+    return notFound(res);
+  }
+  if (destSegments.length < 3) {
+    res.writeHead(403, { "content-type": "text/plain" });
+    return res.end("Destination must be inside a project.");
+  }
+
+  const [teamSlug, projectName, ...sourcePath] = segments;
+  const [destTeam, destProject, ...destPath] = destSegments;
+  // Cross-team or cross-project moves can't be a metadata patch (the bytes
+  // live under the source project's key prefix); refuse rather than corrupt.
+  if (destTeam !== teamSlug || destProject !== projectName) {
+    return forbidden(res, "Can only move within the same project.");
+  }
+
+  let result;
+  try {
+    result = await convexCall("mutation", "desktopBrowse:movePathForDesktop", {
+      teamSlug,
+      projectName,
+      sourcePath,
+      destPath,
+    });
+  } catch (err) {
+    pushLog?.(
+      `webdav: MOVE ${segments.join("/")} → ${destSegments.join("/")} failed: ${err.message}`,
+    );
+    res.writeHead(500, { "content-type": "text/plain" });
+    return res.end(err.message);
+  }
+  const status = result?.status;
+  if (status === "moved") {
+    // 201 when the move created a new resource at the destination; 204 when it
+    // overwrote. We don't distinguish, and 201 is the safe WebDAV default.
+    res.writeHead(201, { "content-type": "text/plain" });
+    return res.end("moved");
+  }
+  if (status === "not_found") return notFound(res);
+  if (status === "conflict") {
+    res.writeHead(409, { "content-type": "text/plain" });
+    return res.end("A file or folder with that name already exists there.");
+  }
+  return forbidden(res, "You don't have permission to move this.");
 }
 
 module.exports = { start };

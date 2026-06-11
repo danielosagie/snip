@@ -24,10 +24,16 @@ import {
 } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
-import { getUser, requireProjectAccess, requireTeamAccess } from "./auth";
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  getUser,
+  identityName,
+  requireProjectAccess,
+  requireTeamAccess,
+} from "./auth";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getS3Client, BUCKET_NAME } from "./s3";
+import { removeSearchableForVideo } from "./search";
 
 const ID_SUFFIX_LEN = 6;
 
@@ -1337,5 +1343,311 @@ export const ensureFolderForDesktop = mutation({
         "Unknown",
     });
     return { ok: true, created: true };
+  },
+});
+
+// ── Resolve a WebDAV path to the concrete folder/file it names ───────────────
+//
+// DELETE and MOVE both need the same name → ID walk the read paths use, but
+// from a MutationCtx so they can write. `names` is the segment list AFTER the
+// project name (i.e. folderPath, where the last element may be a file). We
+// return the deepest matched folder plus, when the path resolved to a file, the
+// matching video doc. A `kind: "none"` result means the path didn't resolve and
+// the caller should answer 404 — never silently fall through.
+
+type DesktopTargetContext = {
+  team: Doc<"teams">;
+  project: Doc<"projects">;
+  role: string;
+};
+
+// Look up team + project + the member's role, mirroring the upload path's
+// authorization (createUploadForDesktop → resolveUploadTargetForDesktop):
+// member or above may write; viewers are rejected by the caller. Returns null
+// when the team/project can't be resolved so the caller answers 404.
+async function resolveProjectForDesktopWrite(
+  ctx: QueryCtx,
+  teamSlug: string,
+  projectName: string,
+): Promise<DesktopTargetContext | null> {
+  const user = await getUser(ctx);
+  if (!user) return null;
+  const team = await resolveTeamBySlug(ctx, teamSlug);
+  if (!team) return null;
+  await requireTeamAccess(ctx, team._id);
+  const project = await resolveProjectByName(ctx, team._id, projectName);
+  if (!project) return null;
+  const { membership } = await requireProjectAccess(ctx, project._id);
+  return { team, project, role: membership.role };
+}
+
+type DesktopPathTarget =
+  | { kind: "none" }
+  | { kind: "folder"; folder: Doc<"folders"> | null }
+  | { kind: "file"; video: Doc<"videos"> };
+
+// Resolve `names` (segments after the project) within a resolved project to a
+// folder or a file. Folder match: the whole path walks to existing folders
+// (null folder = project root). File match: all but the last segment walk to
+// folders and the last names a live video in that folder. This mirrors
+// browsePathForDesktop's folder-vs-file disambiguation so DELETE/MOVE hit the
+// SAME node the listing shows.
+async function resolveDesktopPathTarget(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  names: string[],
+): Promise<DesktopPathTarget> {
+  // The project root itself ("/team/project") is never a deletable/movable
+  // target through the drive — that's a project-level operation.
+  if (names.length === 0) return { kind: "folder", folder: null };
+
+  const walk = await walkFolderPath(ctx, projectId, names);
+  if (walk.matched === names.length) {
+    // Whole path resolved to folders → the deepest one is the target.
+    if (!walk.folderId) return { kind: "folder", folder: null };
+    const folder = await ctx.db.get(walk.folderId);
+    return folder ? { kind: "folder", folder } : { kind: "none" };
+  }
+  if (walk.matched === names.length - 1) {
+    // All but the last segment matched → the last names a file in the deepest
+    // matched folder. Use the SAME display-name disambiguation the listing
+    // uses so the name Finder shows resolves deterministically.
+    const fileName = names[names.length - 1];
+    const entries = await listVideosInFolder(
+      ctx,
+      projectId,
+      walk.folderId,
+      // preferProxy is irrelevant for delete/move (we never read bytes), but
+      // listVideosInFolder needs a value; pass true to match the read paths.
+      true,
+    );
+    const match = entries.find((e) => e.displayName === fileName);
+    if (!match) return { kind: "none" };
+    const video = await ctx.db.get(match.videoId);
+    return video && !video.deletedAt
+      ? { kind: "file", video }
+      : { kind: "none" };
+  }
+  return { kind: "none" };
+}
+
+/**
+ * Delete a file or folder named by a WebDAV path. Backs the WebDAV DELETE that
+ * Finder issues when a file/folder is dragged to the Trash.
+ *
+ *  - File → SOFT delete (sets `deletedAt` + `deletedByName`, drops the search
+ *    index), exactly like the web app's `videos.remove`, so a Finder mistake is
+ *    recoverable from the "Recently deleted" page rather than gone for good.
+ *  - Folder → mirrors `folders.remove`: hard-deletes the `folders` row but only
+ *    when it's empty, refusing otherwise so we never orphan or destroy the
+ *    videos inside it.
+ *
+ * Authorization mirrors the upload path (createUploadForDesktop): the desktop's
+ * paired Convex identity must be a member or above on the project; viewers are
+ * rejected. Returns a discriminated status the WebDAV layer maps to
+ * 204 / 404 / 409 / 403.
+ */
+export const removePathForDesktop = mutation({
+  args: {
+    teamSlug: v.string(),
+    projectName: v.string(),
+    folderPath: v.optional(v.array(v.string())),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("deleted"),
+      v.literal("not_found"),
+      v.literal("not_empty"),
+      v.literal("forbidden"),
+    ),
+  }),
+  handler: async (ctx, args) => {
+    const ctxInfo = await resolveProjectForDesktopWrite(
+      ctx,
+      args.teamSlug,
+      args.projectName,
+    );
+    if (!ctxInfo) return { status: "not_found" as const };
+    if (ctxInfo.role === "viewer") {
+      return { status: "forbidden" as const };
+    }
+
+    const names = args.folderPath ?? [];
+    const target = await resolveDesktopPathTarget(ctx, ctxInfo.project._id, names);
+
+    if (target.kind === "none") return { status: "not_found" as const };
+
+    if (target.kind === "file") {
+      const user = await getUser(ctx);
+      await ctx.db.patch(target.video._id, {
+        deletedAt: Date.now(),
+        deletedByName: user ? identityName(user) : undefined,
+      });
+      // Drop the video + its frame-caption rows from search so trashed items
+      // don't surface in ⌘K — same as videos.remove.
+      try {
+        await removeSearchableForVideo(ctx, target.video._id);
+      } catch (e) {
+        console.error("search index (desktop remove) failed", e);
+      }
+      return { status: "deleted" as const };
+    }
+
+    // Folder. Deleting the project root via the drive is not allowed.
+    if (!target.folder) return { status: "forbidden" as const };
+
+    const sub = await ctx.db
+      .query("folders")
+      .withIndex("by_project_and_parent", (q) =>
+        q
+          .eq("projectId", target.folder!.projectId)
+          .eq("parentFolderId", target.folder!._id),
+      )
+      .first();
+    const vid = await ctx.db
+      .query("videos")
+      .withIndex("by_folder", (q) => q.eq("folderId", target.folder!._id))
+      .first();
+    if (sub || (vid && !vid.deletedAt)) {
+      return { status: "not_empty" as const };
+    }
+    await ctx.db.delete(target.folder._id);
+    return { status: "deleted" as const };
+  },
+});
+
+/**
+ * Move/rename a file or folder. Backs the WebDAV MOVE that Finder issues on a
+ * rename (same parent, new name) or a drag between folders (new parent). The
+ * destination is given as path segments after the project name, with the last
+ * segment being the new file/folder name and the rest the destination folder.
+ *
+ *  - File → reparent (`folderId`) and/or retitle (`title`), mirroring
+ *    `folders.moveVideoToFolder` + `videos.update`.
+ *  - Folder → reparent and/or rename, mirroring `folders.moveFolder` +
+ *    `folders.rename` (sibling-name + cycle guards included).
+ *
+ * Source and destination must live in the SAME team/project — Finder can only
+ * MOVE within one mounted volume, and cross-project moves would need a fresh
+ * upload, not a metadata patch. Same member+ authorization as DELETE.
+ */
+export const movePathForDesktop = mutation({
+  args: {
+    teamSlug: v.string(),
+    projectName: v.string(),
+    // Segments after the project name for the SOURCE (last may be a file).
+    sourcePath: v.array(v.string()),
+    // Segments after the project name for the DESTINATION (last = new name).
+    destPath: v.array(v.string()),
+  },
+  returns: v.object({
+    status: v.union(
+      v.literal("moved"),
+      v.literal("not_found"),
+      v.literal("conflict"),
+      v.literal("forbidden"),
+    ),
+  }),
+  handler: async (ctx, args) => {
+    const ctxInfo = await resolveProjectForDesktopWrite(
+      ctx,
+      args.teamSlug,
+      args.projectName,
+    );
+    if (!ctxInfo) return { status: "not_found" as const };
+    if (ctxInfo.role === "viewer") {
+      return { status: "forbidden" as const };
+    }
+    const projectId = ctxInfo.project._id;
+
+    if (args.destPath.length === 0) return { status: "not_found" as const };
+    const newName = args.destPath[args.destPath.length - 1];
+    const destParentNames = args.destPath.slice(0, -1);
+
+    // Resolve the destination's PARENT folder (must already exist; Finder
+    // MKCOLs new folders before moving into them, same as upload).
+    const destWalk = await walkFolderPath(ctx, projectId, destParentNames);
+    if (destWalk.matched !== destParentNames.length) {
+      return { status: "not_found" as const };
+    }
+    const destParentId = destWalk.folderId; // undefined = project root
+
+    const source = await resolveDesktopPathTarget(
+      ctx,
+      projectId,
+      args.sourcePath,
+    );
+    if (source.kind === "none") return { status: "not_found" as const };
+
+    if (source.kind === "file") {
+      const video = source.video;
+      // Reparent if the destination folder differs.
+      if ((video.folderId ?? undefined) !== (destParentId ?? undefined)) {
+        await ctx.db.patch(video._id, { folderId: destParentId });
+      }
+      // Retitle if the leaf name changed. The drive's display name is the
+      // video title (with collision suffix); we set the raw title to the new
+      // leaf so the rename round-trips.
+      if (newName !== video.title) {
+        await ctx.db.patch(video._id, { title: newName });
+        try {
+          await removeSearchableForVideo(ctx, video._id);
+        } catch (e) {
+          console.error("search index (desktop move) drop failed", e);
+        }
+      }
+      return { status: "moved" as const };
+    }
+
+    // Folder move/rename. The project root can't be moved.
+    if (!source.folder) return { status: "forbidden" as const };
+    const folder = source.folder;
+    const cleanName = newName.trim().replace(/\s+/g, " ").slice(0, 120);
+    if (!cleanName) return { status: "forbidden" as const };
+    if (/[\\/:*?"<>|]/.test(cleanName)) return { status: "forbidden" as const };
+
+    const nextParent = destParentId ?? undefined;
+    const currentParent = folder.parentFolderId ?? undefined;
+
+    // Cycle guard: a folder can't become its own descendant (mirrors
+    // folders.moveFolder).
+    if (nextParent !== currentParent && destParentId) {
+      if (destParentId === folder._id) return { status: "forbidden" as const };
+      let cursor: Id<"folders"> | undefined = destParentId;
+      const seen = new Set<string>();
+      while (cursor) {
+        if (cursor === folder._id) return { status: "forbidden" as const };
+        if (seen.has(cursor)) break;
+        seen.add(cursor);
+        const next: Doc<"folders"> | null = await ctx.db.get(cursor);
+        cursor = next?.parentFolderId ?? undefined;
+      }
+    }
+
+    // Reject a sibling-name collision in the destination parent (case-
+    // insensitive), mirroring folders.rename / moveFolder.
+    const siblings = await ctx.db
+      .query("folders")
+      .withIndex("by_project_and_parent", (q) =>
+        q.eq("projectId", projectId).eq("parentFolderId", nextParent),
+      )
+      .collect();
+    const lower = cleanName.toLowerCase();
+    if (
+      siblings.some((s) => s._id !== folder._id && s.name.toLowerCase() === lower)
+    ) {
+      return { status: "conflict" as const };
+    }
+
+    const patch: Partial<{
+      parentFolderId: Id<"folders"> | undefined;
+      name: string;
+    }> = {};
+    if (nextParent !== currentParent) patch.parentFolderId = nextParent;
+    if (cleanName !== folder.name) patch.name = cleanName;
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(folder._id, patch);
+    }
+    return { status: "moved" as const };
   },
 });
