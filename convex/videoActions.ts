@@ -553,6 +553,7 @@ export const markUploadComplete = action({
     } catch (error) {
       const shouldDeleteObject = shouldDeleteUploadedObjectOnFailure(error);
       if (shouldDeleteObject) {
+        // Genuine bad-file rejection — drop the object and fail for real.
         const s3 = getS3Client();
         try {
           await s3.send(
@@ -564,17 +565,23 @@ export const markUploadComplete = action({
         } catch {
           // No-op: preserve original processing failure.
         }
+        await ctx.runMutation(internal.videos.markAsFailed, {
+          videoId: args.videoId,
+          uploadError: error instanceof Error ? error.message : undefined,
+        });
+        throw error;
       }
 
-      const uploadError =
-        shouldDeleteObject && error instanceof Error
-          ? error.message
-          : "Mux ingest failed after upload.";
-      await ctx.runMutation(internal.videos.markAsFailed, {
+      // The original is HEAD-verified intact above; this is a Mux ingest
+      // problem (e.g. the free-tier "limited to 10 assets" cap, or a Mux
+      // outage), not a bad upload. Keep the video playable from the original
+      // — the players fall back to original-file playback — instead of
+      // showing a misleading "failed". A later backfill can re-encode it.
+      await ctx.runMutation(internal.videos.markAsReadyOriginalOnly, {
         videoId: args.videoId,
-        uploadError,
+        muxError: error instanceof Error ? error.message : "Mux ingest failed.",
       });
-      throw error;
+      return { success: true };
     }
 
     return { success: true };
@@ -628,6 +635,64 @@ export const backfillGeneratedCaptions = internalAction({
       }
     }
     return { candidates: rows.length, requested, failed };
+  },
+});
+
+/**
+ * One-time backfill for videos stuck "failed" because Mux choked (most often
+ * the free-tier 10-asset cap) even though the original upload is intact — the
+ * "snip says failed but Finder plays it fine" case. HEAD-checks each failed
+ * video's original object and flips the ones that are really present to
+ * ready-from-original. Dry-run unless `apply` is true:
+ *   npx convex run videoActions:reconcileFailedVideosToOriginal '{"apply":true}'
+ */
+export const reconcileFailedVideosToOriginal = internalAction({
+  args: {
+    apply: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    candidates: v.number(),
+    recovered: v.number(),
+    missing: v.number(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ candidates: number; recovered: number; missing: number }> => {
+    const rows: Array<{ videoId: Id<"videos">; s3Key: string; title: string }> =
+      await ctx.runQuery(internal.videos.listFailedVideosWithOriginal, {
+        limit: args.limit,
+      });
+    const s3 = getS3Client();
+    let recovered = 0;
+    let missing = 0;
+    for (const row of rows) {
+      let present = false;
+      try {
+        const head = await s3.send(
+          new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: row.s3Key }),
+        );
+        present =
+          typeof head.ContentLength === "number" && head.ContentLength > 0;
+      } catch {
+        present = false;
+      }
+      if (!present) {
+        missing++;
+        continue;
+      }
+      if (!args.apply) {
+        recovered++;
+        continue;
+      }
+      await ctx.runMutation(internal.videos.markAsReadyOriginalOnly, {
+        videoId: row.videoId,
+        muxError: "Recovered: original present, Mux ingest had failed.",
+      });
+      recovered++;
+    }
+    return { candidates: rows.length, recovered, missing };
   },
 });
 
