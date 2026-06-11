@@ -173,7 +173,7 @@ export function ShareDownloadSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent>
+      <SheetContent className="surface-client">
         <SheetHeader>
           <SheetTitle>Download</SheetTitle>
           <SheetDescription>
