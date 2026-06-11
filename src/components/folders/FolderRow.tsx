@@ -26,6 +26,10 @@ interface Props {
     droppedFolderId: Id<"folders">,
     targetFolderId: Id<"folders">,
   ) => void;
+  /** When a folder with this id renders, it auto-enters inline rename (used
+   *  right after a background "New folder" or a drag-combine creates one). */
+  renameFolderId?: Id<"folders"> | null;
+  onRenameConsumed?: () => void;
 }
 
 export function FolderRow({
@@ -35,6 +39,8 @@ export function FolderRow({
   canEdit,
   onDropVideo,
   onDropFolder,
+  renameFolderId,
+  onRenameConsumed,
 }: Props) {
   if (folders.length === 0) return null;
 
@@ -55,6 +61,8 @@ export function FolderRow({
             canEdit={canEdit}
             onDropVideo={onDropVideo}
             onDropFolder={onDropFolder}
+            autoRename={renameFolderId === f._id}
+            onAutoRenameConsumed={onRenameConsumed}
           />
         ))}
       </div>

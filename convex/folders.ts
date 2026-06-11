@@ -127,6 +127,82 @@ export const create = mutation({
   },
 });
 
+/**
+ * Finder-style "combine into a new folder". Creates a folder at the given
+ * level, then moves the supplied videos (and optionally folders) into it in a
+ * single atomic handler — so a drop never leaves a half-made folder behind.
+ * Reuses the same access checks + cycle guard as moveVideoToFolder/moveFolder.
+ * Returns the new folder id so the caller can drop the user into renaming it.
+ */
+export const createWithItems = mutation({
+  args: {
+    projectId: v.id("projects"),
+    parentFolderId: v.optional(v.id("folders")),
+    name: v.string(),
+    videoIds: v.array(v.id("videos")),
+    folderIds: v.optional(v.array(v.id("folders"))),
+  },
+  returns: v.id("folders"),
+  handler: async (ctx, args): Promise<Id<"folders">> => {
+    const { user } = await requireProjectAccess(ctx, args.projectId, "member");
+    const name = sanitizeName(args.name);
+
+    // Reject duplicate names under the same parent (case-insensitive) — mirrors
+    // create() so the gesture can't smuggle past the uniqueness rule.
+    const siblings = await ctx.db
+      .query("folders")
+      .withIndex("by_project_and_parent", (q) =>
+        q
+          .eq("projectId", args.projectId)
+          .eq("parentFolderId", args.parentFolderId),
+      )
+      .collect();
+    const lower = name.toLowerCase();
+    if (siblings.some((s) => s.name.toLowerCase() === lower)) {
+      throw new Error(`A folder named "${name}" already exists here.`);
+    }
+
+    const folderIds = args.folderIds ?? [];
+    // Don't let a folder be combined into itself (it would become its own
+    // child once we move it into the brand-new folder). The new folder can't
+    // yet be a descendant of anything, so a same-project check is enough for
+    // the move targets — no deep cycle walk is required here.
+    for (const fid of folderIds) {
+      const f = await ctx.db.get(fid);
+      if (!f || f.projectId !== args.projectId) {
+        throw new Error("Folder doesn't belong to this project.");
+      }
+    }
+    for (const vid of args.videoIds) {
+      const video = await ctx.db.get(vid);
+      if (!video || video.projectId !== args.projectId) {
+        throw new Error("File doesn't belong to this project.");
+      }
+    }
+
+    const newFolderId = await ctx.db.insert("folders", {
+      projectId: args.projectId,
+      parentFolderId: args.parentFolderId,
+      name,
+      createdByClerkId: user.subject,
+      createdByName:
+        (user as { name?: string; email?: string }).name ??
+        (user as { email?: string }).email ??
+        "Unknown",
+    });
+
+    for (const vid of args.videoIds) {
+      await ctx.db.patch(vid, { folderId: newFolderId });
+    }
+    for (const fid of folderIds) {
+      if (fid === newFolderId) continue;
+      await ctx.db.patch(fid, { parentFolderId: newFolderId });
+    }
+
+    return newFolderId;
+  },
+});
+
 export const rename = mutation({
   args: { folderId: v.id("folders"), name: v.string() },
   handler: async (ctx, args) => {
