@@ -6,7 +6,7 @@ import { useMutation } from "convex/react";
 import { Plus, Upload, FolderPlus, FileSignature, FileText } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
-import { contractPath } from "@/lib/routes";
+import { contractPath, documentPath } from "@/lib/routes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,8 +77,14 @@ export function ProjectAddButton({
         docType,
         contentHtml: "",
       });
-      // Drop straight into the new editor.
-      navigate({ to: contractPath(teamSlug, projectId, contractId) });
+      // Drop straight into the new editor — documents get their own
+      // /doc/ URL space, never a /contract/ one.
+      navigate({
+        to:
+          docType === "document"
+            ? documentPath(teamSlug, projectId, contractId)
+            : contractPath(teamSlug, projectId, contractId),
+      });
     } catch (e) {
       alert(e instanceof Error ? e.message : `Couldn't create ${label}.`);
     } finally {

@@ -185,7 +185,7 @@ export default function WatchPage() {
 
   if (videoData === undefined) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center">
         <DelayedAppear>
           <div className="text-[#888]">Opening…</div>
         </DelayedAppear>
@@ -195,7 +195,7 @@ export default function WatchPage() {
 
   if (!videoData?.video) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">

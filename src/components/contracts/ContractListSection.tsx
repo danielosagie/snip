@@ -4,7 +4,7 @@ import { useQuery } from "convex/react";
 import { Link } from "@tanstack/react-router";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
-import { contractPath } from "@/lib/routes";
+import { contractPath, documentPath } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { Check, FileSignature, FileText } from "lucide-react";
 
@@ -34,12 +34,27 @@ const STATUS_STYLES: Record<string, string> = {
  * Multi-contract list — replaces the single ContractTile when the
  * project has any contracts in the new table. Auto-hides when empty
  * AND there's no embedded contract (caller handles back-compat).
+ *
+ * Contracts and plain documents share the `contracts` table (split by
+ * `docType`) but are NOT the same thing to the user: contracts carry
+ * signing chrome (status badge, signed counts), documents are just
+ * docs. Render them as two distinct groups so a document never looks
+ * like something awaiting signature.
  */
 export function ContractListSection({
   projectId,
   teamSlug,
 }: ContractListSectionProps) {
-  const contracts = useQuery(api.contractsTable.list, { projectId });
+  // Each group fetches its own kind server-side — documents never ride
+  // along in a "contracts" payload and vice versa.
+  const contractRows = useQuery(api.contractsTable.list, {
+    projectId,
+    docType: "contract",
+  });
+  const documentRows = useQuery(api.contractsTable.list, {
+    projectId,
+    docType: "document",
+  });
   // Legacy embedded contract (the wizard-backed singleton on
   // projects.contract). Surfaced as a synthetic row at the top of the
   // list so a project that pre-dates the multi-contract table still
@@ -48,85 +63,83 @@ export function ContractListSection({
   const project = useQuery(api.projects.get, { projectId });
   const legacyContract = project?.contract ?? null;
 
-  if (contracts === undefined || project === undefined) {
+  if (
+    contractRows === undefined ||
+    documentRows === undefined ||
+    project === undefined
+  ) {
     return null;
   }
-  const totalCount = contracts.length + (legacyContract ? 1 : 0);
+  const totalCount =
+    contractRows.length + documentRows.length + (legacyContract ? 1 : 0);
   if (totalCount === 0) {
     return null;
   }
+  const hasContracts = contractRows.length > 0 || legacyContract !== null;
+  const hasDocuments = documentRows.length > 0;
 
   return (
     // Match FolderRow: dense top-padding, plain mono header, no
     // shadow on the section container.
-    <section className="px-6 pt-4">
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-          Contracts
+    <section className="px-6 pt-4 space-y-4">
+      {/* ── Contracts — signing lifecycle lives here ─────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+            Contracts
+          </div>
         </div>
-      </div>
-
-      {/* Folder-tile parity: dense horizontal rows, 2px border, no
-          drop-shadow, single FileSignature icon on the left, name +
-          subline of meta on the right. Click navigates to the editor. */}
-      <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-          {legacyContract ? (
-            <Link
-              to={`/dashboard/${teamSlug}/${projectId}/contract`}
-              className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
-            >
-              <FileSignature
-                className="h-5 w-5 flex-shrink-0 text-[#888]"
-                strokeWidth={1.75}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold text-[#1a1a1a] truncate">
-                  {project?.name ?? "Contract"}
-                </div>
-                <div className="text-[10px] font-mono text-[#888] truncate">
-                  {legacyContract.clientName
-                    ? `Client: ${legacyContract.clientName}`
-                    : "Statement of work"}
-                </div>
-              </div>
-              <span
-                className={cn(
-                  "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
-                  legacyContract.signedAt
-                    ? STATUS_STYLES.completed
-                    : legacyContract.sentForSignatureAt
-                      ? STATUS_STYLES.pending
-                      : STATUS_STYLES.draft,
-                )}
+        {hasContracts ? (
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            {legacyContract ? (
+              <Link
+                to={`/dashboard/${teamSlug}/${projectId}/contract`}
+                className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
               >
-                {legacyContract.signedAt ? (
-                  <>
-                    <Check className="mr-0.5 h-2.5 w-2.5" strokeWidth={3} />
-                    signed
-                  </>
-                ) : legacyContract.sentForSignatureAt ? (
-                  "sent"
-                ) : (
-                  "draft"
-                )}
-              </span>
-            </Link>
-          ) : null}
-          {contracts.map((c) => {
-            const isDoc = c.docType === "document";
-            const meta = isDoc
-              ? "Document"
-              : c.recipientCount > 0
-                ? `${c.signedCount}/${c.recipientCount} signed`
-                : KIND_LABELS[c.kind] ?? c.kind;
-            const Icon = isDoc ? FileText : FileSignature;
-            return (
+                <FileSignature
+                  className="h-5 w-5 flex-shrink-0 text-[#888]"
+                  strokeWidth={1.75}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
+                    {project?.name ?? "Contract"}
+                  </div>
+                  <div className="text-[10px] font-mono text-[#888] truncate">
+                    {legacyContract.clientName
+                      ? `Client: ${legacyContract.clientName}`
+                      : "Statement of work"}
+                  </div>
+                </div>
+                <span
+                  className={cn(
+                    "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
+                    legacyContract.signedAt
+                      ? STATUS_STYLES.completed
+                      : legacyContract.sentForSignatureAt
+                        ? STATUS_STYLES.pending
+                        : STATUS_STYLES.draft,
+                  )}
+                >
+                  {legacyContract.signedAt ? (
+                    <>
+                      <Check className="mr-0.5 h-2.5 w-2.5" strokeWidth={3} />
+                      signed
+                    </>
+                  ) : legacyContract.sentForSignatureAt ? (
+                    "sent"
+                  ) : (
+                    "draft"
+                  )}
+                </span>
+              </Link>
+            ) : null}
+            {contractRows.map((c) => (
               <Link
                 key={c._id}
                 to={contractPath(teamSlug, projectId, c._id)}
                 className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
               >
-                <Icon
+                <FileSignature
                   className="h-5 w-5 flex-shrink-0 text-[#888]"
                   strokeWidth={1.75}
                 />
@@ -135,7 +148,9 @@ export function ContractListSection({
                     {c.title}
                   </div>
                   <div className="text-[10px] font-mono text-[#888] truncate">
-                    {meta}
+                    {c.recipientCount > 0
+                      ? `${c.signedCount}/${c.recipientCount} signed`
+                      : KIND_LABELS[c.kind] ?? c.kind}
                   </div>
                 </div>
                 <span
@@ -154,8 +169,50 @@ export function ContractListSection({
                   )}
                 </span>
               </Link>
-            );
-          })}
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11px] font-mono text-[#888] italic">
+            No contracts yet.
+          </div>
+        )}
+      </div>
+
+      {/* ── Documents — plain docs, no signing chrome ────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+            Documents
+          </div>
+        </div>
+        {hasDocuments ? (
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            {documentRows.map((d) => (
+              <Link
+                key={d._id}
+                to={documentPath(teamSlug, projectId, d._id)}
+                className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
+              >
+                <FileText
+                  className="h-5 w-5 flex-shrink-0 text-[#888]"
+                  strokeWidth={1.75}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
+                    {d.title}
+                  </div>
+                  <div className="text-[10px] font-mono text-[#888] truncate">
+                    Document
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11px] font-mono text-[#888] italic">
+            No documents yet.
+          </div>
+        )}
       </div>
     </section>
   );
