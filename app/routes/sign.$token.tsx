@@ -240,7 +240,7 @@ function SignPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f0f0e8]">
+    <div className="surface-client min-h-screen bg-[#f0f0e8]">
       <header className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 py-4 flex items-center justify-between">
         <SnipMark />
         <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
@@ -437,7 +437,7 @@ function SignPage() {
 
 function CenteredShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f0f0e8] flex flex-col">
+    <div className="surface-client min-h-screen bg-[#f0f0e8] flex flex-col">
       <header className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 py-4">
         <SnipMark />
       </header>
