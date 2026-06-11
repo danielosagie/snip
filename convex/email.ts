@@ -66,23 +66,27 @@ async function sendViaResend(args: {
 }
 
 /** Minimal on-brand HTML shell — inline styles only (email clients
- *  strip <style>/external CSS). Cream bg, near-black text, the snip
- *  wordmark with the burnt-orange period. */
+ *  strip <style>/external CSS). Matches the client-surface look:
+ *  white rounded card on a soft gray canvas, near-black text, the
+ *  snip wordmark with the orange period. */
 function shell(bodyHtml: string): string {
-  return `<!doctype html><html><body style="margin:0;background:#f0f0e8;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  return `<!doctype html><html><body style="margin:0;background:#fafafa;padding:40px 0;font-family:'Inter Tight',Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-    <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:90%;background:#f0f0e8;border:2px solid #1a1a1a;">
-      <tr><td style="padding:24px 28px;border-bottom:2px solid #1a1a1a;">
-        <span style="font-size:22px;font-weight:900;letter-spacing:-0.03em;color:#1a1a1a;">snip<span style="color:#C2410C;">.</span></span>
+    <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:90%;background:#ffffff;border:1px solid #e8e8ec;border-radius:16px;">
+      <tr><td style="padding:24px 28px;border-bottom:1px solid #e8e8ec;">
+        <span style="font-size:21px;font-weight:600;letter-spacing:-0.03em;color:#131315;">snip<span style="color:#FF6600;">.</span></span>
       </td></tr>
-      <tr><td style="padding:28px;color:#1a1a1a;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
+      <tr><td style="padding:28px;color:#131315;font-size:15px;line-height:1.6;">${bodyHtml}</td></tr>
     </table>
+    <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:90%;"><tr>
+      <td style="padding:16px 28px;color:#a0a0a5;font-size:12px;">Sent by snip — video review for creative teams.</td>
+    </tr></table>
   </td></tr></table>
 </body></html>`;
 }
 
 function button(href: string, label: string): string {
-  return `<a href="${href}" style="display:inline-block;background:#1a1a1a;color:#f0f0e8;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border:2px solid #1a1a1a;">${label}</a>`;
+  return `<a href="${href}" style="display:inline-block;background:#131315;color:#ffffff;text-decoration:none;font-weight:500;font-size:14px;padding:12px 24px;border-radius:9999px;">${label}</a>`;
 }
 
 export const sendTeamInvite = internalAction({
@@ -142,7 +146,7 @@ export const sendContractOtp = internalAction({
       `<p style="margin:0 0 12px;">Use this code to verify your identity and sign ` +
         `<strong>${args.contractTitle}</strong>:</p>` +
         `<p style="margin:0 0 20px;font-family:monospace;font-size:32px;font-weight:700;` +
-        `letter-spacing:0.15em;color:#1a1a1a;">${args.code}</p>` +
+        `letter-spacing:0.15em;color:#131315;">${args.code}</p>` +
         `<p style="margin:0;color:#888;font-size:13px;">This code expires in 10 minutes. ` +
         `If you didn't request it, you can ignore this email.</p>`,
     );

@@ -1,5 +1,6 @@
 /* Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=block');
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap');
 
 @import "tailwindcss";
 
@@ -429,4 +430,92 @@ body {
 }
 .group:hover [class~="group-hover:text-[#1a1a1a]"] {
   color: var(--foreground) !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Client-surface theme — the soft, light look from the landing page,  */
+/* applied to surfaces that clients see (share, watch, signing, auth). */
+/* Colors flow through the same CSS variables the legacy remap rules   */
+/* above already target, so hardcoded utility colors re-skin for free; */
+/* geometry (radius, border weight, shadows, case) is softened via the */
+/* ui-* hook classes on the shared primitives.                         */
+/* ------------------------------------------------------------------ */
+.surface-client {
+  --background: #ffffff;
+  --background-alt: #131315;
+  --surface: #ffffff;
+  --surface-alt: #fafafa;
+  --surface-strong: #131315;
+  --surface-muted: #f1f1f3;
+
+  --foreground: #131315;
+  --foreground-muted: #6e6e73;
+  --foreground-subtle: #a0a0a5;
+  --foreground-inverse: #ffffff;
+
+  --border: #e8e8ec;
+  --border-subtle: #e8e8ec;
+  --shadow-color: rgba(19, 19, 21, 0.06);
+  --shadow-accent: rgba(255, 102, 0, 0.25);
+
+  --accent: #FF6600;
+  --accent-hover: #e65c00;
+  --accent-light: #ffb380;
+
+  --destructive: #dc2626;
+  --destructive-subtle: #fef2f2;
+
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  color-scheme: light;
+}
+
+/* Primitive geometry inside client surfaces */
+.surface-client .ui-card {
+  border-radius: 16px;
+  border-width: 1px;
+  box-shadow: 0 1px 2px rgba(19, 19, 21, 0.04), 0 12px 32px -16px rgba(19, 19, 21, 0.12);
+  background-color: var(--surface);
+}
+.surface-client .ui-card-title {
+  text-transform: none;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.surface-client .ui-btn {
+  border-radius: 9999px;
+  border-width: 1px;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+  box-shadow: none !important;
+}
+.surface-client .ui-btn:hover,
+.surface-client .ui-btn:active {
+  transform: none !important;
+}
+.surface-client input:not([type="checkbox"]):not([type="radio"]),
+.surface-client textarea {
+  border-radius: 10px;
+  border-width: 1px;
+}
+/* Brutalist offset shadows read as glitches on soft surfaces */
+.surface-client [class*="shadow-["] {
+  box-shadow: 0 1px 2px rgba(19, 19, 21, 0.05), 0 8px 24px -12px rgba(19, 19, 21, 0.1) !important;
+}
+.surface-client [class*="border-2"] {
+  border-width: 1px;
+}
+/* Icon wells in the state cards (the `mx-auto w-12 h-12` squares) */
+.surface-client .mx-auto.w-12.h-12 {
+  border-radius: 12px;
+}
+
+/* Motion: honor reduced-motion for the shared animation utilities */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .animate-out {
+    animation: none !important;
+  }
 }

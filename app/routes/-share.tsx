@@ -795,7 +795,7 @@ export default function SharePage() {
 
   if (isBootstrappingShare) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center">
         <DelayedAppear>
           <div className="text-[#888]">Opening…</div>
         </DelayedAppear>
@@ -805,7 +805,7 @@ export default function SharePage() {
 
   if (shareInfo.status === "missing" || shareInfo.status === "expired") {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
@@ -834,7 +834,7 @@ export default function SharePage() {
   // automatically the moment Mux finishes — no reload needed.
   if (shareInfo.status === "processing") {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
@@ -853,7 +853,7 @@ export default function SharePage() {
 
   if (shareInfo.status === "requiresPassword" && !grantToken) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
@@ -897,7 +897,7 @@ export default function SharePage() {
   // reactively once they sign in, so a match flips this away automatically.
   if (shareInfo.status === "requiresAccess" && !grantToken) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
@@ -930,7 +930,7 @@ export default function SharePage() {
   // state if there are no ready items.
   if (!isBundle && !videoData?.video) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
@@ -982,7 +982,7 @@ export default function SharePage() {
 
   if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
@@ -1000,7 +1000,7 @@ export default function SharePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f0f0e8]">
+    <div className="surface-client min-h-screen bg-[#f0f0e8]">
       <header className="bg-[#f0f0e8] border-b-2 border-[#1a1a1a] px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <Link
