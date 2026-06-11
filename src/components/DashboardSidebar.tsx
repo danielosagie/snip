@@ -7,16 +7,14 @@ import {
   ChevronsUpDown,
   CreditCard,
   HardDrive,
-  Moon,
   Plus,
   Settings,
-  Sun,
   Trash2,
   Users,
   Briefcase,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
-import { useTheme } from "@/components/theme/ThemeToggle";
+import { ThemeStyleToggle } from "@/components/theme/ThemeToggle";
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -402,7 +400,6 @@ function SidebarLink({
 }
 
 function SidebarFooter({ name }: { name: string }) {
-  const { theme, toggleTheme, mounted } = useTheme();
   return (
     <div className="border-t-2 border-[#1a1a1a] px-3 py-2 flex items-center gap-2">
       <UserButton
@@ -433,20 +430,7 @@ function SidebarFooter({ name }: { name: string }) {
           {name || "Account"}
         </div>
       </div>
-      <button
-        onClick={toggleTheme}
-        className="p-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors"
-        title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-        aria-label="Toggle theme"
-      >
-        {!mounted ? (
-          <span className="block h-4 w-4" />
-        ) : theme === "dark" ? (
-          <Sun className="h-4 w-4" />
-        ) : (
-          <Moon className="h-4 w-4" />
-        )}
-      </button>
+      <ThemeStyleToggle className="p-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors" />
     </div>
   );
 }

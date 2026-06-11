@@ -177,6 +177,76 @@
   }
 }
 
+/* ============================================================
+   Soft style (shade.inc-inspired) — second app-wide skin.
+   data-style="soft" sits on <html> next to data-theme; the
+   accent family intentionally stays the brand #FF6600.
+   ============================================================ */
+[data-style="soft"] {
+  /* Core palette - clean white */
+  --background: #ffffff;
+  --background-alt: #131315;
+  --surface: #ffffff;
+  --surface-alt: #fafafa;
+  --surface-strong: #131315;
+  --surface-muted: #f1f1f3;
+
+  /* Text */
+  --foreground: #131315;
+  --foreground-muted: #6e6e73;
+  --foreground-subtle: #a0a0a5;
+  --foreground-inverse: #ffffff;
+
+  /* Borders */
+  --border: #e8e8ec;
+  --border-subtle: #e8e8ec;
+  --shadow-color: rgba(19, 19, 21, 0.06);
+}
+
+[data-style="soft"][data-theme="dark"] {
+  /* Core palette - near-black neutrals */
+  --background: #0a0a0b;
+  --background-alt: #f4f4f5;
+  --surface: #161618;
+  --surface-alt: #1d1d22;
+  --surface-strong: #26262a;
+  --surface-muted: #222226;
+
+  /* Text */
+  --foreground: #f4f4f5;
+  --foreground-muted: #a0a0a5;
+  --foreground-subtle: #6e6e73;
+  --foreground-inverse: #0a0a0b;
+
+  /* Borders */
+  --border: #26262a;
+  --border-subtle: #26262a;
+  --shadow-color: rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="soft"]:not([data-theme="light"]) {
+    /* Core palette - near-black neutrals */
+    --background: #0a0a0b;
+    --background-alt: #f4f4f5;
+    --surface: #161618;
+    --surface-alt: #1d1d22;
+    --surface-strong: #26262a;
+    --surface-muted: #222226;
+
+    /* Text */
+    --foreground: #f4f4f5;
+    --foreground-muted: #a0a0a5;
+    --foreground-subtle: #6e6e73;
+    --foreground-inverse: #0a0a0b;
+
+    /* Borders */
+    --border: #26262a;
+    --border-subtle: #26262a;
+    --shadow-color: rgba(0, 0, 0, 0.4);
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -384,6 +454,7 @@ body {
 
 [class~="text-[#888]"] { color: var(--foreground-muted) !important; }
 [class~="text-[#888888]"] { color: var(--foreground-muted) !important; }
+[class~="text-[#666]"] { color: var(--foreground-muted) !important; }
 [class~="bg-[#888]"] { background-color: var(--foreground-muted) !important; }
 
 [class~="text-[#ccc]"] { color: var(--border-subtle) !important; }
@@ -417,6 +488,7 @@ body {
 [class~="hover:bg-[#1a1a1a]"]:hover { background-color: var(--foreground) !important; }
 [class~="hover:bg-[#e8e8e0]"]:hover { background-color: var(--surface-alt) !important; }
 [class~="hover:bg-[#d8d8d0]"]:hover { background-color: var(--surface-muted) !important; }
+[class~="hover:bg-[#e0e0d6]"]:hover { background-color: var(--surface-muted) !important; }
 [class~="hover:bg-[#FF7A1F]"]:hover { background-color: var(--accent-hover) !important; }
 [class~="hover:bg-[#dc2626]/10"]:hover {
   background-color: color-mix(in srgb, var(--destructive) 10%, transparent) !important;
@@ -518,4 +590,66 @@ body {
   .animate-out {
     animation: none !important;
   }
+}
+
+/* ============================================================
+   Soft style — geometry. Rounds corners, thins borders, swaps
+   offset shadows for soft layered ones, and relaxes the mono
+   uppercase voice. Independent of any .surface-client scope.
+   NOTE: the .ui-btn rules must stay AFTER the [class*="shadow-["]
+   remap so box-shadow:none wins the source-order tie.
+   ============================================================ */
+[data-style="soft"] body {
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+}
+
+/* Brutalist 2px borders → hairlines */
+[data-style="soft"] [class*="border-2"] {
+  border-width: 1px;
+}
+
+/* Offset hard shadows → soft layered shadow */
+[data-style="soft"] [class*="shadow-["] {
+  box-shadow:
+    0 1px 2px var(--shadow-color),
+    0 8px 24px var(--shadow-color) !important;
+}
+
+/* Buttons: pill, quiet, no shadow, no hover/active jump */
+[data-style="soft"] .ui-btn {
+  border-radius: 9999px;
+  border-width: 1px;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-weight: 500;
+  box-shadow: none !important;
+}
+
+[data-style="soft"] .ui-btn:hover,
+[data-style="soft"] .ui-btn:active {
+  transform: none !important;
+  translate: none !important;
+  box-shadow: none !important;
+}
+
+/* Cards: rounded, hairline border, soft layered shadow */
+[data-style="soft"] .ui-card {
+  border-radius: 16px;
+  border-width: 1px;
+  box-shadow:
+    0 1px 2px var(--shadow-color),
+    0 8px 24px var(--shadow-color);
+}
+
+[data-style="soft"] .ui-card-title {
+  text-transform: none;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Inputs: gently rounded */
+[data-style="soft"] input:not([type="checkbox"]):not([type="radio"]),
+[data-style="soft"] textarea {
+  border-radius: 10px;
+  border-width: 1px;
 }

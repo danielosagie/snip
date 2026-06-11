@@ -88,6 +88,10 @@ function RootDocument({ children }: { children: ReactNode }) {
   const themeInitScript = `
     (() => {
       try {
+        const storedStyle = localStorage.getItem("snip-style");
+        if (storedStyle === "classic" || storedStyle === "soft") {
+          document.documentElement.setAttribute("data-style", storedStyle);
+        }
         const stored = localStorage.getItem("snip-theme") || localStorage.getItem("lawn-theme");
         if (stored === "light" || stored === "dark") {
           document.documentElement.setAttribute("data-theme", stored);
