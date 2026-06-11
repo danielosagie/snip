@@ -103,17 +103,37 @@ async function requireContractAccess(
   return contract;
 }
 
+// Plain documents share the table but must never enter the signing
+// lifecycle. Server-side backstop for what the UI already hides —
+// rows without docType are legacy contracts.
+function assertNotDocument(contract: Doc<"contracts">, action: string) {
+  if ((contract.docType ?? "contract") === "document") {
+    throw new Error(`Documents don't support ${action}.`);
+  }
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────
 
 export const list = query({
-  args: { projectId: v.id("projects") },
+  args: {
+    projectId: v.id("projects"),
+    // Optional server-side split: "contract" rows (absent docType counts as
+    // contract — legacy rows) vs "document" rows. Omitted = everything, so
+    // existing callers keep working unchanged.
+    docType: v.optional(v.union(v.literal("contract"), v.literal("document"))),
+  },
   handler: async (ctx, args) => {
     await requireProjectAccess(ctx, args.projectId, "viewer");
     const rows = await ctx.db
       .query("contracts")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
-    const visible = rows.filter((r) => !r.deletedAt);
+    const visible = rows.filter(
+      (r) =>
+        !r.deletedAt &&
+        (args.docType === undefined ||
+          (r.docType ?? "contract") === args.docType),
+    );
     visible.sort((a, b) => b._creationTime - a._creationTime);
 
     // Attach recipient counts so the list UI can render the signer
@@ -287,6 +307,7 @@ export const applyWizard = mutation({
   },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
+    assertNotDocument(contract, "the contract wizard");
     if (contract.status !== "draft") {
       throw new Error("Only draft contracts can run the wizard.");
     }
@@ -364,6 +385,7 @@ export const addRecipient = mutation({
   returns: v.id("contractRecipients"),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
+    assertNotDocument(contract, "signing recipients");
     if (contract.status !== "draft") {
       throw new Error("Recipients can only be added to draft contracts.");
     }
@@ -450,6 +472,7 @@ export const addField = mutation({
   returns: v.id("contractFields"),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
+    assertNotDocument(contract, "signature fields");
     if (contract.status !== "draft") {
       throw new Error("Fields can only be edited on draft contracts.");
     }
@@ -530,6 +553,7 @@ export const sendForSignature = mutation({
   args: { contractId: v.id("contracts") },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
+    assertNotDocument(contract, "sending for signature");
     if (contract.status !== "draft") {
       throw new Error("Only draft contracts can be sent.");
     }
