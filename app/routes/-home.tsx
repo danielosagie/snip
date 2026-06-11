@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef, lazy, Suspense, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useUser } from "@clerk/tanstack-react-start";
 import { SnipMark } from "@/components/SnipMark";
@@ -362,8 +362,30 @@ function MockDrive() {
   );
 }
 
+/**
+ * Animated review demo (Remotion player), lazy-loaded after mount so it
+ * never blocks first paint or SSR. The static MockReview stands in until
+ * the chunk arrives — and permanently for reduced-motion viewers.
+ */
+const ReviewDemoPlayer = lazy(() => import("@/components/landing/ReviewDemo"));
+
+function AnimatedReview() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setReady(true);
+    }
+  }, []);
+  if (!ready) return <MockReview />;
+  return (
+    <Suspense fallback={<MockReview />}>
+      <ReviewDemoPlayer />
+    </Suspense>
+  );
+}
+
 const HERO_TABS = [
-  { id: "review", label: "Review", Comp: MockReview },
+  { id: "review", label: "Review", Comp: AnimatedReview },
   { id: "contracts", label: "Contracts", Comp: MockContracts },
   { id: "delivery", label: "Delivery", Comp: MockDelivery },
   { id: "drive", label: "Drive", Comp: MockDrive },
