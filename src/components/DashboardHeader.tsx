@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { UserButton } from "@clerk/tanstack-react-start";
-import { Moon, PanelLeft, PanelLeftClose, Sun } from "lucide-react";
-import { useTheme } from "@/components/theme/ThemeToggle";
+import { PanelLeft, PanelLeftClose } from "lucide-react";
+import { ThemeStyleToggle } from "@/components/theme/ThemeToggle";
 import React from "react";
 import { useConvex } from "convex/react";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
@@ -9,23 +9,8 @@ import { prewarmDashboardIndex } from "../../app/routes/dashboard/-index.data";
 import { useSidebarState } from "@/lib/sidebarContext";
 
 function ThemeToggleButton() {
-  const { theme, toggleTheme, mounted } = useTheme();
-
-  if (!mounted) return <div className="w-8 h-8" />;
-
   return (
-    <button
-      onClick={toggleTheme}
-      className="w-8 h-8 flex items-center justify-center text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors"
-      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode (⌘⇧L)`}
-      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-    >
-      {theme === "dark" ? (
-        <Sun className="h-4 w-4" />
-      ) : (
-        <Moon className="h-4 w-4" />
-      )}
-    </button>
+    <ThemeStyleToggle className="w-8 h-8 flex items-center justify-center text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors" />
   );
 }
 
