@@ -660,6 +660,53 @@ export const getUnfurlByToken = query({
   },
 });
 
+/**
+ * Media fields for a link-unfurl preview image. Same privacy gate as
+ * getUnfurlByToken (anyone-access, no password, not expired) so a leaked URL
+ * can't expose a frame of a private video in a chat preview. Internal-only —
+ * the playback ids are surfaced just so a signing action can mint a thumbnail
+ * token; `previewPlaybackId` is a SIGNED id (useless without the token), and
+ * the caller never returns a clean frame for a paywalled share.
+ */
+export const getUnfurlMedia = internalQuery({
+  args: { token: v.string() },
+  returns: v.union(
+    v.object({
+      title: v.string(),
+      description: v.union(v.string(), v.null()),
+      // Watermarked preview asset (signed). Present once the per-team
+      // watermark overlay has finished ingesting.
+      previewPlaybackId: v.union(v.string(), v.null()),
+      previewReady: v.boolean(),
+      // Clean public playback id — only ever used for NON-paywalled shares,
+      // where there's no watermarked source and the real frame is fine to show.
+      publicPlaybackId: v.union(v.string(), v.null()),
+      isPaywalled: v.boolean(),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    const link = await findShareLinkByToken(ctx, args.token);
+    if (!link) return null;
+    if (link.expiresAt && link.expiresAt < Date.now()) return null;
+    if ((link.generalAccess ?? "anyone") !== "anyone") return null;
+    if (hasPasswordProtection(link)) return null;
+    // Single-video shares only — bundle covers are a separate follow-up; a
+    // bundle link still gets its title via getUnfurlByToken.
+    if (!link.videoId) return null;
+    const video = await ctx.db.get(link.videoId);
+    if (!video || video.deletedAt) return null;
+    return {
+      title: video.title,
+      description: video.description ?? null,
+      previewPlaybackId: video.muxPreviewPlaybackId ?? null,
+      previewReady: video.muxPreviewAssetStatus === "ready",
+      publicPlaybackId: video.muxPlaybackId ?? null,
+      isPaywalled: Boolean(link.paywall),
+    };
+  },
+});
+
 export const issueAccessGrant = mutation({
   args: {
     token: v.string(),
