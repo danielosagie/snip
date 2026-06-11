@@ -5,6 +5,13 @@ lawn; the upstream repo at `pingdotgg/lawn` is still the origin remote.
 
 ## Design Language
 
+> **Exception — marketing landing page.** `app/routes/-home.tsx` intentionally
+> uses a different, shade.inc-inspired art direction (white background, Inter
+> Tight sentence-case display type with a gray second line, mono `▶ EYEBROW`
+> labels, pill buttons, rounded bento cards, dark rounded CTA panel). Do not
+> "fix" it back to the brutalist language below — that language applies to the
+> app UI and the other marketing pages.
+
 ### Philosophy
 Brutalist, typographic, minimal. The design should feel bold and direct—like a
 poster, not a dashboard. Prioritize clarity over decoration. Let typography and
