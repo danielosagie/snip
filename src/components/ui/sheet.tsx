@@ -6,9 +6,10 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Right-anchored sheet (slide-over panel) built on Radix Dialog. Same a11y as
- * the modal Dialog but pinned to the screen edge — used for the download
- * manager and other side panels.
+ * Edge-anchored sheet (slide-over panel) built on Radix Dialog. Same a11y as
+ * the modal Dialog but pinned to a screen edge — used for the download
+ * manager, the sections outline, and other side panels. Defaults to the
+ * right edge; pass `side="left"` for a left-anchored panel.
  */
 
 const Sheet = DialogPrimitive.Root;
@@ -31,16 +32,25 @@ const SheetOverlay = React.forwardRef<
 ));
 SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+const SHEET_SIDE = {
+  right:
+    "inset-y-0 right-0 border-l-2 shadow-[-12px_0_0_0_rgba(0,0,0,0.08)] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
+  left: "inset-y-0 left-0 border-r-2 shadow-[12px_0_0_0_rgba(0,0,0,0.08)] data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left",
+} as const;
+
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    side?: keyof typeof SHEET_SIDE;
+  }
+>(({ className, children, side = "right", ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[-12px_0_0_0_rgba(0,0,0,0.08)] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
+        "fixed z-50 flex h-full w-full max-w-md flex-col border-[#1a1a1a] bg-[#f0f0e8] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
+        SHEET_SIDE[side],
         className,
       )}
       {...props}

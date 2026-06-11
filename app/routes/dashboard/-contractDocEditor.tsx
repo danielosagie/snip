@@ -13,6 +13,12 @@ import { DocumentOutline, useHeadings } from "@/components/contracts/DocumentOut
 import { ContractSectionOutline } from "@/components/contracts/ContractSectionOutline";
 import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
 import { ContractWizardFullScreen } from "@/components/contracts/ContractWizardFullScreen";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { contractPath, documentPath, projectPath } from "@/lib/routes";
 import {
@@ -116,7 +122,9 @@ export function ContractDocEditorPage({
   const [fieldsSheetOpen, setFieldsSheetOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  // The sections outline is a Sheet (slide-over), not a persistent rail —
+  // same affordance for documents and contracts. Starts closed.
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
   // Left-rail sections for contracts. Primary source: the wizard-generated
@@ -186,6 +194,8 @@ export function ContractDocEditorPage({
       .setTextSelection(pos + 1)
       .scrollIntoView()
       .run();
+    // Picking a section dismisses the overlay so you land on the scroll spot.
+    setOutlineOpen(false);
   };
 
   if (data === undefined) {
@@ -265,6 +275,19 @@ export function ContractDocEditorPage({
           </div>
         </div>
 
+        {/* Sections — one affordance for both modes: a nav button that opens
+            the outline as a slide-over Sheet (no persistent rail). */}
+        <button
+          type="button"
+          onClick={() => setOutlineOpen(true)}
+          title="Sections"
+          aria-label="Sections"
+          className="inline-flex items-center gap-1.5 px-3 h-9 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider bg-[#f0f0e8] text-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] active:translate-y-[2px] active:translate-x-[2px] transition-all flex-shrink-0"
+        >
+          <PanelLeft className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Sections</span>
+        </button>
+
         {/* Contract ⇄ Document toggle — same editor, signing surface only shows
             for contracts. Draft-only (signing state can't change after send). */}
         <div className="flex items-center border-2 border-[#1a1a1a] flex-shrink-0">
@@ -298,59 +321,15 @@ export function ContractDocEditorPage({
       </DashboardHeader>
 
       <div className="flex-1 overflow-y-auto">
+        {/* No persistent outline column anymore — the editor body owns the
+            width; sections live in the Sheet opened from the nav. Contracts
+            still keep their right-hand signing column. */}
         <div
           className={cn(
             "max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 gap-6",
-            isDocument
-              ? outlineOpen
-                ? "lg:grid-cols-[220px_1fr]"
-                : "lg:grid-cols-[auto_1fr]"
-              : "lg:grid-cols-[auto_1fr_320px]",
+            !isDocument && "lg:grid-cols-[1fr_320px]",
           )}
         >
-          {isDocument ? (
-            // Documents keep the lightweight heading outline.
-            <DocumentOutline
-              editor={editor}
-              open={outlineOpen}
-              onOpenChange={setOutlineOpen}
-            />
-          ) : outlineOpen ? (
-            // Contracts get the wizard-section rail. The aside supplies its
-            // own right border, so the wrapper only draws the other three
-            // sides + the brutalist shadow to match the cards around it.
-            <div className="hidden lg:flex self-start max-h-[calc(100vh-10rem)] border-y-2 border-l-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a]">
-              <ContractSectionOutline
-                sections={outlineSections}
-                activeSectionId={activeSectionId}
-                onSelect={scrollToSection}
-                onCollapse={() => setOutlineOpen(false)}
-                renderSectionBody={() => (
-                  <div className="text-[11px] font-mono text-[#888]">
-                    Edit this section directly in the document.
-                  </div>
-                )}
-                onRunWizard={
-                  data.contract.status === "draft"
-                    ? () => setWizardOpen(true)
-                    : undefined
-                }
-                runWizardLabel={
-                  clauseSections ? "Re-run wizard" : "Generate sections"
-                }
-              />
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setOutlineOpen(true)}
-              title="Show sections"
-              aria-label="Show sections"
-              className="hidden lg:inline-flex h-8 w-8 items-center justify-center self-start border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
-            >
-              <PanelLeft className="h-4 w-4" />
-            </button>
-          )}
           <ContractBody
             contract={data.contract}
             editor={editor}
@@ -382,6 +361,43 @@ export function ContractDocEditorPage({
           )}
         </div>
       </div>
+
+      {/* Sections outline — slide-over Sheet, identical affordance for both
+          documents (live H1–H3 headings) and contracts (wizard clauses, with
+          a heading fallback + Generate-sections action). */}
+      <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
+        <SheetContent side="left" className="max-w-sm p-0">
+          <SheetHeader className="border-b-2 border-[#1a1a1a] px-3 py-2">
+            <SheetTitle className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+              Sections
+            </SheetTitle>
+          </SheetHeader>
+          {isDocument ? (
+            <DocumentOutline editor={editor} onOpenChange={setOutlineOpen} inSheet />
+          ) : (
+            <ContractSectionOutline
+              inSheet
+              sections={outlineSections}
+              activeSectionId={activeSectionId}
+              onSelect={scrollToSection}
+              onCollapse={() => setOutlineOpen(false)}
+              renderSectionBody={() => (
+                <div className="text-[11px] font-mono text-[#888]">
+                  Edit this section directly in the document.
+                </div>
+              )}
+              onRunWizard={
+                data.contract.status === "draft"
+                  ? () => setWizardOpen(true)
+                  : undefined
+              }
+              runWizardLabel={
+                clauseSections ? "Re-run wizard" : "Generate sections"
+              }
+            />
+          )}
+        </SheetContent>
+      </Sheet>
 
       {!isDocument && (
         <SignatureFieldsSheet
