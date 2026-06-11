@@ -6,6 +6,7 @@ import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { Input } from "@/components/ui/input";
+import { DelayedAppear } from "@/components/ui/delayed-appear";
 import { SnipMark } from "@/components/SnipMark";
 import { cn } from "@/lib/utils";
 import { Check, X } from "lucide-react";
@@ -130,7 +131,9 @@ function SignPage() {
   if (data === undefined) {
     return (
       <CenteredShell>
-        <p className="text-[#888]">Loading…</p>
+        <DelayedAppear>
+          <p className="text-[#888]">Opening contract…</p>
+        </DelayedAppear>
       </CenteredShell>
     );
   }
