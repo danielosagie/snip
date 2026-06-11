@@ -1017,7 +1017,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
               title="Download video"
             >
               <Download className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden sm:inline">{isDownloading ? "Preparing..." : "Download"}</span>
+              <span className="hidden sm:inline">{isDownloading ? "Preparing…" : "Download"}</span>
             </button>
           )}
 
@@ -1225,7 +1225,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10 disabled:opacity-60"
               >
                 <Download className="h-4 w-4" />
-                {isDownloading ? "Preparing download..." : "Download video"}
+                {isDownloading ? "Preparing download…" : "Download video"}
               </button>
             )}
             <button

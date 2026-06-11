@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { DelayedAppear } from "@/components/ui/delayed-appear";
 import { triggerDownload } from "@/lib/download";
 import { cn, formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
 import { useVideoPresence } from "@/lib/useVideoPresence";
@@ -795,7 +796,9 @@ export default function SharePage() {
   if (isBootstrappingShare) {
     return (
       <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center">
-        <div className="text-[#888]">Opening shared video...</div>
+        <DelayedAppear>
+          <div className="text-[#888]">Opening…</div>
+        </DelayedAppear>
       </div>
     );
   }
@@ -810,7 +813,8 @@ export default function SharePage() {
             </div>
             <CardTitle>Link expired or invalid</CardTitle>
             <CardDescription>
-              This share link is no longer valid. Please ask the video owner for a new link.
+              This link is no longer valid. Ask whoever sent it to share a fresh
+              one — it only takes them a second.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -857,7 +861,7 @@ export default function SharePage() {
             </div>
             <CardTitle>Password required</CardTitle>
             <CardDescription>
-              This video is password protected. Enter the password to view.
+              This share is password-protected. Enter the password to view it.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -879,7 +883,7 @@ export default function SharePage() {
                 <p className="text-sm text-[#dc2626]">Incorrect password</p>
               )}
               <Button type="submit" className="w-full" disabled={!passwordInput || isRequestingGrant}>
-                {isRequestingGrant ? "Verifying..." : "View video"}
+                {isRequestingGrant ? "Verifying…" : "View video"}
               </Button>
             </form>
           </CardContent>
@@ -934,7 +938,8 @@ export default function SharePage() {
             </div>
             <CardTitle>Video not available</CardTitle>
             <CardDescription>
-              This video is not available or is still processing.
+              This video isn't available right now. If the link is brand new it
+              may still be processing — try again in a minute.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -1313,7 +1318,7 @@ export default function SharePage() {
                         ? previewTakingLong
                           ? "Still preparing the watermarked preview — this one’s taking longer than usual."
                           : "Preparing watermarked preview… this usually takes 30–90 seconds."
-                        : playbackError ?? (isLoadingPlayback ? "Loading stream..." : "Preparing stream...")}
+                        : playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
                     </p>
                     {isPreviewPending && paywall && !isPaid ? (
                       <p className="text-xs text-white/60 max-w-sm">
@@ -1380,13 +1385,13 @@ export default function SharePage() {
               <Textarea
                 value={commentText}
                 onChange={(event) => setCommentText(event.target.value)}
-                placeholder="Leave a comment..."
+                placeholder="Leave a comment…"
                 className="min-h-[90px]"
               />
               {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
               <Button type="submit" disabled={!commentText.trim() || isSubmittingComment}>
                 <MessageSquare className="mr-1.5 h-4 w-4" />
-                {isSubmittingComment ? "Posting..." : "Post comment"}
+                {isSubmittingComment ? "Posting…" : "Post comment"}
               </Button>
             </form>
           ) : (
@@ -1396,9 +1401,15 @@ export default function SharePage() {
           )}
 
           {comments === undefined ? (
-            <p className="text-sm text-[#888]">Loading comments...</p>
+            <DelayedAppear>
+              <p className="text-sm text-[#888]">Loading comments…</p>
+            </DelayedAppear>
           ) : comments.length === 0 ? (
-            <p className="text-sm text-[#888]">No comments yet.</p>
+            <p className="text-sm text-[#888]">
+              {canComment && isUserLoaded && user
+                ? "No comments yet — yours will pin to the exact frame you're watching."
+                : "No comments yet."}
+            </p>
           ) : (
             <div className="space-y-3">
               {comments.map((comment) => {

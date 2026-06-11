@@ -7,6 +7,7 @@ import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player/V
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { DelayedAppear } from "@/components/ui/delayed-appear";
 import { triggerDownload } from "@/lib/download";
 import { formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
 import { AlertCircle, MessageSquare, Clock, Download, X } from "lucide-react";
@@ -185,7 +186,9 @@ export default function WatchPage() {
   if (videoData === undefined) {
     return (
       <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center">
-        <div className="text-[#888]">Loading...</div>
+        <DelayedAppear>
+          <div className="text-[#888]">Opening…</div>
+        </DelayedAppear>
       </div>
     );
   }
@@ -256,7 +259,7 @@ export default function WatchPage() {
             aria-label={isDownloading ? "Preparing download" : "Download video"}
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">{isDownloading ? "Preparing..." : "Download"}</span>
+            <span className="hidden sm:inline">{isDownloading ? "Preparing…" : "Download"}</span>
           </Button>
           <Button
             variant="outline"
@@ -303,7 +306,7 @@ export default function WatchPage() {
               <div className="flex flex-col items-center gap-3 text-white">
                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
                  <p className="text-sm font-medium text-white/85">
-                   {playbackError ?? (isLoadingPlayback ? "Loading stream..." : "Preparing stream...")}
+                   {playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
                  </p>
               </div>
             </div>
@@ -325,9 +328,15 @@ export default function WatchPage() {
           
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {comments === undefined ? (
-              <p className="text-sm text-[#888]">Loading comments...</p>
+              <DelayedAppear>
+                <p className="text-sm text-[#888]">Loading comments…</p>
+              </DelayedAppear>
             ) : comments.length === 0 ? (
-              <p className="text-sm text-[#888]">No comments yet.</p>
+              <p className="text-sm text-[#888]">
+                {isUserLoaded && user
+                  ? "No comments yet — yours will pin to the exact frame you're watching."
+                  : "No comments yet."}
+              </p>
             ) : (
               <div className="space-y-3">
                 {comments.map((comment) => (
@@ -380,13 +389,13 @@ export default function WatchPage() {
                 <Textarea
                   value={commentText}
                   onChange={(event) => setCommentText(event.target.value)}
-                  placeholder="Leave a comment..."
+                  placeholder="Leave a comment…"
                   className="min-h-[90px] text-sm"
                 />
                 {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
                 <Button type="submit" size="sm" disabled={!commentText.trim() || isSubmittingComment} className="w-full">
                   <MessageSquare className="mr-1.5 h-4 w-4" />
-                  {isSubmittingComment ? "Posting..." : "Post comment"}
+                  {isSubmittingComment ? "Posting…" : "Post comment"}
                 </Button>
               </form>
             ) : (
@@ -428,9 +437,15 @@ export default function WatchPage() {
           
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {comments === undefined ? (
-              <p className="text-sm text-[#888]">Loading comments...</p>
+              <DelayedAppear>
+                <p className="text-sm text-[#888]">Loading comments…</p>
+              </DelayedAppear>
             ) : comments.length === 0 ? (
-              <p className="text-sm text-[#888]">No comments yet.</p>
+              <p className="text-sm text-[#888]">
+                {isUserLoaded && user
+                  ? "No comments yet — yours will pin to the exact frame you're watching."
+                  : "No comments yet."}
+              </p>
             ) : (
               <div className="space-y-3">
                 {comments.map((comment) => (
@@ -489,13 +504,13 @@ export default function WatchPage() {
                 <Textarea
                   value={commentText}
                   onChange={(event) => setCommentText(event.target.value)}
-                  placeholder="Leave a comment..."
+                  placeholder="Leave a comment…"
                   className="min-h-[90px] text-sm"
                 />
                 {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
                 <Button type="submit" size="sm" disabled={!commentText.trim() || isSubmittingComment} className="w-full">
                   <MessageSquare className="mr-1.5 h-4 w-4" />
-                  {isSubmittingComment ? "Posting..." : "Post comment"}
+                  {isSubmittingComment ? "Posting…" : "Post comment"}
                 </Button>
               </form>
             ) : (
