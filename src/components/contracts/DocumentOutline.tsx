@@ -13,9 +13,14 @@ import { PanelLeftClose, PanelLeft } from "lucide-react";
  * it. Collapsible; when collapsed, a small toggle re-opens it.
  */
 
-type Heading = { level: number; text: string; pos: number };
+export type Heading = { level: number; text: string; pos: number };
 
-function useHeadings(editor: Editor | null): Heading[] {
+/**
+ * Live H1–H3 headings from the Tiptap doc. Exported so the contract
+ * editor can fall back to heading-derived sections when a contract has
+ * no wizard clauses yet (the left rail should never just be missing).
+ */
+export function useHeadings(editor: Editor | null): Heading[] {
   const [headings, setHeadings] = useState<Heading[]>([]);
   useEffect(() => {
     if (!editor) return;

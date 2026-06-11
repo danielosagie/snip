@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
 import { ContractToolbar } from "@/components/contracts/ContractToolbar";
-import { DocumentOutline } from "@/components/contracts/DocumentOutline";
+import { DocumentOutline, useHeadings } from "@/components/contracts/DocumentOutline";
+import { ContractSectionOutline } from "@/components/contracts/ContractSectionOutline";
 import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
 import { ContractWizardFullScreen } from "@/components/contracts/ContractWizardFullScreen";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -22,6 +23,7 @@ import {
   ChevronDown,
   FileSignature as FileSignatureIcon,
   GripVertical,
+  PanelLeft,
   Pencil,
   Plus,
   Send,
@@ -109,6 +111,76 @@ function ContractEditorPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(true);
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+
+  // Left-rail sections for contracts. Primary source: the wizard-generated
+  // clause list on the contract row (reactive — applyWizard patches `clauses`
+  // and this query updates). Fallback when the wizard hasn't run: derive
+  // sections from the live H1–H3 headings (same approach as DocumentOutline)
+  // so the rail is never just missing.
+  const clauses = data?.contract.clauses;
+  const clauseSections = useMemo(() => {
+    if (!clauses || clauses.length === 0) return null;
+    return [...clauses]
+      .sort((a, b) => a.order - b.order)
+      .map((c) => ({
+        id: c.id,
+        title: c.title,
+        sectionKey: c.sectionKey,
+        required: c.required,
+      }));
+  }, [clauses]);
+  const headings = useHeadings(editor);
+  const headingSections = useMemo(
+    () =>
+      headings.map((h) => ({
+        // Encode the doc position in the id so a click can scroll without
+        // a text search. Clause ids never collide with these (uuid-ish).
+        id: String(h.pos),
+        title: h.text,
+        sectionKey: "",
+        required: false,
+      })),
+    [headings],
+  );
+  const outlineSections = clauseSections ?? headingSections;
+
+  // Scroll the editor to the heading that matches the clicked section.
+  // Clauses don't carry document positions — but renderClausesAsHtml emits
+  // exactly one `<h2>{title}</h2>` per clause, so matching the clause title
+  // against the live heading nodes finds the anchor. Heading-derived
+  // sections already carry their position in the id.
+  const scrollToSection = (sectionId: string) => {
+    setActiveSectionId(sectionId);
+    if (!editor || editor.isDestroyed) return;
+    let pos: number | null = null;
+    if (clauseSections) {
+      const target = clauseSections.find((s) => s.id === sectionId);
+      if (!target) return;
+      const wanted = target.title.trim().toLowerCase();
+      editor.state.doc.descendants((node, p) => {
+        if (pos !== null) return false;
+        if (
+          node.type.name === "heading" &&
+          node.textContent.trim().toLowerCase() === wanted
+        ) {
+          pos = p;
+          return false;
+        }
+        return true;
+      });
+    } else {
+      const parsed = Number(sectionId);
+      pos = Number.isFinite(parsed) ? parsed : null;
+    }
+    if (pos === null) return;
+    editor
+      .chain()
+      .focus()
+      .setTextSelection(pos + 1)
+      .scrollIntoView()
+      .run();
+  };
 
   if (data === undefined) {
     return (
@@ -146,14 +218,18 @@ function ContractEditorPage() {
             <h1 className="text-base font-black tracking-tighter uppercase text-[#1a1a1a] truncate">
               {data.contract.title}
             </h1>
-            <span
-              className={cn(
-                "shrink-0 inline-flex items-center px-2 py-0.5 border-2 text-[10px] font-bold uppercase tracking-wider",
-                STATUS_STYLES[data.contract.status] ?? STATUS_STYLES.draft,
-              )}
-            >
-              {data.contract.status}
-            </span>
+            {/* Signing-lifecycle badge is contract chrome — a plain document
+                has no signing status, so don't show one. */}
+            {!isDocument && (
+              <span
+                className={cn(
+                  "shrink-0 inline-flex items-center px-2 py-0.5 border-2 text-[10px] font-bold uppercase tracking-wider",
+                  STATUS_STYLES[data.contract.status] ?? STATUS_STYLES.draft,
+                )}
+              >
+                {data.contract.status}
+              </span>
+            )}
           </div>
         </div>
 
@@ -197,16 +273,52 @@ function ContractEditorPage() {
               ? outlineOpen
                 ? "lg:grid-cols-[220px_1fr]"
                 : "lg:grid-cols-[auto_1fr]"
-              : outlineOpen
-                ? "lg:grid-cols-[220px_1fr_320px]"
-                : "lg:grid-cols-[auto_1fr_320px]",
+              : "lg:grid-cols-[auto_1fr_320px]",
           )}
         >
-          <DocumentOutline
-            editor={editor}
-            open={outlineOpen}
-            onOpenChange={setOutlineOpen}
-          />
+          {isDocument ? (
+            // Documents keep the lightweight heading outline.
+            <DocumentOutline
+              editor={editor}
+              open={outlineOpen}
+              onOpenChange={setOutlineOpen}
+            />
+          ) : outlineOpen ? (
+            // Contracts get the wizard-section rail. The aside supplies its
+            // own right border, so the wrapper only draws the other three
+            // sides + the brutalist shadow to match the cards around it.
+            <div className="hidden lg:flex self-start max-h-[calc(100vh-10rem)] border-y-2 border-l-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a]">
+              <ContractSectionOutline
+                sections={outlineSections}
+                activeSectionId={activeSectionId}
+                onSelect={scrollToSection}
+                onCollapse={() => setOutlineOpen(false)}
+                renderSectionBody={() => (
+                  <div className="text-[11px] font-mono text-[#888]">
+                    Edit this section directly in the document.
+                  </div>
+                )}
+                onRunWizard={
+                  data.contract.status === "draft"
+                    ? () => setWizardOpen(true)
+                    : undefined
+                }
+                runWizardLabel={
+                  clauseSections ? "Re-run wizard" : "Generate sections"
+                }
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setOutlineOpen(true)}
+              title="Show sections"
+              aria-label="Show sections"
+              className="hidden lg:inline-flex h-8 w-8 items-center justify-center self-start border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+            >
+              <PanelLeft className="h-4 w-4" />
+            </button>
+          )}
           <ContractBody
             contract={data.contract}
             editor={editor}
