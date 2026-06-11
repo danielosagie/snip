@@ -1165,6 +1165,40 @@ export const listCaptionBackfillCandidates = internalQuery({
   },
 });
 
+/**
+ * Failed videos whose original upload is still in object storage — the
+ * "Mux choked but Finder plays it fine" case. Used by the one-time
+ * reconcileFailedVideosToOriginal backfill to flip them back to playable.
+ */
+export const listFailedVideosWithOriginal = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(
+    v.object({
+      videoId: v.id("videos"),
+      s3Key: v.string(),
+      title: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("videos")
+      .take(Math.min(args.limit ?? 2000, 8000));
+    return rows
+      .filter(
+        (vd) =>
+          !vd.deletedAt &&
+          vd.status === "failed" &&
+          typeof vd.s3Key === "string" &&
+          (vd.s3Key as string).length > 0,
+      )
+      .map((vd) => ({
+        videoId: vd._id,
+        s3Key: vd.s3Key as string,
+        title: vd.title.slice(0, 40),
+      }));
+  },
+});
+
 export const purge = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
@@ -1636,6 +1670,56 @@ export const markAsFailed = internalMutation({
     } catch (e) {
       console.error("upload-failed notification failed", e);
     }
+  },
+});
+
+/**
+ * Mux ingest failed (most commonly the Mux free-tier "limited to 10 assets"
+ * cap, or any Mux outage) but the ORIGINAL upload is intact in object storage.
+ * Don't fail the video — keep it `ready` and let every player fall back to
+ * original-file playback (the same instant-play path used while Mux encodes).
+ * snip's own free plan has no asset cap, so a Mux quota error must never make
+ * a perfectly good upload look broken.
+ *
+ * Self-guarding: if there's no original object reference to serve, there's
+ * nothing to play, so this degrades to the real failed state instead. Callers
+ * that already deleted the object (genuine bad-file rejections) must keep using
+ * markAsFailed.
+ */
+export const markAsReadyOriginalOnly = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    muxError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const before = await ctx.db.get(args.videoId);
+    if (!before) return;
+
+    if (!before.s3Key) {
+      await ctx.db.patch(args.videoId, {
+        muxAssetStatus: "errored",
+        uploadError: args.muxError,
+        status: "failed",
+      });
+      return;
+    }
+
+    // Serve from the original. muxAssetStatus "errored" is an internal marker
+    // (no UI reads it) so a later retry/backfill can find these; status stays
+    // "ready" so the grid + players treat it as a normal, original-quality
+    // video. uploadError is cleared — this isn't a user-facing failure.
+    await ctx.db.patch(args.videoId, {
+      status: "ready",
+      muxAssetStatus: "errored",
+      muxAssetId: undefined,
+      muxPlaybackId: undefined,
+      muxSignedPlaybackId: undefined,
+      muxPreviewAssetId: undefined,
+      muxPreviewPlaybackId: undefined,
+      muxPreviewAssetStatus: undefined,
+      encodingDeferred: undefined,
+      uploadError: undefined,
+    });
   },
 });
 

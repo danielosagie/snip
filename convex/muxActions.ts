@@ -451,9 +451,13 @@ export const processWebhook = internalAction({
             });
             break;
           }
-          await ctx.runMutation(internal.videos.markAsFailed, {
+          // Mux couldn't transcode, but the original upload is still in object
+          // storage and usually plays natively. Degrade to original-file
+          // playback instead of a hard "failed" (markAsReadyOriginalOnly falls
+          // back to failed itself if there's no original to serve).
+          await ctx.runMutation(internal.videos.markAsReadyOriginalOnly, {
             videoId: resolved.videoId,
-            uploadError: errorMessage,
+            muxError: errorMessage,
           });
           break;
         }
@@ -487,15 +491,17 @@ export const processWebhook = internalAction({
 
           const errorMessage =
             getErrorMessage(data) ?? "Mux upload failed or was cancelled.";
-          console.error("Marking video failed from Mux upload failure", {
+          console.error("Mux upload failure — degrading to original playback", {
             eventType,
             videoId: resolved.videoId,
             uploadId,
             errorMessage,
           });
-          await ctx.runMutation(internal.videos.markAsFailed, {
+          // The R2 original exists (Mux pulls from it); keep the video playable
+          // from the original rather than failing it.
+          await ctx.runMutation(internal.videos.markAsReadyOriginalOnly, {
             videoId: resolved.videoId,
-            uploadError: errorMessage,
+            muxError: errorMessage,
           });
           break;
         }
