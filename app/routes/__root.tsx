@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { ClerkProvider } from "@clerk/tanstack-react-start";
 import type { ReactNode } from "react";
+import { Analytics } from "@vercel/analytics/react";
 
 import { ConvexClientProvider } from "@/lib/convex";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -117,6 +118,7 @@ function RootDocument({ children }: { children: ReactNode }) {
             <TooltipProvider>{children}</TooltipProvider>
           </ThemeProvider>
         </ConvexClientProvider>
+        <Analytics />
         <Scripts />
       </body>
     </html>
