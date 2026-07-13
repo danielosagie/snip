@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAction } from "convex/react";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import {
   Folder,
   Video as VideoIcon,
@@ -9,6 +12,9 @@ import {
   LayoutGrid,
   List as ListIcon,
   ChevronRight,
+  Search,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { cn, formatBytes, formatDuration } from "@/lib/utils";
 
@@ -48,6 +54,8 @@ interface Props {
   items: ShareItemNode[];
   activeItemId: string | null;
   onSelectItem: (id: string) => void;
+  grantToken: string | null;
+  viewAs: "client" | "owner";
 }
 
 type ItemKind = "video" | "image" | "other";
@@ -77,6 +85,62 @@ function KindIcon({ kind, className }: { kind: ItemKind; className?: string }) {
   return <VideoIcon className={className} />;
 }
 
+function ShareThumbnail({
+  item,
+  grantToken,
+  viewAs,
+  className,
+}: {
+  item: ShareItemNode;
+  grantToken: string | null;
+  viewAs: "client" | "owner";
+  className: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const getImagePreview = useAction(api.videoActions.getSharedImagePreview);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(
+    item.thumbnailUrl?.startsWith("http") ? item.thumbnailUrl : null,
+  );
+  const kind = itemKind(item);
+
+  useEffect(() => {
+    if (resolvedUrl || kind !== "image" || !grantToken) return;
+    const node = containerRef.current;
+    if (!node) return;
+    let cancelled = false;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      void getImagePreview({
+        grantToken,
+        itemVideoId: item._id as Id<"videos">,
+        viewAs,
+      }).then((result) => {
+        if (!cancelled && result.url) setResolvedUrl(result.url);
+      }).catch(() => {
+        // Keep the stable kind placeholder when a preview is unavailable.
+      });
+    }, { rootMargin: "240px" });
+    observer.observe(node);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [getImagePreview, grantToken, item._id, kind, resolvedUrl, viewAs]);
+
+  return (
+    <div ref={containerRef} className={className}>
+      {resolvedUrl ? (
+        <img src={resolvedUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-[#777]">
+          <KindIcon kind={kind} className="h-5 w-5" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SELECT_CLASS =
   "h-8 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-xs font-bold text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#C2410C]";
 
@@ -86,12 +150,16 @@ export function ShareFolderBrowser({
   items,
   activeItemId,
   onSelectItem,
+  grantToken,
+  viewAs,
 }: Props) {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [sort, setSort] = useState<SortMode>("name");
   const [view, setView] = useState<ViewMode>("grid");
+  const [query, setQuery] = useState("");
+  const [isOpen, setIsOpen] = useState(true);
 
   const folderById = useMemo(() => {
     const m = new Map<string, ShareFolderNode>();
@@ -149,7 +217,12 @@ export function ShareFolderBrowser({
   const childFolders = childrenByParent.get(currentFolderId) ?? [];
 
   const visibleItems = useMemo(() => {
-    let list = items.filter((i) => i.folderId === currentFolderId);
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    let list = items.filter((i) =>
+      normalizedQuery
+        ? i.title.toLocaleLowerCase().includes(normalizedQuery)
+        : i.folderId === currentFolderId,
+    );
     if (statusFilter !== "all") {
       list = list.filter((i) => i.workflowStatus === statusFilter);
     }
@@ -172,7 +245,7 @@ export function ShareFolderBrowser({
         break;
     }
     return sorted;
-  }, [items, currentFolderId, statusFilter, typeFilter, sort]);
+  }, [items, currentFolderId, statusFilter, typeFilter, sort, query]);
 
   const totalSize = useMemo(
     () => items.reduce((sum, i) => sum + (i.fileSize ?? 0), 0),
@@ -191,6 +264,22 @@ export function ShareFolderBrowser({
 
   return (
     <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0]" aria-label="Shared files">
+      <div className="flex items-center gap-3 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-black text-[#1a1a1a]">Shared files</div>
+          <div className="font-mono text-[11px] text-[#888]">{items.length} items</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsOpen((open) => !open)}
+          aria-expanded={isOpen}
+          className="flex h-8 items-center gap-1.5 border-2 border-[#1a1a1a] px-2 text-xs font-bold hover:bg-[#e0e0d6]"
+        >
+          {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          {isOpen ? "Collapse" : "Browse"}
+        </button>
+      </div>
+      {isOpen ? <>
       {/* Breadcrumbs */}
       <div className="flex items-center gap-1 flex-wrap border-b-2 border-[#1a1a1a] px-3 py-2 text-sm">
         {breadcrumbs.map((crumb, idx) => {
@@ -224,6 +313,18 @@ export function ShareFolderBrowser({
           {items.length} {items.length === 1 ? "item" : "items"}
           {totalSize > 0 ? ` · ${formatBytes(totalSize)}` : ""}
         </span>
+
+        <label className="relative min-w-[12rem] flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#888]" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search this share…"
+            aria-label="Search shared files"
+            className="h-8 w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] pl-7 pr-2 text-xs text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
+          />
+        </label>
 
         <select
           aria-label="Filter by status"
@@ -293,7 +394,7 @@ export function ShareFolderBrowser({
 
       <div className="p-3 space-y-3">
         {/* Subfolders */}
-        {childFolders.length > 0 ? (
+        {childFolders.length > 0 && !query.trim() ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
             {childFolders.map((folder) => (
               <button
@@ -327,7 +428,6 @@ export function ShareFolderBrowser({
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
             {visibleItems.map((item) => {
               const isActive = item._id === activeItemId;
-              const kind = itemKind(item);
               const status = STATUS_META[item.workflowStatus];
               return (
                 <button
@@ -342,17 +442,7 @@ export function ShareFolderBrowser({
                   )}
                 >
                   <div className="relative aspect-video bg-[#1a1a1a] overflow-hidden">
-                    {item.thumbnailUrl ? (
-                      <img
-                        src={item.thumbnailUrl}
-                        alt={item.title}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[#666]">
-                        <KindIcon kind={kind} className="h-6 w-6" />
-                      </div>
-                    )}
+                    <ShareThumbnail item={item} grantToken={grantToken} viewAs={viewAs} className="h-full w-full" />
                     {item.duration ? (
                       <span className="absolute bottom-1 right-1 bg-black/75 px-1 text-[10px] font-mono text-white">
                         {formatDuration(item.duration)}
@@ -380,7 +470,6 @@ export function ShareFolderBrowser({
           <div className="divide-y-2 divide-[#1a1a1a] border-2 border-[#1a1a1a]">
             {visibleItems.map((item) => {
               const isActive = item._id === activeItemId;
-              const kind = itemKind(item);
               const status = STATUS_META[item.workflowStatus];
               return (
                 <button
@@ -392,7 +481,7 @@ export function ShareFolderBrowser({
                     isActive ? "bg-[#FFEDD5]" : "bg-[#f0f0e8] hover:bg-[#e0e0d6]",
                   )}
                 >
-                  <KindIcon kind={kind} className="h-4 w-4 flex-shrink-0 text-[#888]" />
+                  <ShareThumbnail item={item} grantToken={grantToken} viewAs={viewAs} className="h-10 w-16 flex-shrink-0 overflow-hidden bg-[#1a1a1a]" />
                   <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#1a1a1a]">
                     {item.title}
                   </span>
@@ -416,6 +505,7 @@ export function ShareFolderBrowser({
           </div>
         )}
       </div>
+      </> : null}
     </section>
   );
 }

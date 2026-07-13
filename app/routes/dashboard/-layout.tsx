@@ -69,6 +69,10 @@ export default function DashboardLayout() {
       : undefined;
   const routeVideoId =
     typeof params.videoId === "string" ? params.videoId : undefined;
+  const routeFolderId = useMemo(() => {
+    const value = new URLSearchParams(searchStr).get("folder");
+    return value ? (value as Id<"folders">) : undefined;
+  }, [searchStr]);
   const publicPlaybackId = useQuery(
     api.videos.getPublicIdByVideoId,
     routeVideoId ? { videoId: routeVideoId } : "skip",
@@ -119,10 +123,10 @@ export default function DashboardLayout() {
         routeProjectId &&
         (canUploadToCurrentProject || uploadTargets === undefined)
       ) {
-        // Falling back to the route's project — there's no caller-
-        // supplied folder context here (global drag-drop), so the
-        // file lands at project root.
-        void uploadFilesToProject(routeProjectId, files);
+        // Global Finder/browser drops still belong to the folder currently
+        // shown in the dashboard. The mutation validates that the folder is
+        // part of this project before accepting it.
+        void uploadFilesToProject(routeProjectId, files, routeFolderId);
         return;
       }
 
@@ -137,6 +141,7 @@ export default function DashboardLayout() {
     [
       canUploadToCurrentProject,
       routeProjectId,
+      routeFolderId,
       uploadFilesToProject,
       uploadTargets,
     ],

@@ -119,8 +119,8 @@ function BillingRoute() {
     <div className="h-full flex flex-col">
       <DashboardHeader paths={[{ label: "Billing & usage" }]} />
 
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="max-w-3xl">
+      <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-8">
+        <div className="mx-auto w-full max-w-4xl">
           <h1 className="text-3xl font-black tracking-tight text-[#1a1a1a]">
             Billing &amp; usage
           </h1>
@@ -807,9 +807,7 @@ function PayoutsSection() {
         <h2 className="font-black text-sm uppercase tracking-tight">Payouts</h2>
       </div>
       <p className="text-sm text-[#666] mb-4 max-w-prose">
-        Connect Stripe to collect payments from clients on paywalled delivery
-        links. Snip never touches the money — it goes straight to your Stripe
-        account. Each team has its own connected account.
+        Connect a Stripe account to charge for shared files and receive payouts.
       </p>
 
       {featureStatus && !featureStatus.stripeConnect ? (
@@ -889,6 +887,10 @@ function TeamPayoutCard({
         setError(result.reason ?? "Stripe is not configured on this deployment.");
         return;
       }
+      if (result.status === "configuration_required") {
+        setError(result.reason ?? "Stripe Connect needs platform setup.");
+        return;
+      }
       setBusy("link");
       const link = await createOnboardingLink({ teamId, returnUrl, refreshUrl });
       if (link.status === "ok" && link.url) {
@@ -936,14 +938,13 @@ function TeamPayoutCard({
   };
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <CardTitle>{teamName}</CardTitle>
             <CardDescription>
-              Stripe Express account — Stripe handles compliance, payouts, and
-              onboarding.
+              Stripe Express handles onboarding and payouts.
             </CardDescription>
           </div>
           {status === "active" ? (
@@ -966,16 +967,18 @@ function TeamPayoutCard({
           <div className="text-sm text-[#888]">Loading status…</div>
         ) : (
           <>
-            <dl className="grid grid-cols-2 gap-2 text-sm">
-              <dt className="text-[#888]">Account ID</dt>
-              <dd className="font-mono truncate">
-                {onboardingStatus.stripeAccountId ?? "—"}
-              </dd>
-              <dt className="text-[#888]">Charges enabled</dt>
-              <dd>{onboardingStatus.chargesEnabled ? "Yes" : "No"}</dd>
-              <dt className="text-[#888]">Payouts enabled</dt>
-              <dd>{onboardingStatus.payoutsEnabled ? "Yes" : "No"}</dd>
-            </dl>
+            {onboardingStatus.stripeAccountId ? (
+              <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 text-sm">
+                <dt className="text-[#888]">Account ID</dt>
+                <dd className="max-w-[12rem] truncate font-mono">
+                  {onboardingStatus.stripeAccountId}
+                </dd>
+                <dt className="text-[#888]">Charges enabled</dt>
+                <dd>{onboardingStatus.chargesEnabled ? "Yes" : "No"}</dd>
+                <dt className="text-[#888]">Payouts enabled</dt>
+                <dd>{onboardingStatus.payoutsEnabled ? "Yes" : "No"}</dd>
+              </dl>
+            ) : null}
 
             {!onboardingStatus.stripeAccountId ? (
               <Button
@@ -1024,8 +1027,19 @@ function TeamPayoutCard({
             ) : null}
 
             {error ? (
-              <div className="text-sm text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
-                {error}
+              <div role="alert" className="border-2 border-[#dc2626] bg-[#dc2626]/10 p-3 text-sm text-[#7f1d1d]">
+                <p>{error}</p>
+                {error.includes("platform") ? (
+                  <a
+                    href="https://dashboard.stripe.com/settings/connect/platform-profile"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 font-bold underline"
+                  >
+                    Finish Stripe platform setup
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                ) : null}
               </div>
             ) : null}
           </>

@@ -160,10 +160,22 @@ export function useVideoUploadManager() {
 
       const filesToUpload = [...standalone, ...stitchedClips];
 
-      for (const file of filesToUpload) {
-        const uploadId = createUploadId();
+      // Register the whole batch before starting network work. Previously an
+      // item only appeared when the sequential loop reached it, which made a
+      // 200-file drop look like a series of unrelated single uploads.
+      const queued = filesToUpload.map((file) => ({
+        id: createUploadId(),
+        projectId,
+        file,
+        progress: 0,
+        status: "pending" as const,
+        abortController: new AbortController(),
+      }));
+      setUploads((prev) => [...prev, ...queued]);
+
+      for (const queuedItem of queued) {
+        const { file, id: uploadId, abortController } = queuedItem;
         const title = file.name.replace(/\.[^/.]+$/, "");
-        const abortController = new AbortController();
         // Pick the best content-type guess the browser gave us. If it
         // couldn't determine one (common for .prproj, .blend, .fcpxml,
         // etc.) fall back to a neutral binary type so the backend
@@ -173,18 +185,6 @@ export function useVideoUploadManager() {
           file.type && file.type.trim().length > 0
             ? file.type
             : "application/octet-stream";
-
-        setUploads((prev) => [
-          ...prev,
-          {
-            id: uploadId,
-            projectId,
-            file,
-            progress: 0,
-            status: "pending",
-            abortController,
-          },
-        ]);
 
         let createdVideoId: Id<"videos"> | undefined;
 

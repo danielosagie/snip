@@ -12,6 +12,7 @@ import {
   Columns3,
   Check,
   ListFilter,
+  ArrowLeft,
 } from "lucide-react";
 import {
   FILE_KIND_BUCKETS,
@@ -138,7 +139,8 @@ export function ProjectToolbar({
             onDropVideo={(id) => onDropVideoOnBreadcrumb?.(id, null)}
             onDropFolder={(id) => onDropFolderOnBreadcrumb?.(id, null)}
           >
-            <span className="font-mono">..</span>
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            <span className="sr-only">Back to project root</span>
           </BreadcrumbSegment>
           {crumbs.map((c, i) => {
             const last = i === crumbs.length - 1;
@@ -169,7 +171,7 @@ export function ProjectToolbar({
         )}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <label className="flex-1 max-w-md flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1">
+          <label className="flex-1 max-w-md flex items-center gap-2 px-1 py-1">
             <Search className="h-3.5 w-3.5 text-[#888]" />
             <input
               value={search}

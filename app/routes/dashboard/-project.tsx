@@ -1093,8 +1093,11 @@ export default function ProjectPage({
           {currentFolderId && canUpload ? (
             <button
               type="button"
-              onClick={() => setFolderShareOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] transition-colors flex-shrink-0"
+              onClick={() => {
+                navigator.vibrate?.(8);
+                setFolderShareOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] active:translate-y-px active:bg-[#d8d8cf] transition-[background-color,transform] flex-shrink-0"
               title="Share this folder & everything in it"
             >
               <Share2 className="h-3.5 w-3.5" />
