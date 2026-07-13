@@ -1085,6 +1085,8 @@ export default function SharePage() {
             items={bundleItems}
             activeItemId={activeItemId}
             onSelectItem={handleSelectBundleItem}
+            grantToken={grantToken}
+            viewAs={viewAs}
           />
         ) : null}
 

@@ -12,6 +12,7 @@ import {
   Trash2,
   Users,
   Briefcase,
+  Unplug,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { ThemeStyleToggle } from "@/components/theme/ThemeToggle";
@@ -652,28 +653,27 @@ function DesktopAppOrDrive() {
   return (
     <div className="flex flex-col gap-1.5">
       {status === "mounted" ? (
-        <>
+        <div className="flex w-full border-2 border-[#1a1a1a] bg-[#f0f0e8]">
           <button
             type="button"
             onClick={() => void window.api?.shell.openFolder(mount?.mountPath ?? "")}
-            className={DESKTOP_BTN}
+            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors"
             title="Open the cloud drive in Finder"
           >
             <HardDrive className="h-3.5 w-3.5" />
-            Drive connected · Open
+            <span className="truncate">Drive connected</span>
           </button>
-          {/* The "remove" half of the toggle — the connected state used to
-              be a dead end with no way to turn the drive off. */}
           <button
             type="button"
             onClick={() => void disconnect()}
             disabled={busy}
-            className="text-[10px] text-[#888] hover:text-[#b91c1c] underline self-center disabled:opacity-50"
+            className="flex h-auto w-9 flex-shrink-0 items-center justify-center border-l-2 border-[#1a1a1a] text-[#888] hover:bg-[#b91c1c] hover:text-[#f0f0e8] active:translate-y-px disabled:opacity-50"
             title="Unmount the cloud drive"
+            aria-label="Disconnect drive"
           >
-            {busy ? "Disconnecting…" : "Disconnect drive"}
+            <Unplug className="h-3.5 w-3.5" />
           </button>
-        </>
+        </div>
       ) : status === "unmounting" ? (
         <button type="button" disabled className={DESKTOP_BTN}>
           <HardDrive className="h-3.5 w-3.5" />

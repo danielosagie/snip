@@ -49,7 +49,12 @@ function deriveConnectStatus(
 export const createConnectAccount = action({
   args: { teamId: v.id("teams") },
   returns: v.object({
-    status: v.union(v.literal("ok"), v.literal("disabled"), v.literal("exists")),
+    status: v.union(
+      v.literal("ok"),
+      v.literal("disabled"),
+      v.literal("exists"),
+      v.literal("configuration_required"),
+    ),
     accountId: v.union(v.string(), v.null()),
     reason: v.optional(v.string()),
   }),
@@ -57,7 +62,7 @@ export const createConnectAccount = action({
     ctx,
     args,
   ): Promise<{
-    status: "ok" | "disabled" | "exists";
+    status: "ok" | "disabled" | "exists" | "configuration_required";
     accountId: string | null;
     reason?: string;
   }> => {
@@ -89,16 +94,33 @@ export const createConnectAccount = action({
         ? identity.email
         : undefined;
 
-    const account = await stripe.accounts.create({
-      type: "express",
-      email: ownerEmail,
-      business_profile: { name: team.name },
-      capabilities: {
-        card_payments: { requested: true },
-        transfers: { requested: true },
-      },
-      metadata: { teamId: team._id, teamSlug: team.slug },
-    });
+    let account: Stripe.Account;
+    try {
+      account = await stripe.accounts.create({
+        type: "express",
+        email: ownerEmail,
+        business_profile: { name: team.name },
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        metadata: { teamId: team._id, teamSlug: team.slug },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (
+        message.includes("responsibilities of managing losses") ||
+        message.includes("connect/platform-profile")
+      ) {
+        return {
+          status: "configuration_required",
+          accountId: null,
+          reason:
+            "The Snip platform must finish its Stripe Connect profile before Express accounts can be created.",
+        };
+      }
+      throw error;
+    }
 
     await ctx.runMutation(internal.stripeConnect.recordAccountCreated, {
       teamId: args.teamId,
