@@ -198,6 +198,10 @@ export default defineSchema({
     name: v.string(),
     createdByClerkId: v.string(),
     createdByName: v.string(),
+    // Mutable filesystem metadata for the desktop mount. Existing folders
+    // fall back to _creationTime until they are changed through either UI.
+    driveModifiedAt: v.optional(v.number()),
+    driveVersion: v.optional(v.number()),
   })
     .index("by_project", ["projectId"])
     .index("by_project_and_parent", ["projectId", "parentFolderId"]),
@@ -330,6 +334,11 @@ export default defineSchema({
     fileSize: v.optional(v.number()),
     contentType: v.optional(v.string()),
     uploadError: v.optional(v.string()),
+    // Monotonic identity for the mounted-drive representation. `_creationTime`
+    // is immutable and made same-path/same-size overwrites invisible to rclone's
+    // cache; these fields change whenever the logical file bytes/path changes.
+    driveModifiedAt: v.optional(v.number()),
+    driveVersion: v.optional(v.number()),
     // Free-form tags (bulk-editable). Optional; absent = no tags.
     tags: v.optional(v.array(v.string())),
     status: v.union(
@@ -869,9 +878,9 @@ export default defineSchema({
       v.literal("release"),
       v.literal("custom"),
     ),
-    // Unified editor mode. "contract" (default when absent) shows the signing
-    // surface (recipients, fields, send, audit, certificate). "document" is a
-    // plain doc — same editor, signing hidden. Toggleable in the editor header.
+    // Unified editor label. Documents and contracts share the same capabilities
+    // (templates, versions, recipients, signature fields and audit history);
+    // this value only controls taxonomy and the route shown to the user.
     docType: v.optional(v.union(v.literal("contract"), v.literal("document"))),
     // Editable body (Tiptap HTML) + the wizard-generated clauses (same
     // shape as projects.contract.clauses).

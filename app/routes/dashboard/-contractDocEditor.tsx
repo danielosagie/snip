@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
 import { ContractToolbar } from "@/components/contracts/ContractToolbar";
-import { DocumentOutline, useHeadings } from "@/components/contracts/DocumentOutline";
+import { useHeadings } from "@/components/contracts/DocumentOutline";
 import { ContractSectionOutline } from "@/components/contracts/ContractSectionOutline";
 import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
 import { ContractWizardFullScreen } from "@/components/contracts/ContractWizardFullScreen";
@@ -19,13 +19,16 @@ import {
   ArrowLeft,
   AtSign,
   Calendar,
+  Camera,
   CheckSquare,
   ChevronDown,
+  Copy,
   FileSignature as FileSignatureIcon,
   GripVertical,
   PanelLeft,
   Pencil,
   Plus,
+  RotateCcw,
   Send,
   Trash2,
   Type,
@@ -117,6 +120,7 @@ export function ContractDocEditorPage({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(true);
+  const [mobileOutlineOpen, setMobileOutlineOpen] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
   // Left-rail sections for contracts. Primary source: the wizard-generated
@@ -241,8 +245,8 @@ export function ContractDocEditorPage({
           </Link>
           <div className="flex items-baseline gap-2 min-w-0">
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-              {/* `kind` is contract taxonomy (SOW, NDA…) — meaningless
-                  for a plain document, so just say what it is. */}
+              {/* `kind` is optional taxonomy (SOW, NDA…); documents keep
+                  their simpler label while retaining every capability. */}
               {isDocument
                 ? "Document"
                 : KIND_LABELS[data.contract.kind] ?? data.contract.kind}
@@ -250,23 +254,19 @@ export function ContractDocEditorPage({
             <h1 className="text-base font-black tracking-tighter uppercase text-[#1a1a1a] truncate">
               {data.contract.title}
             </h1>
-            {/* Signing-lifecycle badge is contract chrome — a plain document
-                has no signing status, so don't show one. */}
-            {!isDocument && (
-              <span
-                className={cn(
-                  "shrink-0 inline-flex items-center px-2 py-0.5 border-2 text-[10px] font-bold uppercase tracking-wider",
-                  STATUS_STYLES[data.contract.status] ?? STATUS_STYLES.draft,
-                )}
-              >
-                {data.contract.status}
-              </span>
-            )}
+            <span
+              className={cn(
+                "hidden sm:inline-flex shrink-0 items-center px-2 py-0.5 border-2 text-[10px] font-bold uppercase tracking-wider",
+                STATUS_STYLES[data.contract.status] ?? STATUS_STYLES.draft,
+              )}
+            >
+              {data.contract.status}
+            </span>
           </div>
         </div>
 
-        {/* Contract ⇄ Document toggle — same editor, signing surface only shows
-            for contracts. Draft-only (signing state can't change after send). */}
+        {/* Contract ⇄ Document is taxonomy only. Both types use the same
+            editor, templates, recipients, signing, audit, and history. */}
         <div className="flex items-center border-2 border-[#1a1a1a] flex-shrink-0">
           {(["contract", "document"] as const).map((t) => {
             const current = (data.contract.docType ?? "contract") === t;
@@ -298,25 +298,50 @@ export function ContractDocEditorPage({
       </DashboardHeader>
 
       <div className="flex-1 overflow-y-auto">
-        <div
-          className={cn(
-            "max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 gap-6",
-            isDocument
-              ? outlineOpen
-                ? "lg:grid-cols-[220px_1fr]"
-                : "lg:grid-cols-[auto_1fr]"
-              : "lg:grid-cols-[auto_1fr_320px]",
-          )}
-        >
-          {isDocument ? (
-            // Documents keep the lightweight heading outline.
-            <DocumentOutline
-              editor={editor}
-              open={outlineOpen}
-              onOpenChange={setOutlineOpen}
-            />
-          ) : outlineOpen ? (
-            // Contracts get the wizard-section rail. The aside supplies its
+        <div className="max-w-7xl mx-auto px-3 py-3 sm:px-6 sm:py-8 grid grid-cols-1 gap-6 lg:grid-cols-[auto_minmax(0,1fr)_320px]">
+          <div className="lg:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileOutlineOpen((open) => !open)}
+              className="flex min-h-11 w-full items-center justify-between border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 text-xs font-bold uppercase tracking-wider"
+              aria-expanded={mobileOutlineOpen}
+            >
+              <span className="inline-flex items-center gap-2">
+                <PanelLeft className="h-4 w-4" />
+                Sections & templates
+              </span>
+              <ChevronDown
+                className={cn("h-4 w-4 transition-transform", mobileOutlineOpen && "rotate-180")}
+              />
+            </button>
+            {mobileOutlineOpen ? (
+              <ContractSectionOutline
+                mobile
+                sections={outlineSections}
+                activeSectionId={activeSectionId}
+                onSelect={(sectionId) => {
+                  scrollToSection(sectionId);
+                  setMobileOutlineOpen(false);
+                }}
+                onCollapse={() => setMobileOutlineOpen(false)}
+                renderSectionBody={() => (
+                  <div className="text-[11px] font-mono text-[#888]">
+                    Edit this section directly in the document.
+                  </div>
+                )}
+                onRunWizard={
+                  data.contract.status === "draft"
+                    ? () => setWizardOpen(true)
+                    : undefined
+                }
+                runWizardLabel={
+                  clauseSections ? "Re-run wizard" : "Generate sections"
+                }
+              />
+            ) : null}
+          </div>
+          {outlineOpen ? (
+            // Every item gets the same section/template rail. The aside supplies its
             // own right border, so the wrapper only draws the other three
             // sides + the brutalist shadow to match the cards around it.
             <div className="hidden lg:flex self-start max-h-[calc(100vh-10rem)] border-y-2 border-l-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a]">
@@ -356,44 +381,38 @@ export function ContractDocEditorPage({
             editor={editor}
             onEditorReady={setEditor}
             onRunWizard={
-              data.contract.status === "draft" && !isDocument
+              data.contract.status === "draft"
                 ? () => setWizardOpen(true)
                 : undefined
             }
-            onOpenFields={
-              isDocument ? undefined : () => setFieldsSheetOpen(true)
-            }
+            onOpenFields={() => setFieldsSheetOpen(true)}
           />
-          {/* Signing surface — contracts only. Documents are just docs. */}
-          {!isDocument && (
-            <div className="space-y-6">
-              <RecipientsPanel
-                contract={data.contract}
-                recipients={data.recipients}
-              />
-              <FieldsPanel
-                contract={data.contract}
-                recipients={data.recipients}
-                fields={data.fields}
-                onOpenPlacement={() => setFieldsSheetOpen(true)}
-              />
-              <AuditLogPanel audit={data.audit} />
-            </div>
-          )}
+          <div className="space-y-6">
+            <RecipientsPanel
+              contract={data.contract}
+              recipients={data.recipients}
+            />
+            <FieldsPanel
+              contract={data.contract}
+              recipients={data.recipients}
+              fields={data.fields}
+              onOpenPlacement={() => setFieldsSheetOpen(true)}
+            />
+            <VersionHistoryPanel contract={data.contract} />
+            <AuditLogPanel audit={data.audit} />
+          </div>
         </div>
       </div>
 
-      {!isDocument && (
-        <SignatureFieldsSheet
-          open={fieldsSheetOpen}
-          onOpenChange={setFieldsSheetOpen}
-          contractId={data.contract._id}
-          contentHtml={data.contract.contentHtml ?? ""}
-          recipients={data.recipients}
-          fields={data.fields}
-          isDraft={data.contract.status === "draft"}
-        />
-      )}
+      <SignatureFieldsSheet
+        open={fieldsSheetOpen}
+        onOpenChange={setFieldsSheetOpen}
+        contractId={data.contract._id}
+        contentHtml={data.contract.contentHtml ?? ""}
+        recipients={data.recipients}
+        fields={data.fields}
+        isDraft={data.contract.status === "draft"}
+      />
 
       {wizardOpen && (
         <ContractWizardFullScreen
@@ -423,7 +442,7 @@ function ContractBody({
   contract: ContractDoc;
   editor: Editor | null;
   onEditorReady: (editor: Editor) => void;
-  /** Omitted for plain documents — hides the toolbar's "Fields" button. */
+  /** Opens the shared signature-field placement surface. */
   onOpenFields?: () => void;
   /** Omitted unless the contract is a draft — opens the setup wizard. */
   onRunWizard?: () => void;
@@ -463,7 +482,7 @@ function ContractBody({
   }, [body, contract._id, contract.contentHtml, dirty, isEditable, update]);
 
   return (
-    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] p-6">
+    <div className="-mx-3 border-y-2 border-[#1a1a1a] bg-[#f0f0e8] p-3 sm:mx-0 sm:border-2 sm:p-6 sm:shadow-[4px_4px_0px_0px_#1a1a1a]">
       <div className="flex items-center justify-between gap-3 mb-4">
         <h2 className="text-xl font-black uppercase tracking-tighter text-[#1a1a1a]">
           Body
@@ -473,7 +492,7 @@ function ContractBody({
             <button
               type="button"
               onClick={onRunWizard}
-              className="inline-flex items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2.5 h-7 text-[10px] font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] transition-colors"
+              className="inline-flex min-h-11 items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2.5 text-[10px] font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] transition-colors sm:min-h-7"
               title="Generate the contract from a few questions"
             >
               Run setup wizard
@@ -627,18 +646,30 @@ function RecipientsPanel({
             <div className="font-bold text-[#1a1a1a] mb-2 uppercase tracking-wider text-[10px]">
               Signing links
             </div>
-            <ul className="space-y-1.5 font-mono">
+            <ul className="space-y-2 font-mono">
               {recipients.map((r) => (
-                <li key={r._id} className="break-all">
-                  <span className="text-[#888]">{r.email}: </span>
+                <li key={r._id} className="flex items-center gap-2">
                   <a
-                    className="text-[#C2410C] underline hover:no-underline"
+                    className="min-w-0 flex-1 truncate text-[#C2410C] underline hover:no-underline"
                     href={`/sign/${r.token}`}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    /sign/{r.token.slice(0, 12)}…
+                    {r.email}
                   </a>
+                  <button
+                    type="button"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center border-2 border-[#1a1a1a] hover:bg-[#FFEDD5] sm:h-8 sm:w-8"
+                    title={`Copy signing link for ${r.email}`}
+                    aria-label={`Copy signing link for ${r.email}`}
+                    onClick={() =>
+                      void navigator.clipboard.writeText(
+                        `${window.location.origin}/sign/${r.token}`,
+                      )
+                    }
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -963,6 +994,121 @@ function FieldChip({
         </span>
       </button>
     </li>
+  );
+}
+
+function VersionHistoryPanel({ contract }: { contract: ContractDoc }) {
+  const versions = useQuery(api.contractsTable.listVersions, {
+    contractId: contract._id,
+  });
+  const snapshot = useMutation(api.contractsTable.snapshotVersion);
+  const restore = useMutation(api.contractsTable.restoreVersion);
+  const remove = useMutation(api.contractsTable.removeVersion);
+  const [label, setLabel] = useState("");
+  const [working, setWorking] = useState(false);
+
+  const handleSnapshot = async () => {
+    setWorking(true);
+    try {
+      await snapshot({
+        contractId: contract._id,
+        label: label.trim() || undefined,
+      });
+      setLabel("");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not save version.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-5 shadow-[4px_4px_0px_0px_#1a1a1a]">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a]">
+          Version history
+        </h3>
+        <span className="font-mono text-[10px] text-[#888]">
+          {versions?.length ?? 0} saved
+        </span>
+      </div>
+
+      {contract.status === "draft" ? (
+        <div className="mb-4 flex gap-2">
+          <Input
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+            placeholder="Version label (optional)"
+            className="min-w-0 flex-1 rounded-none border-2 border-[#1a1a1a] bg-[#f0f0e8] text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => void handleSnapshot()}
+            disabled={working}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] hover:bg-[#C2410C] disabled:opacity-50"
+            title="Save current version"
+            aria-label="Save current version"
+          >
+            <Camera className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
+
+      <ol className="space-y-2">
+        {versions === undefined ? (
+          <li className="text-xs text-[#888]">Loading history…</li>
+        ) : versions.length === 0 ? (
+          <li className="text-xs italic text-[#888]">
+            Save a version before a major edit. Sending for signature also saves one automatically.
+          </li>
+        ) : (
+          versions.map((version) => (
+            <li
+              key={version._id}
+              className="flex items-center gap-2 border-l-2 border-[#C2410C] py-1 pl-3"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-bold text-[#1a1a1a]">
+                  {version.label || `Version ${version.versionNumber}`}
+                </div>
+                <div className="text-[10px] text-[#888]">
+                  {version.createdByName} · {formatRelativeTime(version._creationTime)}
+                  {version.isCurrent ? " · current" : ""}
+                </div>
+              </div>
+              {contract.status === "draft" && !version.isCurrent ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`Restore ${version.label || `version ${version.versionNumber}`}?`)) {
+                      void restore({ contractId: contract._id, versionId: version._id });
+                    }
+                  }}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center border-2 border-[#1a1a1a] hover:bg-[#FFEDD5]"
+                  title="Restore this version"
+                  aria-label="Restore this version"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm("Delete this saved version?")) {
+                    void remove({ contractId: contract._id, versionId: version._id });
+                  }
+                }}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center border-2 border-[#1a1a1a] hover:bg-[#dc2626] hover:text-white"
+                title="Delete this version"
+                aria-label="Delete this version"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))
+        )}
+      </ol>
+    </div>
   );
 }
 

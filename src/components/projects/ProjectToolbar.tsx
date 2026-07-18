@@ -123,7 +123,7 @@ export function ProjectToolbar({
   const crumbs = breadcrumbs ?? [];
 
   return (
-    <div className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] flex items-center gap-2 px-4 sm:px-6 py-2 min-w-0">
+    <div className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] flex flex-wrap items-center gap-2 px-2 py-2 min-w-0 sm:flex-nowrap sm:px-6">
       {/* Breadcrumbs — only when inside a folder. Project root is
           implicit (it's where you land); the back-up drop target is
           the leftmost crumb. When at root there's no breadcrumb row
@@ -166,12 +166,12 @@ export function ProjectToolbar({
           on the wrapper does the spacing. */}
       <div
         className={cn(
-          "flex-1 flex flex-row items-center justify-between gap-6 min-w-0",
-          currentFolderId ? "ml-2" : "",
+          "basis-full flex-1 flex flex-row items-center justify-between gap-2 min-w-0 sm:basis-auto sm:gap-6",
+          currentFolderId ? "sm:ml-2" : "",
         )}
       >
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <label className="flex-1 max-w-md flex items-center gap-2 px-1 py-1">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 sm:gap-2">
+          <label className="flex-1 max-w-md flex min-h-11 items-center gap-2 px-2 sm:min-h-0 sm:px-1 sm:py-1">
             <Search className="h-3.5 w-3.5 text-[#888]" />
             <input
               value={search}
@@ -195,7 +195,7 @@ export function ProjectToolbar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] transition-colors flex-shrink-0"
+                className="inline-flex h-11 w-11 items-center justify-center gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] transition-colors flex-shrink-0 sm:h-auto sm:w-auto sm:px-2 sm:py-1"
               >
                 <ArrowUpDown className="h-3.5 w-3.5" />
                 <span className="font-mono normal-case hidden md:inline">
@@ -230,7 +230,7 @@ export function ProjectToolbar({
                 <button
                   type="button"
                   className={cn(
-                    "inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-colors flex-shrink-0",
+                    "inline-flex h-11 w-11 items-center justify-center gap-1.5 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-colors flex-shrink-0 sm:h-auto sm:w-auto sm:px-2 sm:py-1",
                     activeKindCount > 0
                       ? "bg-[#1a1a1a] text-[#f0f0e8]"
                       : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
@@ -288,7 +288,7 @@ export function ProjectToolbar({
             onClick={() => onViewModeChange("grid")}
             aria-label="Grid view"
             className={cn(
-              "p-1 transition-colors",
+              "inline-flex h-10 w-10 items-center justify-center transition-colors sm:h-auto sm:w-auto sm:p-1",
               viewMode === "grid"
                 ? "bg-[#1a1a1a] text-[#f0f0e8]"
                 : "text-[#888] hover:text-[#1a1a1a]",
@@ -300,7 +300,7 @@ export function ProjectToolbar({
             onClick={() => onViewModeChange("list")}
             aria-label="List view"
             className={cn(
-              "p-1 transition-colors",
+              "inline-flex h-10 w-10 items-center justify-center transition-colors sm:h-auto sm:w-auto sm:p-1",
               viewMode === "list"
                 ? "bg-[#1a1a1a] text-[#f0f0e8]"
                 : "text-[#888] hover:text-[#1a1a1a]",
@@ -312,7 +312,7 @@ export function ProjectToolbar({
             onClick={() => onViewModeChange("kanban")}
             aria-label="Kanban view"
             className={cn(
-              "p-1 transition-colors",
+              "inline-flex h-10 w-10 items-center justify-center transition-colors sm:h-auto sm:w-auto sm:p-1",
               viewMode === "kanban"
                 ? "bg-[#1a1a1a] text-[#f0f0e8]"
                 : "text-[#888] hover:text-[#1a1a1a]",

@@ -1,21 +1,54 @@
 import { useAction, useMutation } from "convex/react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import type { UploadStatus } from "@/components/upload/UploadProgress";
 import { stitchImageSequence } from "@/lib/stitchImageSequence";
 
+const MULTIPART_THRESHOLD_BYTES = 32 * 1024 * 1024;
+const MAX_BATCH_CONCURRENCY = 3;
+const PROGRESS_RENDER_INTERVAL_MS = 100;
+
 export interface ManagedUploadItem {
   id: string;
   projectId: Id<"projects">;
+  folderId?: Id<"folders">;
   file: File;
   videoId?: Id<"videos">;
   progress: number;
+  bytesUploaded: number;
   status: UploadStatus;
   error?: string;
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
-  abortController?: AbortController;
+  resumable: boolean;
+}
+
+interface MultipartState {
+  uploadId: string;
+  partSize: number;
+  nextPart: number;
+  completedBytes: number;
+}
+
+interface UploadRuntime {
+  id: string;
+  projectId: Id<"projects">;
+  folderId?: Id<"folders">;
+  file: File;
+  videoId?: Id<"videos">;
+  controller: AbortController;
+  intent: "pause" | "cancel" | null;
+  multipart?: MultipartState;
+  running: boolean;
+  lastUiAt: number;
+  lastSampleAt: number;
+  lastSampleBytes: number;
+  speedSamples: number[];
+}
+
+function currentIntent(runtime: UploadRuntime) {
+  return runtime.intent;
 }
 
 function createUploadId() {
@@ -25,11 +58,7 @@ function createUploadId() {
   return Math.random().toString(36).slice(2);
 }
 
-// Matches sequence filenames like `shot.0001.png` or `shot_0001.exr`.
-// The integer must be 3-6 digits; anything shorter is too ambiguous and
-// would false-positive on dates / version numbers.
 const SEQUENCE_FILENAME_RE = /^(.+?)[._](\d{3,6})\.([a-z0-9]+)$/i;
-
 const SEQUENCE_FRAME_EXTS = new Set([
   "png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "tga", "webp", "bmp",
 ]);
@@ -42,46 +71,274 @@ interface FrameMatch {
 }
 
 function detectFrame(file: File): FrameMatch | null {
-  const m = SEQUENCE_FILENAME_RE.exec(file.name);
-  if (!m) return null;
-  const [, stem, idxStr, ext] = m;
+  const match = SEQUENCE_FILENAME_RE.exec(file.name);
+  if (!match) return null;
+  const [, stem, indexText, ext] = match;
   if (!SEQUENCE_FRAME_EXTS.has(ext.toLowerCase())) return null;
-  const index = Number(idxStr);
-  if (!Number.isFinite(index)) return null;
-  return { stem, index, ext: ext.toLowerCase(), file };
+  const index = Number(indexText);
+  return Number.isFinite(index)
+    ? { stem, index, ext: ext.toLowerCase(), file }
+    : null;
 }
 
-/**
- * Group an upload batch by (stem, ext) when ≥3 files share both. Returns
- * a map from groupKey → ordered frames. Files that don't match the
- * sequence pattern are excluded.
- */
 function groupSequenceFrames(files: File[]): Map<string, FrameMatch[]> {
   const groups = new Map<string, FrameMatch[]>();
   for (const file of files) {
-    const match = detectFrame(file);
-    if (!match) continue;
-    const key = `${match.stem}.${match.ext}`;
-    const arr = groups.get(key) ?? [];
-    arr.push(match);
-    groups.set(key, arr);
+    const frame = detectFrame(file);
+    if (!frame) continue;
+    const key = `${frame.stem}.${frame.ext}`;
+    const group = groups.get(key) ?? [];
+    group.push(frame);
+    groups.set(key, group);
   }
-  for (const [key, arr] of groups) {
-    if (arr.length < 3) {
-      groups.delete(key);
-      continue;
-    }
-    arr.sort((a, b) => a.index - b.index);
+  for (const [key, group] of groups) {
+    if (group.length < 3) groups.delete(key);
+    else group.sort((a, b) => a.index - b.index);
   }
   return groups;
+}
+
+function uploadBlob(
+  url: string,
+  blob: Blob,
+  contentType: string,
+  signal: AbortSignal,
+  onProgress: (loaded: number) => void,
+) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    if (signal.aborted) {
+      reject(new DOMException("Transfer interrupted", "AbortError"));
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(event.loaded);
+    });
+    xhr.addEventListener("load", () => {
+      signal.removeEventListener("abort", abort);
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+    });
+    xhr.addEventListener("error", () => {
+      signal.removeEventListener("abort", abort);
+      reject(new Error("Upload failed: network error"));
+    });
+    xhr.addEventListener("abort", () => {
+      signal.removeEventListener("abort", abort);
+      reject(new DOMException("Transfer interrupted", "AbortError"));
+    });
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.send(blob);
+  });
 }
 
 export function useVideoUploadManager() {
   const createVideo = useMutation(api.videos.create);
   const getUploadUrl = useAction(api.videoActions.getUploadUrl);
+  const startMultipartUpload = useAction(api.videoActions.startMultipartUpload);
+  const getMultipartPartUrl = useAction(api.videoActions.getMultipartPartUrl);
+  const completeMultipartUpload = useAction(api.videoActions.completeMultipartUpload);
+  const cancelUploadObject = useAction(api.videoActions.cancelUploadObject);
   const markUploadComplete = useAction(api.videoActions.markUploadComplete);
-  const markUploadFailed = useAction(api.videoActions.markUploadFailed);
   const [uploads, setUploads] = useState<ManagedUploadItem[]>([]);
+  const runtimesRef = useRef(new Map<string, UploadRuntime>());
+
+  const patchUpload = useCallback(
+    (id: string, patch: Partial<ManagedUploadItem>) => {
+      setUploads((current) =>
+        current.map((upload) =>
+          upload.id === id ? { ...upload, ...patch } : upload,
+        ),
+      );
+    },
+    [],
+  );
+
+  const removeUpload = useCallback((id: string) => {
+    runtimesRef.current.delete(id);
+    setUploads((current) => current.filter((upload) => upload.id !== id));
+  }, []);
+
+  const updateProgress = useCallback(
+    (runtime: UploadRuntime, absoluteBytes: number, force = false) => {
+      const now = performance.now();
+      const elapsed = (now - runtime.lastSampleAt) / 1000;
+      if (elapsed >= 0.12) {
+        const speed = Math.max(0, absoluteBytes - runtime.lastSampleBytes) / elapsed;
+        runtime.speedSamples.push(speed);
+        if (runtime.speedSamples.length > 6) runtime.speedSamples.shift();
+        runtime.lastSampleAt = now;
+        runtime.lastSampleBytes = absoluteBytes;
+      }
+      if (!force && now - runtime.lastUiAt < PROGRESS_RENDER_INTERVAL_MS) return;
+      runtime.lastUiAt = now;
+      const speed = runtime.speedSamples.length
+        ? runtime.speedSamples.reduce((sum, value) => sum + value, 0) /
+          runtime.speedSamples.length
+        : 0;
+      const remaining = Math.max(0, runtime.file.size - absoluteBytes);
+      patchUpload(runtime.id, {
+        bytesUploaded: absoluteBytes,
+        progress:
+          runtime.file.size === 0
+            ? 100
+            : Math.min(100, Math.round((absoluteBytes / runtime.file.size) * 100)),
+        bytesPerSecond: speed,
+        estimatedSecondsRemaining: speed > 0 ? Math.ceil(remaining / speed) : null,
+      });
+    },
+    [patchUpload],
+  );
+
+  const cleanupCancelledRuntime = useCallback(
+    async (runtime: UploadRuntime) => {
+      if (runtime.videoId) {
+        await cancelUploadObject({
+          videoId: runtime.videoId,
+          multipartUploadId: runtime.multipart?.uploadId,
+        }).catch((error) => console.error("upload cancellation cleanup failed", error));
+      }
+      removeUpload(runtime.id);
+    },
+    [cancelUploadObject, removeUpload],
+  );
+
+  const runUpload = useCallback(
+    async (runtime: UploadRuntime) => {
+      if (runtime.running) return;
+      if (runtime.intent === "cancel") {
+        await cleanupCancelledRuntime(runtime);
+        return;
+      }
+      runtime.running = true;
+      runtime.controller = new AbortController();
+      patchUpload(runtime.id, { status: "uploading", error: undefined });
+
+      const contentType = runtime.file.type.trim() || "application/octet-stream";
+      const title = runtime.file.name.replace(/\.[^/.]+$/, "");
+      try {
+        if (!runtime.videoId) {
+          runtime.videoId = await createVideo({
+            projectId: runtime.projectId,
+            title,
+            fileSize: runtime.file.size,
+            contentType,
+            folderId: runtime.folderId,
+          });
+          patchUpload(runtime.id, { videoId: runtime.videoId });
+        }
+        if (currentIntent(runtime) === "cancel") {
+          await cleanupCancelledRuntime(runtime);
+          return;
+        }
+
+        if (runtime.file.size >= MULTIPART_THRESHOLD_BYTES) {
+          if (!runtime.multipart) {
+            const started = await startMultipartUpload({
+              videoId: runtime.videoId,
+              filename: runtime.file.name,
+              fileSize: runtime.file.size,
+              contentType,
+            });
+            runtime.multipart = {
+              uploadId: started.uploadId,
+              partSize: started.partSize,
+              nextPart: 1,
+              completedBytes: 0,
+            };
+          }
+          const multipart = runtime.multipart;
+          const expectedParts = Math.ceil(runtime.file.size / multipart.partSize);
+          while (multipart.nextPart <= expectedParts) {
+            if (runtime.intent) throw new DOMException("Transfer interrupted", "AbortError");
+            const start = (multipart.nextPart - 1) * multipart.partSize;
+            const end = Math.min(runtime.file.size, start + multipart.partSize);
+            const { url } = await getMultipartPartUrl({
+              videoId: runtime.videoId,
+              uploadId: multipart.uploadId,
+              partNumber: multipart.nextPart,
+            });
+            await uploadBlob(
+              url,
+              runtime.file.slice(start, end),
+              contentType,
+              runtime.controller.signal,
+              (loaded) => updateProgress(runtime, start + loaded),
+            );
+            multipart.completedBytes = end;
+            multipart.nextPart += 1;
+            updateProgress(runtime, end, true);
+          }
+          await completeMultipartUpload({
+            videoId: runtime.videoId,
+            uploadId: multipart.uploadId,
+            expectedParts,
+          });
+        } else {
+          const { url } = await getUploadUrl({
+            videoId: runtime.videoId,
+            filename: runtime.file.name,
+            fileSize: runtime.file.size,
+            contentType,
+          });
+          await uploadBlob(
+            url,
+            runtime.file,
+            contentType,
+            runtime.controller.signal,
+            (loaded) => updateProgress(runtime, loaded),
+          );
+          updateProgress(runtime, runtime.file.size, true);
+        }
+
+        if (currentIntent(runtime) === "cancel") {
+          throw new DOMException("Transfer interrupted", "AbortError");
+        }
+
+        patchUpload(runtime.id, {
+          status: "processing",
+          progress: 100,
+          bytesUploaded: runtime.file.size,
+          estimatedSecondsRemaining: null,
+        });
+        await markUploadComplete({ videoId: runtime.videoId });
+        patchUpload(runtime.id, { status: "complete" });
+        window.setTimeout(() => removeUpload(runtime.id), 4000);
+      } catch (error) {
+        if (currentIntent(runtime) === "cancel") {
+          await cleanupCancelledRuntime(runtime);
+        } else if (currentIntent(runtime) === "pause") {
+          patchUpload(runtime.id, {
+            status: "paused",
+            estimatedSecondsRemaining: null,
+          });
+        } else {
+          patchUpload(runtime.id, {
+            status: "error",
+            error: error instanceof Error ? error.message : "Upload failed",
+            estimatedSecondsRemaining: null,
+          });
+        }
+      } finally {
+        runtime.running = false;
+      }
+    },
+    [
+      cleanupCancelledRuntime,
+      completeMultipartUpload,
+      createVideo,
+      getMultipartPartUrl,
+      getUploadUrl,
+      markUploadComplete,
+      patchUpload,
+      removeUpload,
+      startMultipartUpload,
+      updateProgress,
+    ],
+  );
 
   const uploadFilesToProject = useCallback(
     async (
@@ -89,254 +346,160 @@ export function useVideoUploadManager() {
       files: File[],
       folderId?: Id<"folders">,
     ) => {
-      // Detect image-sequence groups up-front and stitch each into a
-      // single MP4 in the browser (ffmpeg.wasm) BEFORE uploading. The
-      // frames are already here, so there's no server round-trip. The
-      // resulting MP4 then flows through the normal video upload path
-      // and Mux ingest — it plays like any other video. Frames that
-      // belong to a stitched sequence are NOT uploaded individually.
       const sequenceGroups = groupSequenceFrames(files);
       const framesInSequences = new Set<File>();
-      for (const [, frames] of sequenceGroups) {
-        for (const fr of frames) framesInSequences.add(fr.file);
+      for (const frames of sequenceGroups.values()) {
+        for (const frame of frames) framesInSequences.add(frame.file);
       }
-
-      const standalone = files.filter((f) => !framesInSequences.has(f));
+      const standalone = files.filter((file) => !framesInSequences.has(file));
       const stitchedClips: File[] = [];
-      for (const [, frames] of sequenceGroups) {
+
+      for (const frames of sequenceGroups.values()) {
         const stitchId = createUploadId();
         const { stem } = frames[0];
-        setUploads((prev) => [
-          ...prev,
+        setUploads((current) => [
+          ...current,
           {
             id: stitchId,
             projectId,
+            folderId,
             file: frames[0].file,
             progress: 0,
+            bytesUploaded: 0,
             status: "processing",
-            abortController: new AbortController(),
+            resumable: false,
           },
         ]);
         try {
-          const mp4 = await stitchImageSequence(
-            frames.map((f) => f.file),
-            stem,
-            {
-              fps: 24,
-              onProgress: ({ ratio }) =>
-                setUploads((prev) =>
-                  prev.map((u) =>
-                    u.id === stitchId
-                      ? { ...u, progress: Math.round(ratio * 100) }
-                      : u,
-                  ),
-                ),
-            },
-          );
-          stitchedClips.push(mp4);
-        } catch (err) {
-          console.error("stitchImageSequence failed", err);
-          setUploads((prev) =>
-            prev.map((u) =>
-              u.id === stitchId
-                ? {
-                    ...u,
-                    status: "error",
-                    error:
-                      err instanceof Error
-                        ? `Couldn't stitch sequence: ${err.message}`
-                        : "Couldn't stitch sequence.",
-                  }
-                : u,
+          stitchedClips.push(
+            await stitchImageSequence(
+              frames.map((frame) => frame.file),
+              stem,
+              {
+                fps: 24,
+                onProgress: ({ ratio }) =>
+                  patchUpload(stitchId, { progress: Math.round(ratio * 100) }),
+              },
             ),
           );
-          // Fall back: upload this group's frames as individual files so
-          // nothing is lost when stitching fails (e.g. CDN blocked).
-          for (const fr of frames) standalone.push(fr.file);
-        } finally {
-          setUploads((prev) => prev.filter((u) => u.id !== stitchId));
-        }
-      }
-
-      const filesToUpload = [...standalone, ...stitchedClips];
-
-      // Register the whole batch before starting network work. Previously an
-      // item only appeared when the sequential loop reached it, which made a
-      // 200-file drop look like a series of unrelated single uploads.
-      const queued = filesToUpload.map((file) => ({
-        id: createUploadId(),
-        projectId,
-        file,
-        progress: 0,
-        status: "pending" as const,
-        abortController: new AbortController(),
-      }));
-      setUploads((prev) => [...prev, ...queued]);
-
-      for (const queuedItem of queued) {
-        const { file, id: uploadId, abortController } = queuedItem;
-        const title = file.name.replace(/\.[^/.]+$/, "");
-        // Pick the best content-type guess the browser gave us. If it
-        // couldn't determine one (common for .prproj, .blend, .fcpxml,
-        // etc.) fall back to a neutral binary type so the backend
-        // routes the upload through the generic-file path instead of
-        // trying to feed it to Mux as "video/mp4".
-        const inferredContentType =
-          file.type && file.type.trim().length > 0
-            ? file.type
-            : "application/octet-stream";
-
-        let createdVideoId: Id<"videos"> | undefined;
-
-        try {
-          createdVideoId = await createVideo({
-            projectId,
-            title,
-            fileSize: file.size,
-            contentType: inferredContentType,
-            folderId,
-          });
-
-          setUploads((prev) =>
-            prev.map((upload) =>
-              upload.id === uploadId
-                ? { ...upload, videoId: createdVideoId, status: "uploading" }
-                : upload,
-            ),
-          );
-
-          const { url } = await getUploadUrl({
-            videoId: createdVideoId,
-            filename: file.name,
-            fileSize: file.size,
-            contentType: inferredContentType,
-          });
-
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            let lastTime = Date.now();
-            let lastLoaded = 0;
-            const recentSpeeds: number[] = [];
-
-            xhr.upload.addEventListener("progress", (event) => {
-              if (!event.lengthComputable) return;
-
-              const percentage = Math.round((event.loaded / event.total) * 100);
-              const now = Date.now();
-              const timeDelta = (now - lastTime) / 1000;
-              const bytesDelta = event.loaded - lastLoaded;
-
-              if (timeDelta > 0.1) {
-                const speed = bytesDelta / timeDelta;
-                recentSpeeds.push(speed);
-                if (recentSpeeds.length > 5) recentSpeeds.shift();
-                lastTime = now;
-                lastLoaded = event.loaded;
-              }
-
-              const avgSpeed =
-                recentSpeeds.length > 0
-                  ? recentSpeeds.reduce((sum, speed) => sum + speed, 0) /
-                    recentSpeeds.length
-                  : 0;
-              const remaining = event.total - event.loaded;
-              const eta = avgSpeed > 0 ? Math.ceil(remaining / avgSpeed) : null;
-
-              setUploads((prev) =>
-                prev.map((upload) =>
-                  upload.id === uploadId
-                    ? {
-                        ...upload,
-                        progress: percentage,
-                        bytesPerSecond: avgSpeed,
-                        estimatedSecondsRemaining: eta,
-                      }
-                    : upload,
-                ),
-              );
-            });
-
-            xhr.addEventListener("load", () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-                return;
-              }
-              reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
-            });
-
-            xhr.addEventListener("error", () => {
-              reject(new Error("Upload failed: Network error"));
-            });
-
-            xhr.addEventListener("abort", () => {
-              reject(new Error("Upload cancelled"));
-            });
-
-            abortController.signal.addEventListener("abort", () => {
-              xhr.abort();
-            });
-
-            xhr.open("PUT", url);
-            xhr.setRequestHeader("Content-Type", inferredContentType);
-            xhr.send(file);
-          });
-
-          await markUploadComplete({ videoId: createdVideoId });
-
-          setUploads((prev) =>
-            prev.map((upload) =>
-              upload.id === uploadId
-                ? { ...upload, status: "complete", progress: 100 }
-                : upload,
-            ),
-          );
-
-          setTimeout(() => {
-            setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
-          }, 3000);
         } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : "Upload failed";
-
-          setUploads((prev) =>
-            prev.map((upload) =>
-              upload.id === uploadId
-                ? { ...upload, status: "error", error: errorMessage }
-                : upload,
-            ),
-          );
-
-          if (createdVideoId) {
-            markUploadFailed({ videoId: createdVideoId }).catch(console.error);
-          }
+          console.error("stitchImageSequence failed", error);
+          for (const frame of frames) standalone.push(frame.file);
+        } finally {
+          setUploads((current) => current.filter((upload) => upload.id !== stitchId));
         }
       }
+
+      const queued = [...standalone, ...stitchedClips].map((file) => {
+        const id = createUploadId();
+        const runtime: UploadRuntime = {
+          id,
+          projectId,
+          folderId,
+          file,
+          controller: new AbortController(),
+          intent: null,
+          running: false,
+          lastUiAt: 0,
+          lastSampleAt: performance.now(),
+          lastSampleBytes: 0,
+          speedSamples: [],
+        };
+        runtimesRef.current.set(id, runtime);
+        return runtime;
+      });
+      setUploads((current) => [
+        ...current,
+        ...queued.map((runtime) => ({
+          id: runtime.id,
+          projectId,
+          folderId,
+          file: runtime.file,
+          progress: 0,
+          bytesUploaded: 0,
+          status: "pending" as const,
+          resumable: runtime.file.size >= MULTIPART_THRESHOLD_BYTES,
+        })),
+      ]);
+
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < queued.length) {
+          const runtime = queued[nextIndex++];
+          await runUpload(runtime);
+        }
+      };
+      await Promise.all(
+        Array.from(
+          { length: Math.min(MAX_BATCH_CONCURRENCY, queued.length) },
+          worker,
+        ),
+      );
     },
-    [
-      createVideo,
-      getUploadUrl,
-      markUploadComplete,
-      markUploadFailed,
-    ],
+    [patchUpload, runUpload],
   );
 
   const cancelUpload = useCallback(
     (uploadId: string) => {
-      const upload = uploads.find((item) => item.id === uploadId);
-      if (upload?.abortController) {
-        upload.abortController.abort();
+      const runtime = runtimesRef.current.get(uploadId);
+      if (!runtime) {
+        removeUpload(uploadId);
+        return;
       }
-      if (upload?.videoId) {
-        markUploadFailed({ videoId: upload.videoId }).catch(console.error);
-      }
-      setUploads((prev) => prev.filter((item) => item.id !== uploadId));
+      runtime.intent = "cancel";
+      runtime.controller.abort();
+      patchUpload(uploadId, { status: "cancelling", error: undefined });
+      if (!runtime.running) void cleanupCancelledRuntime(runtime);
     },
-    [uploads, markUploadFailed],
+    [cleanupCancelledRuntime, patchUpload, removeUpload],
+  );
+
+  const pauseUpload = useCallback(
+    (uploadId: string) => {
+      const runtime = runtimesRef.current.get(uploadId);
+      if (!runtime || !runtime.running || runtime.file.size < MULTIPART_THRESHOLD_BYTES) return;
+      runtime.intent = "pause";
+      runtime.controller.abort();
+    },
+    [],
+  );
+
+  const resumeUpload = useCallback(
+    (uploadId: string) => {
+      const runtime = runtimesRef.current.get(uploadId);
+      if (!runtime || runtime.running) return;
+      runtime.intent = null;
+      runtime.lastSampleAt = performance.now();
+      runtime.lastSampleBytes = runtime.multipart?.completedBytes ?? 0;
+      runtime.speedSamples = [];
+      void runUpload(runtime);
+    },
+    [runUpload],
+  );
+
+  const retryUpload = resumeUpload;
+
+  const dismissUpload = useCallback(
+    (uploadId: string) => {
+      const runtime = runtimesRef.current.get(uploadId);
+      if (runtime) {
+        runtime.intent = "cancel";
+        if (!runtime.running) void cleanupCancelledRuntime(runtime);
+        else runtime.controller.abort();
+      } else {
+        removeUpload(uploadId);
+      }
+    },
+    [cleanupCancelledRuntime, removeUpload],
   );
 
   return {
     uploads,
     uploadFilesToProject,
     cancelUpload,
+    pauseUpload,
+    resumeUpload,
+    retryUpload,
+    dismissUpload,
   };
 }

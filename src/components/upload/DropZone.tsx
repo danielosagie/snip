@@ -35,9 +35,7 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
       // file the user can drag in (videos, source files, contracts,
       // images, archives). Filtering here would silently swallow
       // perfectly-valid docs.
-      const files = Array.from(e.dataTransfer.files).filter(
-        (file) => file.size > 0,
-      );
+      const files = Array.from(e.dataTransfer.files);
 
       if (files.length > 0) {
         onFilesSelected(files);

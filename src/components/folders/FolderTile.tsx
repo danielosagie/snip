@@ -33,6 +33,7 @@ interface Props {
     droppedFolderId: Id<"folders">,
     targetFolderId: Id<"folders">,
   ) => void;
+  onDropFiles?: (files: File[], targetFolderId: Id<"folders">) => void;
 }
 
 export function FolderTile({
@@ -44,13 +45,14 @@ export function FolderTile({
   canEdit,
   onDropVideo,
   onDropFolder,
+  onDropFiles,
 }: Props) {
   const navigate = useNavigate();
   const renameFolder = useMutation(api.folders.rename);
   const removeFolder = useMutation(api.folders.remove);
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(name);
-  const [dropActive, setDropActive] = useState(false);
+  const [dropKind, setDropKind] = useState<"files" | "items" | null>(null);
 
   const open = () => {
     // TanStack's typed navigate doesn't know about this route's search
@@ -92,6 +94,7 @@ export function FolderTile({
 
   return (
     <article
+      data-snip-folder-drop-target="true"
       onClick={open}
       draggable={canEdit && !editing}
       onDragStart={(e) => {
@@ -100,23 +103,31 @@ export function FolderTile({
       }}
       onDragOver={(e) => {
         if (!canEdit) return;
-        // Only react to snip payloads — ignore arbitrary HTML5 drag
-        // events (e.g. images from the desktop).
         const types = e.dataTransfer.types;
-        if (
+        const hasFiles = types.includes("Files");
+        const hasSnipItems =
           types.includes("application/x-snip-video") ||
-          types.includes("application/x-snip-folder")
-        ) {
+          types.includes("application/x-snip-folder");
+        if (hasFiles || hasSnipItems) {
           e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          if (!dropActive) setDropActive(true);
+          e.dataTransfer.dropEffect = hasFiles ? "copy" : "move";
+          const nextKind = hasFiles ? "files" : "items";
+          if (dropKind !== nextKind) setDropKind(nextKind);
         }
       }}
-      onDragLeave={() => setDropActive(false)}
+      onDragLeave={(e) => {
+        if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+        setDropKind(null);
+      }}
       onDrop={(e) => {
         e.preventDefault();
+        setDropKind(null);
+        const files = Array.from(e.dataTransfer.files ?? []);
+        if (files.length > 0) {
+          onDropFiles?.(files, folderId);
+          return;
+        }
         e.stopPropagation();
-        setDropActive(false);
         const videoId = e.dataTransfer.getData("application/x-snip-video");
         if (videoId) {
           onDropVideo?.(videoId as Id<"videos">, folderId);
@@ -131,12 +142,15 @@ export function FolderTile({
       }}
       className={cn(
         "group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] cursor-pointer transition-colors w-full min-w-0",
-        dropActive
+        dropKind
           ? "bg-[#FF6600] text-[#f0f0e8]"
           : "bg-[#f0f0e8] hover:bg-[#e8e8e0]",
       )}
     >
-      <Folder className="h-5 w-5 flex-shrink-0 text-[#888]" strokeWidth={1.75} />
+      <Folder
+        className={cn("h-5 w-5 flex-shrink-0", dropKind ? "text-[#f0f0e8]" : "text-[#888]")}
+        strokeWidth={1.75}
+      />
       <div className="flex-1 min-w-0">
         {editing ? (
           <input
@@ -156,11 +170,13 @@ export function FolderTile({
           />
         ) : (
           <>
-            <div className="text-sm font-bold text-[#1a1a1a] truncate">
-              {name}
+            <div className={cn("text-sm font-bold truncate", dropKind ? "text-[#f0f0e8]" : "text-[#1a1a1a]")}>
+              {dropKind === "files" ? `Upload into ${name}` : name}
             </div>
-            <div className="text-[10px] font-mono text-[#888]">
-              {itemCount} {itemCount === 1 ? "item" : "items"}
+            <div className={cn("text-[10px] font-mono", dropKind ? "text-[#f0f0e8]/80" : "text-[#888]")}>
+              {dropKind === "files"
+                ? "Release to choose this folder"
+                : `${itemCount} ${itemCount === 1 ? "item" : "items"}`}
             </div>
           </>
         )}

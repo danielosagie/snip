@@ -61,6 +61,8 @@ interface Props {
   /** Label for the wizard button (e.g. "Run setup wizard" vs
    *  "Re-run wizard"). Defaults to "Run wizard". */
   runWizardLabel?: string;
+  /** Renders the same outline as an inline mobile panel instead of a desktop rail. */
+  mobile?: boolean;
 }
 
 export function ContractSectionOutline({
@@ -73,6 +75,7 @@ export function ContractSectionOutline({
   onDeleteSection,
   onRunWizard,
   runWizardLabel,
+  mobile = false,
 }: Props) {
   // Track which row is currently expanded. We expand at most one at
   // a time so the rail stays scannable; the parent's activeSectionId
@@ -82,7 +85,12 @@ export function ContractSectionOutline({
   );
 
   return (
-    <aside className="hidden lg:flex w-72 flex-shrink-0 flex-col border-r-2 border-[#1a1a1a] bg-[#f0f0e8] min-h-0">
+    <aside
+      className={cn(
+        "flex-shrink-0 flex-col border-2 border-[#1a1a1a] bg-[#f0f0e8] min-h-0",
+        mobile ? "flex w-full" : "hidden lg:flex w-72 border-y-0 border-l-0",
+      )}
+    >
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b-2 border-[#1a1a1a]">
         <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
           Sections
@@ -100,7 +108,7 @@ export function ContractSectionOutline({
       <nav className="flex-1 overflow-y-auto py-1">
         {sections.length === 0 ? (
           <div className="px-3 py-3 text-xs text-[#888]">
-            Headings you add to the contract will appear here.
+            Headings you add to this item will appear here.
           </div>
         ) : (
           sections.map((s) => {

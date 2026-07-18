@@ -83,7 +83,7 @@ export function ContractDocPreview({
         // No outline / focus ring inside the paper page — the page
         // itself is the visual container.
         class:
-          "outline-none focus:outline-none min-h-[600px] cursor-text",
+          "outline-none focus:outline-none min-h-[65svh] sm:min-h-[600px] cursor-text",
       },
     },
   });
@@ -111,17 +111,17 @@ export function ContractDocPreview({
   }, [editor, onEditorReady]);
 
   return (
-    <div className="min-h-full px-6 sm:px-10 py-8 flex flex-col items-center bg-[#e8e8e0]">
+    <div className="min-h-full px-0 py-3 sm:px-10 sm:py-8 flex flex-col items-center bg-[#e8e8e0]">
       {/* Paper page — sized to ~A4 / Letter ratio with generous
           margins. The shadow + 2px border gives it the brutalist
           page-on-desk look without abandoning the rest of the
           palette. */}
       <article
         className={cn(
-          "w-full max-w-[816px] bg-white text-[#1a1a1a] border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_var(--shadow-color)]",
+          "w-full max-w-[816px] bg-white text-[#1a1a1a] border-y-2 border-[#1a1a1a] shadow-none sm:border-2 sm:shadow-[6px_6px_0px_0px_var(--shadow-color)]",
           // Page padding (1 inch = 96px) — visible on top + bottom
           // so the user can see when content fills the page.
-          "px-[96px] py-[96px]",
+          "px-5 py-8 sm:px-[96px] sm:py-[96px]",
         )}
         // Force Inter / system sans inside the page even though the
         // rest of the app uses mono — contracts read better as a

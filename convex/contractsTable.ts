@@ -18,6 +18,7 @@ import {
   type ProjectType,
   type WizardAnswers,
 } from "./contractTemplates";
+import { recordItemVersion } from "./itemVersions";
 
 const projectTypeValidator = v.union(
   v.literal("logo_design"),
@@ -103,15 +104,6 @@ async function requireContractAccess(
   return contract;
 }
 
-// Plain documents share the table but must never enter the signing
-// lifecycle. Server-side backstop for what the UI already hides —
-// rows without docType are legacy contracts.
-function assertNotDocument(contract: Doc<"contracts">, action: string) {
-  if ((contract.docType ?? "contract") === "document") {
-    throw new Error(`Documents don't support ${action}.`);
-  }
-}
-
 // ─── Queries ─────────────────────────────────────────────────────────
 
 export const list = query({
@@ -177,6 +169,96 @@ export const get = query({
     recipients.sort((a, b) => a.order - b.order);
     audit.sort((a, b) => a.createdAt - b.createdAt);
     return { contract, recipients, fields, audit };
+  },
+});
+
+/** Point-in-time history for every item in the unified document editor. */
+export const listVersions = query({
+  args: { contractId: v.id("contracts") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "viewer");
+    const rows = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    return rows
+      .filter((row) => row.kind === "doc" && row.projectId === contract.projectId)
+      .sort((a, b) => b.versionNumber - a.versionNumber);
+  },
+});
+
+export const snapshotVersion = mutation({
+  args: { contractId: v.id("contracts"), label: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    const user = await requireUser(ctx);
+    const existing = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    const versionNumber =
+      existing.reduce((max, row) => Math.max(max, row.versionNumber), 0) + 1;
+    return await recordItemVersion(ctx, {
+      lineageKey: String(args.contractId),
+      projectId: contract.projectId,
+      kind: "doc",
+      versionNumber,
+      label: args.label?.trim() || undefined,
+      createdByClerkId: user.subject,
+      createdByName: identityName(user),
+      contentHtml: contract.contentHtml,
+      wizardAnswers: contract.wizardAnswers,
+    });
+  },
+});
+
+export const restoreVersion = mutation({
+  args: { contractId: v.id("contracts"), versionId: v.id("itemVersions") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    if (contract.status !== "draft") {
+      throw new Error("Only drafts can restore an earlier version.");
+    }
+    const version = await ctx.db.get(args.versionId);
+    if (
+      !version ||
+      version.kind !== "doc" ||
+      version.lineageKey !== String(args.contractId) ||
+      version.projectId !== contract.projectId
+    ) {
+      throw new Error("Version not found for this document.");
+    }
+    const siblings = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    for (const sibling of siblings) {
+      const isCurrent = sibling._id === version._id;
+      if (sibling.isCurrent !== isCurrent) {
+        await ctx.db.patch(sibling._id, { isCurrent });
+      }
+    }
+    await ctx.db.patch(args.contractId, {
+      contentHtml: version.contentHtml ?? contract.contentHtml,
+      wizardAnswers: version.wizardAnswers ?? contract.wizardAnswers,
+      lastSavedAt: Date.now(),
+    });
+  },
+});
+
+export const removeVersion = mutation({
+  args: { contractId: v.id("contracts"), versionId: v.id("itemVersions") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    const version = await ctx.db.get(args.versionId);
+    if (
+      version &&
+      version.kind === "doc" &&
+      version.lineageKey === String(args.contractId) &&
+      version.projectId === contract.projectId
+    ) {
+      await ctx.db.delete(version._id);
+    }
   },
 });
 
@@ -307,9 +389,8 @@ export const applyWizard = mutation({
   },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "the contract wizard");
     if (contract.status !== "draft") {
-      throw new Error("Only draft contracts can run the wizard.");
+      throw new Error("Only draft items can run the wizard.");
     }
     const answers: WizardAnswers = {};
     for (const e of args.answers.entries) answers[e.key] = e.value;
@@ -385,7 +466,6 @@ export const addRecipient = mutation({
   returns: v.id("contractRecipients"),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "signing recipients");
     if (contract.status !== "draft") {
       throw new Error("Recipients can only be added to draft contracts.");
     }
@@ -472,7 +552,6 @@ export const addField = mutation({
   returns: v.id("contractFields"),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "signature fields");
     if (contract.status !== "draft") {
       throw new Error("Fields can only be edited on draft contracts.");
     }
@@ -553,7 +632,6 @@ export const sendForSignature = mutation({
   args: { contractId: v.id("contracts") },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "sending for signature");
     if (contract.status !== "draft") {
       throw new Error("Only draft contracts can be sent.");
     }
@@ -568,6 +646,24 @@ export const sendForSignature = mutation({
     }
 
     const now = Date.now();
+    // Preserve the exact editable state as a named history entry before it is
+    // frozen. Documents and contracts share this same lifecycle.
+    const existingVersions = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    await recordItemVersion(ctx, {
+      lineageKey: String(args.contractId),
+      projectId: contract.projectId,
+      kind: "doc",
+      versionNumber:
+        existingVersions.reduce((max, row) => Math.max(max, row.versionNumber), 0) + 1,
+      label: "Sent for signature",
+      createdByClerkId: user.subject,
+      createdByName: identityName(user),
+      contentHtml: contract.contentHtml,
+      wizardAnswers: contract.wizardAnswers,
+    });
     // Freeze the exact body the recipients will sign + hash it. This is the
     // record they're bound to; the hash makes any later edit detectable.
     const frozenContentHtml = contract.contentHtml;

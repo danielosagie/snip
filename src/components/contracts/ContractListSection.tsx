@@ -35,11 +35,9 @@ const STATUS_STYLES: Record<string, string> = {
  * project has any contracts in the new table. Auto-hides when empty
  * AND there's no embedded contract (caller handles back-compat).
  *
- * Contracts and plain documents share the `contracts` table (split by
- * `docType`) but are NOT the same thing to the user: contracts carry
- * signing chrome (status badge, signed counts), documents are just
- * docs. Render them as two distinct groups so a document never looks
- * like something awaiting signature.
+ * Contracts and documents share one capability model. `docType` only
+ * controls the label and URL grouping; both can use recipients, signing,
+ * templates, audit history, and versions.
  */
 export function ContractListSection({
   projectId,
@@ -178,7 +176,7 @@ export function ContractListSection({
         )}
       </div>
 
-      {/* ── Documents — plain docs, no signing chrome ────────────── */}
+      {/* ── Documents — same lifecycle, different taxonomy ──────── */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
@@ -202,9 +200,19 @@ export function ContractListSection({
                     {d.title}
                   </div>
                   <div className="text-[10px] font-mono text-[#888] truncate">
-                    Document
+                    {d.recipientCount > 0
+                      ? `${d.signedCount}/${d.recipientCount} signed`
+                      : "Document"}
                   </div>
                 </div>
+                <span
+                  className={cn(
+                    "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
+                    STATUS_STYLES[d.status] ?? STATUS_STYLES.draft,
+                  )}
+                >
+                  {d.status}
+                </span>
               </Link>
             ))}
           </div>

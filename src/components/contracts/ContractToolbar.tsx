@@ -55,7 +55,7 @@ function ToolbarSelect({
           disabled={disabled}
           aria-label={label}
           title={label}
-          className="inline-flex h-7 items-center justify-between gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-40"
+          className="inline-flex h-11 items-center justify-between gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-40 sm:h-7"
           style={{ minWidth }}
         >
           <span className="truncate">{current?.label ?? ""}</span>
@@ -116,7 +116,7 @@ function ToolButton({
       aria-label={title}
       aria-pressed={active}
       className={[
-        "inline-flex h-7 w-7 items-center justify-center border-2 border-[#1a1a1a] transition-colors disabled:opacity-40",
+        "inline-flex h-11 w-11 items-center justify-center border-2 border-[#1a1a1a] transition-colors disabled:opacity-40 sm:h-7 sm:w-7",
         active
           ? "bg-[#1a1a1a] text-[#f0f0e8]"
           : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5]",
@@ -176,7 +176,7 @@ export function ContractToolbar({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
+    <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-2 sm:flex-wrap sm:overflow-visible sm:px-3">
       <Group>
         <ToolButton
           title="Undo (⌘Z)"
@@ -358,7 +358,7 @@ export function ContractToolbar({
             type="button"
             onClick={onOpenFields}
             title="Place signature fields"
-            className="inline-flex items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] px-3 h-7 text-[11px] font-bold uppercase tracking-wider text-[#f0f0e8] hover:bg-[#C2410C] transition-colors"
+            className="inline-flex h-11 items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] px-3 text-[11px] font-bold uppercase tracking-wider text-[#f0f0e8] hover:bg-[#C2410C] transition-colors sm:h-7"
           >
             <PenTool className="h-3.5 w-3.5" />
             Fields

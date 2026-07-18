@@ -1078,18 +1078,6 @@ export default function SharePage() {
           </div>
         )}
 
-        {isBundle ? (
-          <ShareFolderBrowser
-            bundleName={summary?.bundle?.name ?? "Shared files"}
-            folders={bundleFolders}
-            items={bundleItems}
-            activeItemId={activeItemId}
-            onSelectItem={handleSelectBundleItem}
-            grantToken={grantToken}
-            viewAs={viewAs}
-          />
-        ) : null}
-
         {paywall && isOwner && isVideoPlayback ? (
           <section className="border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-5 flex flex-col gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1563,6 +1551,18 @@ export default function SharePage() {
           )}
         </section>
         </div>
+
+        {isBundle ? (
+          <ShareFolderBrowser
+            bundleName={summary?.bundle?.name ?? "Shared files"}
+            folders={bundleFolders}
+            items={bundleItems}
+            activeItemId={activeItemId}
+            onSelectItem={handleSelectBundleItem}
+            grantToken={grantToken}
+            viewAs={viewAs}
+          />
+        ) : null}
       </main>
 
       <footer className="border-t-2 border-[#1a1a1a] px-6 py-4 mt-8">

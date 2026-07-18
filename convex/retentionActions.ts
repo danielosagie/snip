@@ -39,7 +39,7 @@ async function deleteProxyObjects(keys: string[]): Promise<void> {
 
 /**
  * Best-effort GC for assets replaced by a drive overwrite
- * (desktopBrowse.resetVideoForOverwrite): the old original object, encoded
+ * (desktopBrowse.commitVideoOverwrite): the old original object, encoded
  * Mux/Stream assets, preview asset, mirrored renditions. Every failure is
  * logged and swallowed — the row already points at the new upload, so a
  * leaked object is a COGS leak, not a correctness bug.

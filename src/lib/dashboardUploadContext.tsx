@@ -13,12 +13,18 @@ export type DashboardUploadContextValue = {
     projectId: Id<"projects">;
     file: File;
     progress: number;
+    bytesUploaded: number;
     status: UploadStatus;
     error?: string;
     bytesPerSecond?: number;
     estimatedSecondsRemaining?: number | null;
+    resumable: boolean;
   }[];
   cancelUpload: (uploadId: string) => void;
+  pauseUpload: (uploadId: string) => void;
+  resumeUpload: (uploadId: string) => void;
+  retryUpload: (uploadId: string) => void;
+  dismissUpload: (uploadId: string) => void;
 };
 
 const DashboardUploadContext = createContext<DashboardUploadContextValue | null>(null);

@@ -61,8 +61,8 @@ export function ProjectAddButton({
     }
   };
 
-  // Contracts and plain documents are the same editor (toggle inside); we just
-  // seed docType so contracts open with the signing surface and documents don't.
+  // Contracts and documents are the same editor and capability model; docType
+  // only seeds the label and route grouping.
   const handleAdd = async (docType: "contract" | "document") => {
     if (creatingContract) return;
     const label = docType === "document" ? "document" : "contract";

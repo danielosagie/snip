@@ -1223,6 +1223,9 @@ export default function ProjectPage({
               onDropFolder={(droppedId, targetId) =>
                 void handleMoveFolder(droppedId, targetId)
               }
+              onDropFiles={(files, targetId) =>
+                requestUpload(files, project._id, targetId)
+              }
             />
             {/* Contracts share folder-tile styling and sit alongside
                 them as the project's organizational/metadata strip.
@@ -1481,6 +1484,9 @@ export default function ProjectPage({
               }
               onDropFolder={(droppedId, targetId) =>
                 void handleMoveFolder(droppedId, targetId)
+              }
+              onDropFiles={(files, targetId) =>
+                requestUpload(files, project._id, targetId)
               }
             />
             {currentFolderId === null && (

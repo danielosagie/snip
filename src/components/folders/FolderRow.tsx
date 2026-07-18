@@ -26,6 +26,7 @@ interface Props {
     droppedFolderId: Id<"folders">,
     targetFolderId: Id<"folders">,
   ) => void;
+  onDropFiles?: (files: File[], targetFolderId: Id<"folders">) => void;
 }
 
 export function FolderRow({
@@ -35,6 +36,7 @@ export function FolderRow({
   canEdit,
   onDropVideo,
   onDropFolder,
+  onDropFiles,
 }: Props) {
   if (folders.length === 0) return null;
 
@@ -55,6 +57,7 @@ export function FolderRow({
             canEdit={canEdit}
             onDropVideo={onDropVideo}
             onDropFolder={onDropFolder}
+            onDropFiles={onDropFiles}
           />
         ))}
       </div>

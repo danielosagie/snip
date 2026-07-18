@@ -132,7 +132,7 @@ function SignPage() {
     return (
       <CenteredShell>
         <DelayedAppear>
-          <p className="text-[#888]">Opening contract…</p>
+          <p className="text-[#888]">Opening document…</p>
         </DelayedAppear>
       </CenteredShell>
     );
@@ -141,7 +141,7 @@ function SignPage() {
     return (
       <CenteredShell>
         <TerminalCard title="Invalid signing link">
-          We couldn't find a contract for this link. It may have been voided
+          We couldn't find a document for this link. It may have been voided
           or the URL may be malformed.
         </TerminalCard>
       </CenteredShell>
@@ -161,7 +161,7 @@ function SignPage() {
     return (
       <CenteredShell>
         <TerminalCard title="Signed">
-          Thank you. A copy of the signed contract will be emailed to you
+          Thank you. A copy of the signed document will be emailed to you
           shortly.
         </TerminalCard>
       </CenteredShell>
@@ -171,7 +171,7 @@ function SignPage() {
     return (
       <CenteredShell>
         <TerminalCard title="Declined">
-          You declined to sign this contract.
+          You declined to sign this document.
         </TerminalCard>
       </CenteredShell>
     );
@@ -363,7 +363,7 @@ function SignPage() {
               <span className="text-sm text-[#1a1a1a]">
                 I consent to sign this document electronically (E-SIGN Act /
                 UETA) and to receive related records electronically. I have read
-                the contract above and agree to be bound by its terms. I
+                the document above and agree to be bound by its terms. I
                 understand my typed name and any drawn signature are an
                 electronic signature with the same legal effect as a handwritten
                 one, and that the time, my IP address, and this consent are
@@ -380,7 +380,7 @@ function SignPage() {
                 className="flex-1 inline-flex items-center justify-center gap-2 h-12 px-6 text-sm font-black uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] hover:bg-[#C2410C] shadow-[4px_4px_0px_0px_#1a1a1a] active:translate-y-[1px] active:translate-x-[1px] active:shadow-[2px_2px_0px_0px_#1a1a1a] disabled:opacity-50 transition-all"
               >
                 <Check className="h-4 w-4" />
-                {submitting ? "Signing…" : "Sign contract"}
+                {submitting ? "Signing…" : "Sign document"}
               </button>
               <button
                 type="button"
@@ -398,7 +398,7 @@ function SignPage() {
             </h2>
             <p className="text-sm text-[#1a1a1a]">
               Please briefly explain why you can't sign. The agency that sent
-              this contract will see your reason.
+              this document will see your reason.
             </p>
             <textarea
               value={declineReason}
@@ -483,15 +483,15 @@ function terminalTitle(status: string): string {
 function terminalMessage(status: string): string {
   switch (status) {
     case "completed":
-      return "This contract has been fully signed by all required parties.";
+      return "This document has been fully signed by all required parties.";
     case "declined":
-      return "This contract was declined and is no longer active.";
+      return "This document was declined and is no longer active.";
     case "voided":
-      return "The agency that sent this contract has voided it. Reach out to them for next steps.";
+      return "The agency that sent this document has voided it. Reach out to them for next steps.";
     case "expired":
       return "This signing link has expired. Ask the sender to issue you a new one.";
     default:
-      return "This contract is not currently accepting signatures.";
+      return "This document is not currently accepting signatures.";
   }
 }
 

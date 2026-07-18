@@ -1,10 +1,15 @@
 "use node";
 
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListPartsCommand,
   PutObjectCommand,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v } from "convex/values";
@@ -38,6 +43,7 @@ import { resolvePlaybackProvider, defaultPlaybackProvider } from "./providers/pl
 
 const GIBIBYTE = 1024 ** 3;
 const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
+const MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024;
 
 // Mux ingest is gated by content type — only actual video types route to
 // the Mux pipeline. Everything else (docs, images, audio, source-control
@@ -243,8 +249,8 @@ function normalizeContentType(contentType: string | null | undefined): string {
 }
 
 function validateUploadRequestOrThrow(args: { fileSize: number; contentType: string }) {
-  if (!Number.isFinite(args.fileSize) || args.fileSize <= 0) {
-    throw new Error("File size must be greater than zero.");
+  if (!Number.isFinite(args.fileSize) || args.fileSize < 0) {
+    throw new Error("File size can't be negative.");
   }
 
   if (args.fileSize > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
@@ -274,11 +280,26 @@ async function requireVideoMemberAccess(
   videoId: Id<"videos">
 ) {
   const video = (await ctx.runQuery(api.videos.get, { videoId })) as
-    | { role?: string }
+    | { role?: string; s3Key?: string }
     | null;
   if (!video || video.role === "viewer") {
     throw new Error("Requires member role or higher");
   }
+  return video;
+}
+
+async function allocateOriginalUploadKey(
+  ctx: ActionCtx,
+  videoId: Id<"videos">,
+  filename: string,
+) {
+  const ext = getExtensionFromKey(filename);
+  const loc = await ctx.runQuery(internal.videos.getProxyMirrorContext, {
+    videoId,
+  });
+  return loc?.teamSlug && loc?.projectId
+    ? `projects/${loc.teamSlug}/${loc.projectId}/originals/${videoId}/${Date.now()}.${ext}`
+    : `videos/${videoId}/${Date.now()}.${ext}`;
 }
 
 /**
@@ -384,19 +405,12 @@ export const getUploadUrl = action({
     });
 
     const s3 = getS3Client();
-    const ext = getExtensionFromKey(args.filename);
     // Originals live under the project tree so the drive's full-res toggle can
     // surface them (proxies sit alongside under proxies/). One copy, no
     // duplication — Mux ingests via a signed URL by key, so the path is free to
     // change. Fall back to the legacy videos/ path if we can't resolve the
     // project, so an upload never breaks on a lookup miss.
-    const loc = await ctx.runQuery(internal.videos.getProxyMirrorContext, {
-      videoId: args.videoId,
-    });
-    const key =
-      loc?.teamSlug && loc?.projectId
-        ? `projects/${loc.teamSlug}/${loc.projectId}/originals/${args.videoId}/${Date.now()}.${ext}`
-        : `videos/${args.videoId}/${Date.now()}.${ext}`;
+    const key = await allocateOriginalUploadKey(ctx, args.videoId, args.filename);
     const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
@@ -412,6 +426,154 @@ export const getUploadUrl = action({
     });
 
     return { url, uploadId: key };
+  },
+});
+
+export const startMultipartUpload = action({
+  args: {
+    videoId: v.id("videos"),
+    filename: v.string(),
+    fileSize: v.number(),
+    contentType: v.string(),
+  },
+  returns: v.object({
+    uploadId: v.string(),
+    key: v.string(),
+    partSize: v.number(),
+  }),
+  handler: async (ctx, args): Promise<{
+    uploadId: string;
+    key: string;
+    partSize: number;
+  }> => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    const contentType = validateUploadRequestOrThrow(args);
+    const key = await allocateOriginalUploadKey(ctx, args.videoId, args.filename);
+    const result = await getS3Client().send(
+      new CreateMultipartUploadCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        ContentType: contentType,
+      }),
+    );
+    if (!result.UploadId) throw new Error("Storage did not start the multipart upload.");
+
+    await ctx.runMutation(internal.videos.setUploadInfo, {
+      videoId: args.videoId,
+      s3Key: key,
+      fileSize: args.fileSize,
+      contentType,
+    });
+    return {
+      uploadId: result.UploadId,
+      key,
+      partSize: MULTIPART_PART_SIZE_BYTES,
+    };
+  },
+});
+
+export const getMultipartPartUrl = action({
+  args: {
+    videoId: v.id("videos"),
+    uploadId: v.string(),
+    partNumber: v.number(),
+  },
+  returns: v.object({ url: v.string() }),
+  handler: async (ctx, args): Promise<{ url: string }> => {
+    const video = await requireVideoMemberAccess(ctx, args.videoId);
+    if (!video.s3Key) throw new Error("Upload target is missing.");
+    if (!Number.isInteger(args.partNumber) || args.partNumber < 1 || args.partNumber > 10_000) {
+      throw new Error("Invalid multipart part number.");
+    }
+    const url = await getSignedUrl(
+      getS3Client(),
+      new UploadPartCommand({
+        Bucket: BUCKET_NAME,
+        Key: video.s3Key,
+        UploadId: args.uploadId,
+        PartNumber: args.partNumber,
+      }),
+      { expiresIn: 3600 },
+    );
+    return { url };
+  },
+});
+
+export const completeMultipartUpload = action({
+  args: {
+    videoId: v.id("videos"),
+    uploadId: v.string(),
+    expectedParts: v.number(),
+  },
+  returns: v.object({ success: v.boolean() }),
+  handler: async (ctx, args): Promise<{ success: boolean }> => {
+    const video = await requireVideoMemberAccess(ctx, args.videoId);
+    if (!video.s3Key) throw new Error("Upload target is missing.");
+    const s3 = getS3Client();
+    const parts: Array<{ ETag: string; PartNumber: number }> = [];
+    let marker: string | undefined;
+    do {
+      const page = await s3.send(
+        new ListPartsCommand({
+          Bucket: BUCKET_NAME,
+          Key: video.s3Key,
+          UploadId: args.uploadId,
+          PartNumberMarker: marker,
+        }),
+      );
+      for (const part of page.Parts ?? []) {
+        if (part.ETag && part.PartNumber) {
+          parts.push({ ETag: part.ETag, PartNumber: part.PartNumber });
+        }
+      }
+      marker = page.IsTruncated ? page.NextPartNumberMarker : undefined;
+    } while (marker);
+
+    parts.sort((a, b) => a.PartNumber - b.PartNumber);
+    if (parts.length !== args.expectedParts) {
+      throw new Error(`Upload has ${parts.length} of ${args.expectedParts} parts.`);
+    }
+    await s3.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: BUCKET_NAME,
+        Key: video.s3Key,
+        UploadId: args.uploadId,
+        MultipartUpload: { Parts: parts },
+      }),
+    );
+    return { success: true };
+  },
+});
+
+export const cancelUploadObject = action({
+  args: {
+    videoId: v.id("videos"),
+    multipartUploadId: v.optional(v.string()),
+  },
+  returns: v.object({ success: v.boolean() }),
+  handler: async (ctx, args): Promise<{ success: boolean }> => {
+    const video = await requireVideoMemberAccess(ctx, args.videoId);
+    if (video.s3Key) {
+      try {
+        if (args.multipartUploadId) {
+          await getS3Client().send(
+            new AbortMultipartUploadCommand({
+              Bucket: BUCKET_NAME,
+              Key: video.s3Key,
+              UploadId: args.multipartUploadId,
+            }),
+          );
+        } else {
+          await getS3Client().send(
+            new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: video.s3Key }),
+          );
+        }
+      } catch (error) {
+        console.warn("upload object cleanup failed", error);
+      }
+    }
+    await ctx.runMutation(api.videos.cancelUpload, { videoId: args.videoId });
+    return { success: true };
   },
 });
 
@@ -474,18 +636,12 @@ export const getSharedBundleCover = action({
   },
 });
 
-export const markUploadComplete = action({
-  args: {
-    videoId: v.id("videos"),
-  },
-  returns: v.object({
-    success: v.boolean(),
-  }),
-  handler: async (ctx, args) => {
-    await requireVideoMemberAccess(ctx, args.videoId);
-
+async function markUploadCompleteImpl(
+  ctx: ActionCtx,
+  videoId: Id<"videos">,
+): Promise<{ success: boolean }> {
     const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
-      videoId: args.videoId,
+      videoId,
     });
 
     if (!video || !video.s3Key) {
@@ -501,12 +657,8 @@ export const markUploadComplete = action({
         }),
       );
       const contentLengthRaw = head.ContentLength;
-      if (
-        typeof contentLengthRaw !== "number" ||
-        !Number.isFinite(contentLengthRaw) ||
-        contentLengthRaw <= 0
-      ) {
-        throw new Error("Uploaded video file not found or empty.");
+      if (typeof contentLengthRaw !== "number" || !Number.isFinite(contentLengthRaw)) {
+        throw new Error("Uploaded file metadata is unavailable.");
       }
       const contentLength = contentLengthRaw;
       if (contentLength > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
@@ -518,23 +670,32 @@ export const markUploadComplete = action({
         "application/octet-stream";
 
       await ctx.runMutation(internal.videos.reconcileUploadedObjectMetadata, {
-        videoId: args.videoId,
+        videoId,
         fileSize: contentLength,
         contentType: normalizedContentType,
       });
 
-      if (isMuxVideoType(normalizedContentType, video.s3Key)) {
+      // Empty files are legitimate filesystem objects, but they are not valid
+      // media inputs. Preserve them as generic ready files instead of rejecting
+      // the upload or feeding them to an encoder.
+      if (contentLength === 0) {
+        await ctx.runMutation(internal.videos.markAsReadyAsFile, {
+          videoId,
+          fileSize: 0,
+          contentType: normalizedContentType,
+        });
+      } else if (isMuxVideoType(normalizedContentType, video.s3Key)) {
         // Lazy encoding: when enabled, skip ingest and hold the video
         // in `encodingDeferred` state. The first watch triggers
         // `requestEncoding`, which runs the same pipeline. Cuts COGS
         // on the long tail of footage uploaded but never played.
         if (await shouldDeferEncoding(ctx, video.projectId)) {
           await ctx.runMutation(internal.videos.markAsEncodingDeferred, {
-            videoId: args.videoId,
+            videoId,
           });
         } else {
           await startEncoding(ctx, {
-            videoId: args.videoId,
+            videoId,
             s3Key: video.s3Key,
             projectId: video.projectId,
           });
@@ -545,7 +706,7 @@ export const markUploadComplete = action({
         // available for download. The video player will detect the absence
         // of a playback ID and render a generic file viewer instead.
         await ctx.runMutation(internal.videos.markAsReadyAsFile, {
-          videoId: args.videoId,
+          videoId,
           fileSize: contentLength,
           contentType: normalizedContentType,
         });
@@ -566,7 +727,7 @@ export const markUploadComplete = action({
           // No-op: preserve original processing failure.
         }
         await ctx.runMutation(internal.videos.markAsFailed, {
-          videoId: args.videoId,
+          videoId,
           uploadError: error instanceof Error ? error.message : undefined,
         });
         throw error;
@@ -578,13 +739,53 @@ export const markUploadComplete = action({
       // — the players fall back to original-file playback — instead of
       // showing a misleading "failed". A later backfill can re-encode it.
       await ctx.runMutation(internal.videos.markAsReadyOriginalOnly, {
-        videoId: args.videoId,
+        videoId,
         muxError: error instanceof Error ? error.message : "Mux ingest failed.",
       });
       return { success: true };
     }
 
     return { success: true };
+}
+
+export const markUploadComplete = action({
+  args: {
+    videoId: v.id("videos"),
+  },
+  returns: v.object({
+    success: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    return await markUploadCompleteImpl(ctx, args.videoId);
+  },
+});
+
+/** Auth-free scheduled retry for a row already authorized and committed by an upload action. */
+export const markUploadCompleteInternal = internalAction({
+  args: { videoId: v.id("videos"), attempt: v.optional(v.number()) },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    const attempt = args.attempt ?? 1;
+    try {
+      const status = await ctx.runQuery(
+        internal.desktopBrowse.getVideoStatusForDesktop,
+        { videoId: args.videoId },
+      );
+      if (status !== "uploading" && status !== "failed") return null;
+      await markUploadCompleteImpl(ctx, args.videoId);
+    } catch (error) {
+      if (attempt >= 5) {
+        console.error(`upload ${args.videoId} finalize exhausted retries:`, error);
+        return null;
+      }
+      await ctx.scheduler.runAfter(
+        Math.min(15 * 60_000, 30_000 * 2 ** attempt),
+        internal.videoActions.markUploadCompleteInternal,
+        { videoId: args.videoId, attempt: attempt + 1 },
+      );
+    }
+    return null;
   },
 });
 

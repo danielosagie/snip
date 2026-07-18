@@ -79,6 +79,7 @@ export const create = mutation({
       }
     }
 
+    const now = Date.now();
     const videoId = await ctx.db.insert("videos", {
       projectId: args.projectId,
       uploadedByClerkId: user.subject,
@@ -93,6 +94,8 @@ export const create = mutation({
       visibility: "public",
       publicId,
       folderId: args.folderId,
+      driveModifiedAt: now,
+      driveVersion: 1,
     });
 
     try {
@@ -617,8 +620,17 @@ export const update = mutation({
       "member",
     );
 
-    const updates: Partial<{ title: string; description: string }> = {};
-    if (args.title !== undefined) updates.title = args.title;
+    const updates: Partial<{
+      title: string;
+      description: string;
+      driveModifiedAt: number;
+      driveVersion: number;
+    }> = {};
+    if (args.title !== undefined) {
+      updates.title = args.title;
+      updates.driveModifiedAt = Date.now();
+      updates.driveVersion = (video.driveVersion ?? 0) + 1;
+    }
     if (args.description !== undefined) updates.description = args.description;
 
     await ctx.db.patch(args.videoId, updates);
@@ -1100,6 +1112,29 @@ export const remove = mutation({
   },
 });
 
+/** Cancel an in-flight upload without requiring project-admin trash access. */
+export const cancelUpload = mutation({
+  args: { videoId: v.id("videos") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const { user, video } = await requireVideoAccess(ctx, args.videoId, "member");
+    if (video.status !== "uploading" && video.status !== "failed") return null;
+    await ctx.db.patch(args.videoId, {
+      deletedAt: Date.now(),
+      deletedByName: identityName(user),
+      uploadError: "Upload cancelled.",
+      status: "failed",
+      muxAssetStatus: "errored",
+    });
+    try {
+      await removeSearchableForVideo(ctx, args.videoId);
+    } catch (error) {
+      console.error("search index (upload cancel) failed", error);
+    }
+    return null;
+  },
+});
+
 /**
  * Lift a video out of the trash. Clears the soft-delete markers so
  * it appears back in its project's grid. If the parent project itself
@@ -1306,6 +1341,7 @@ export const setUploadInfo = internalMutation({
     contentType: v.string(),
   },
   handler: async (ctx, args) => {
+    const current = await ctx.db.get(args.videoId);
     await ctx.db.patch(args.videoId, {
       s3Key: args.s3Key,
       muxUploadId: undefined,
@@ -1318,6 +1354,8 @@ export const setUploadInfo = internalMutation({
       fileSize: args.fileSize,
       contentType: args.contentType,
       status: "uploading",
+      driveModifiedAt: Date.now(),
+      driveVersion: (current?.driveVersion ?? 0) + 1,
     });
   },
 });

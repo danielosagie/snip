@@ -25,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { UploadProgress } from "@/components/upload/UploadProgress";
+import { UploadQueuePanel } from "@/components/upload/UploadQueuePanel";
 import { useVideoUploadManager } from "./-useVideoUploadManager";
 import { DashboardUploadProvider } from "@/lib/dashboardUploadContext";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
@@ -85,6 +85,10 @@ export default function DashboardLayout() {
     uploads,
     uploadFilesToProject,
     cancelUpload,
+    pauseUpload,
+    resumeUpload,
+    retryUpload,
+    dismissUpload,
   } = useVideoUploadManager();
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
@@ -107,7 +111,7 @@ export default function DashboardLayout() {
       // Accept anything the user dragged in. Non-video assets still
       // route through the same upload pipeline; the file renderer
       // picks an icon based on contentType / extension downstream.
-      const files = inputFiles.filter((f) => f.size > 0);
+      const files = inputFiles;
       if (files.length === 0) return;
 
       if (preferredProjectId) {
@@ -181,14 +185,20 @@ export default function DashboardLayout() {
       if (!dragEventHasFiles(event)) return;
       event.preventDefault();
       dragDepthRef.current += 1;
-      setIsGlobalDragActive(true);
+      const overFolder =
+        event.target instanceof Element &&
+        Boolean(event.target.closest('[data-snip-folder-drop-target="true"]'));
+      setIsGlobalDragActive(!overFolder);
     };
 
     const handleDragOver = (event: DragEvent) => {
       if (isDropDisabledRoute) return;
       if (!dragEventHasFiles(event)) return;
       event.preventDefault();
-      setIsGlobalDragActive(true);
+      const overFolder =
+        event.target instanceof Element &&
+        Boolean(event.target.closest('[data-snip-folder-drop-target="true"]'));
+      setIsGlobalDragActive(!overFolder);
     };
 
     const handleDragLeave = (event: DragEvent) => {
@@ -204,9 +214,12 @@ export default function DashboardLayout() {
     const handleDrop = (event: DragEvent) => {
       if (isDropDisabledRoute) return;
       if (!dragEventHasFiles(event)) return;
+      const handledByTarget = event.defaultPrevented;
       event.preventDefault();
       dragDepthRef.current = 0;
       setIsGlobalDragActive(false);
+
+      if (handledByTarget) return;
 
       const files = getDroppedFiles(event.dataTransfer?.files ?? null);
       if (files.length === 0) return;
@@ -231,8 +244,20 @@ export default function DashboardLayout() {
       requestUpload,
       uploads,
       cancelUpload,
+      pauseUpload,
+      resumeUpload,
+      retryUpload,
+      dismissUpload,
     }),
-    [requestUpload, uploads, cancelUpload],
+    [
+      requestUpload,
+      uploads,
+      cancelUpload,
+      pauseUpload,
+      resumeUpload,
+      retryUpload,
+      dismissUpload,
+    ],
   );
   const isResolvingPublicPlaybackExemption =
     Boolean(isLoaded && !userId && routeVideoId) && publicPlaybackId === undefined;
@@ -312,23 +337,16 @@ export default function DashboardLayout() {
         </div>
       )}
 
-      {uploads.length > 0 && (
-        <div className="fixed left-4 right-4 top-16 z-50 space-y-2 sm:bottom-4 sm:top-auto sm:right-auto sm:w-full sm:max-w-sm">
-          {uploads.map((upload) => (
-            <UploadProgress
-              key={upload.id}
-              fileName={upload.file.name}
-              fileSize={upload.file.size}
-              progress={upload.progress}
-              status={upload.status}
-              error={upload.error}
-              bytesPerSecond={upload.bytesPerSecond}
-              estimatedSecondsRemaining={upload.estimatedSecondsRemaining}
-              onCancel={() => cancelUpload(upload.id)}
-            />
-          ))}
-        </div>
-      )}
+      {uploads.length > 0 ? (
+        <UploadQueuePanel
+          uploads={uploads}
+          onCancel={cancelUpload}
+          onPause={pauseUpload}
+          onResume={resumeUpload}
+          onRetry={retryUpload}
+          onDismiss={dismissUpload}
+        />
+      ) : null}
 
       <Dialog open={projectPickerOpen} onOpenChange={handleProjectPickerOpenChange}>
         <DialogContent>

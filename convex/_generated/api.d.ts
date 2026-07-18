@@ -28,6 +28,7 @@ import type * as desktopAcls from "../desktopAcls.js";
 import type * as desktopAuth from "../desktopAuth.js";
 import type * as desktopBrowse from "../desktopBrowse.js";
 import type * as desktopPresence from "../desktopPresence.js";
+import type * as desktopUploadActions from "../desktopUploadActions.js";
 import type * as email from "../email.js";
 import type * as featureFlags from "../featureFlags.js";
 import type * as folderPermissions from "../folderPermissions.js";
@@ -98,6 +99,7 @@ declare const fullApi: ApiFromModules<{
   desktopAuth: typeof desktopAuth;
   desktopBrowse: typeof desktopBrowse;
   desktopPresence: typeof desktopPresence;
+  desktopUploadActions: typeof desktopUploadActions;
   email: typeof email;
   featureFlags: typeof featureFlags;
   folderPermissions: typeof folderPermissions;

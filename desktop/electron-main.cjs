@@ -1805,7 +1805,8 @@ async function startMount({ mountPath } = {}) {
     "--dir-cache-time", "30s",
     "--poll-interval", "30s",
     "--no-modtime",
-    "--no-checksum",
+    // Keep remote ETags in the fingerprint. The WebDAV layer increments them
+    // on every overwrite/move, including same-size replacements.
     // Resilience
     "--low-level-retries", "10",
     "--retries", "3",
@@ -1982,26 +1983,63 @@ function startDriveQueuePoll(rcPort) {
   driveQueueTimer = setInterval(async () => {
     let inflight = [];
     try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      if (resp.ok) {
-        const body = await resp.json().catch(() => ({}));
+      const request = (endpoint) => fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+      const [queueResponse, statsResponse] = await Promise.all([
+        request(url),
+        request(`http://127.0.0.1:${rcPort}/core/stats`),
+      ]);
+      if (queueResponse.ok) {
+        const body = await queueResponse.json().catch(() => ({}));
         const queue = Array.isArray(body?.queue) ? body.queue : [];
+        const stats = statsResponse.ok
+          ? await statsResponse.json().catch(() => ({}))
+          : {};
+        const transferring = Array.isArray(stats?.transferring)
+          ? stats.transferring
+          : [];
         inflight = queue
           .filter((q) => q && typeof q.name === "string")
-          .map((q) => ({
-            name: String(q.name).split("/").pop(),
-            size: typeof q.size === "number" ? q.size : null,
-          }));
+          .map((q) => {
+            const queuePath = String(q.name);
+            const queueName = queuePath.split("/").pop();
+            const transfer = transferring.find((item) => {
+              if (!item || typeof item.name !== "string") return false;
+              return item.name === queuePath || item.name.split("/").pop() === queueName;
+            });
+            return {
+              id: typeof q.id === "number" ? q.id : null,
+              name: queueName,
+              path: queuePath,
+              size: typeof transfer?.size === "number"
+                ? transfer.size
+                : typeof q.size === "number" ? q.size : null,
+              bytes: typeof transfer?.bytes === "number" ? transfer.bytes : 0,
+              percentage: typeof transfer?.percentage === "number"
+                ? Math.max(0, Math.min(100, transfer.percentage))
+                : 0,
+              speed: typeof transfer?.speedAvg === "number"
+                ? transfer.speedAvg
+                : typeof transfer?.speed === "number" ? transfer.speed : 0,
+              eta: typeof transfer?.eta === "number" ? transfer.eta : null,
+              status: transfer ? "uploading" : "queued",
+            };
+          });
       }
     } catch {
       // rc not up yet / transient — don't clear the indicator on a blip.
       return;
     }
-    const key = inflight.map((i) => i.name).sort().join("|");
+    const key = JSON.stringify(inflight.map((item) => ({
+      name: item.name,
+      percentage: Math.round(item.percentage),
+      speed: Math.round(item.speed),
+      eta: item.eta == null ? null : Math.round(item.eta),
+      status: item.status,
+    })));
     if (key === lastDriveQueueKey) return; // unchanged → don't spam IPC
     lastDriveQueueKey = key;
     sendDriveActivity(inflight);

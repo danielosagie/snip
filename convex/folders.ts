@@ -114,6 +114,7 @@ export const create = mutation({
       throw new Error(`A folder named "${name}" already exists here.`);
     }
 
+    const now = Date.now();
     return await ctx.db.insert("folders", {
       projectId: args.projectId,
       parentFolderId: args.parentFolderId,
@@ -123,6 +124,8 @@ export const create = mutation({
         (user as { name?: string; email?: string }).name ??
         (user as { email?: string }).email ??
         "Unknown",
+      driveModifiedAt: now,
+      driveVersion: 1,
     });
   },
 });
@@ -148,7 +151,11 @@ export const rename = mutation({
         throw new Error(`A folder named "${name}" already exists here.`);
       }
     }
-    await ctx.db.patch(folder._id, { name });
+    await ctx.db.patch(folder._id, {
+      name,
+      driveModifiedAt: Date.now(),
+      driveVersion: (folder.driveVersion ?? 0) + 1,
+    });
   },
 });
 
@@ -196,7 +203,11 @@ export const moveVideoToFolder = mutation({
         throw new Error("Target folder doesn't belong to this project.");
       }
     }
-    await ctx.db.patch(args.videoId, { folderId: args.folderId });
+    await ctx.db.patch(args.videoId, {
+      folderId: args.folderId,
+      driveModifiedAt: Date.now(),
+      driveVersion: (video.driveVersion ?? 0) + 1,
+    });
   },
 });
 
@@ -261,6 +272,10 @@ export const moveFolder = mutation({
       throw new Error(`A folder named "${folder.name}" already exists there.`);
     }
 
-    await ctx.db.patch(folder._id, { parentFolderId: args.parentFolderId });
+    await ctx.db.patch(folder._id, {
+      parentFolderId: args.parentFolderId,
+      driveModifiedAt: Date.now(),
+      driveVersion: (folder.driveVersion ?? 0) + 1,
+    });
   },
 });
