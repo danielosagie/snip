@@ -5,9 +5,9 @@ import { MutationCtx, QueryCtx } from "./_generated/server";
 
 /**
  * Plan keys. Three tiers post-collapse:
- *   • `free`  — no Stripe subscription required (50 GB)
- *   • `basic` — $20/mo, 2 TB
- *   • `pro`   — $50/mo, 5 TB
+ *   • `free`  — no Stripe subscription required (25 GB)
+ *   • `basic` — $25/mo, 500 GB
+ *   • `pro`   — $50/mo, 2 TB
  *
  * The canonical tier table lives in `convex/workspaceBilling.ts`
  * (TIERS). The constants below mirror that for callers that still
@@ -17,16 +17,21 @@ export type TeamPlan = "free" | "basic" | "pro";
 
 const GIBIBYTE = 1024 ** 3;
 
+const LEGACY_WORKSPACE_STORAGE_LIMIT_BYTES: Partial<Record<TeamPlan, number>> = {
+  basic: 2 * 1024 * GIBIBYTE,
+  pro: 5 * 1024 * GIBIBYTE,
+};
+
 export const TEAM_PLAN_MONTHLY_PRICE_USD: Record<TeamPlan, number> = {
   free: 0,
-  basic: 20,
+  basic: 25,
   pro: 50,
 };
 
 export const TEAM_PLAN_STORAGE_LIMIT_BYTES: Record<TeamPlan, number> = {
-  free: 50 * GIBIBYTE,
-  basic: 2 * 1024 * GIBIBYTE,
-  pro: 5 * 1024 * GIBIBYTE,
+  free: 25 * GIBIBYTE,
+  basic: 500 * GIBIBYTE,
+  pro: 2 * 1024 * GIBIBYTE,
 };
 
 function hasText(value: string | undefined | null): value is string {
@@ -51,9 +56,25 @@ export function resolvePlanFromStripePriceId(
 
   const basicPriceId = process.env.STRIPE_PRICE_BASIC_MONTHLY;
   const proPriceId = process.env.STRIPE_PRICE_PRO_MONTHLY;
+  const basicV2PriceId = process.env.STRIPE_PRICE_BASIC_MONTHLY_V2;
+  const proV2PriceId = process.env.STRIPE_PRICE_PRO_MONTHLY_V2;
+  const basicAnnualPriceId = process.env.STRIPE_PRICE_BASIC_ANNUAL;
+  const proAnnualPriceId = process.env.STRIPE_PRICE_PRO_ANNUAL;
 
-  if (hasText(basicPriceId) && stripePriceId === basicPriceId) return "basic";
-  if (hasText(proPriceId) && stripePriceId === proPriceId) return "pro";
+  if (
+    (hasText(basicPriceId) && stripePriceId === basicPriceId) ||
+    (hasText(basicV2PriceId) && stripePriceId === basicV2PriceId) ||
+    (hasText(basicAnnualPriceId) && stripePriceId === basicAnnualPriceId)
+  ) {
+    return "basic";
+  }
+  if (
+    (hasText(proPriceId) && stripePriceId === proPriceId) ||
+    (hasText(proV2PriceId) && stripePriceId === proV2PriceId) ||
+    (hasText(proAnnualPriceId) && stripePriceId === proAnnualPriceId)
+  ) {
+    return "pro";
+  }
   return null;
 }
 
@@ -139,9 +160,9 @@ export async function getTeamStorageUsedBytes(
   for (const videos of videosByProject) {
     for (const video of videos) {
       if (video.status === "failed") continue;
-      // Drive-first sources live on the connected drive, not in our
-      // object store, so they don't count against the cloud cap.
-      if (video.storageClass === "drive") continue;
+      // The connected drive is backed by the same managed object-storage
+      // bucket. Drive-first avoids eager Mux encoding, but the source bytes
+      // still cost Snip money and therefore count against the storage plan.
       if (typeof video.fileSize === "number" && Number.isFinite(video.fileSize)) {
         total += video.fileSize;
       }
@@ -151,6 +172,20 @@ export async function getTeamStorageUsedBytes(
   return total;
 }
 
+async function getOwnerWorkspaceStorageUsedBytes(
+  ctx: BillingCtx,
+  ownerClerkId: string,
+) {
+  const ownedTeams = await ctx.db
+    .query("teams")
+    .withIndex("by_owner", (q) => q.eq("ownerClerkId", ownerClerkId))
+    .collect();
+  const totals = await Promise.all(
+    ownedTeams.map((team) => getTeamStorageUsedBytes(ctx, team._id)),
+  );
+  return totals.reduce((sum, bytes) => sum + bytes, 0);
+}
+
 /**
  * Storage usage split by lifecycle, for the billing UI's "active vs
  * archived" readout. All sizes are source bytes (`videos.fileSize`):
@@ -158,8 +193,8 @@ export async function getTeamStorageUsedBytes(
  *   • coldBytes  — evicted/deferred (no live ladder); re-encodes on watch.
  *   • driveBytes — drive-first sources; served off the connected drive.
  *
- * `billedBytes` = hot + cold (what counts against the cap). driveBytes is
- * tracked for display but excluded from the cap.
+ * `billedBytes` = hot + cold + drive. Drive-first reduces processing and
+ * egress, not storage capacity.
  */
 export async function getTeamStorageBreakdown(
   ctx: BillingCtx,
@@ -204,7 +239,7 @@ export async function getTeamStorageBreakdown(
     hotBytes,
     coldBytes,
     driveBytes,
-    billedBytes: hotBytes + coldBytes,
+    billedBytes: hotBytes + coldBytes + driveBytes,
   };
 }
 
@@ -226,7 +261,7 @@ function isBillingEnforced(): boolean {
  *   1. Workspace-level subscription on the team owner — preferred,
  *      since one Stripe customer covers all of the owner's teams.
  *   2. Legacy per-team Stripe subscription (component-backed).
- *   3. Otherwise → free tier (50 GB).
+ *   3. Otherwise → free tier (25 GB).
  *
  * The function used to throw when no subscription existed, which forced
  * users into Stripe before they could create their first project. That
@@ -254,7 +289,15 @@ export async function assertTeamHasActiveSubscription(
         workspaceSub.status === "trialing")
     ) {
       const plan = normalizeStoredTeamPlan(workspaceSub.plan);
-      return { ...state, plan, hasActiveSubscription: true };
+      return {
+        ...state,
+        plan,
+        hasActiveSubscription: true,
+        storageLimitBytes:
+          workspaceSub.storageLimitBytes ??
+          LEGACY_WORKSPACE_STORAGE_LIMIT_BYTES[plan] ??
+          TEAM_PLAN_STORAGE_LIMIT_BYTES[plan],
+      };
     }
   }
 
@@ -279,8 +322,17 @@ export async function assertTeamCanStoreBytes(
   incomingBytes: number,
 ) {
   const state = await assertTeamHasActiveSubscription(ctx, teamId);
-  const storageUsedBytes = await getTeamStorageUsedBytes(ctx, teamId);
-  const storageLimitBytes = TEAM_PLAN_STORAGE_LIMIT_BYTES[state.plan];
+  // Workspace subscriptions are pooled across every team the owner owns.
+  // Enforce the same aggregate shown on the Billing page so creating a
+  // second team cannot multiply the storage allowance.
+  const storageUsedBytes = state.team.ownerClerkId
+    ? await getOwnerWorkspaceStorageUsedBytes(ctx, state.team.ownerClerkId)
+    : await getTeamStorageUsedBytes(ctx, teamId);
+  const storageLimitBytes =
+    "storageLimitBytes" in state &&
+    typeof state.storageLimitBytes === "number"
+      ? state.storageLimitBytes
+      : TEAM_PLAN_STORAGE_LIMIT_BYTES[state.plan];
   const requestedBytes = Number.isFinite(incomingBytes)
     ? Math.max(0, incomingBytes)
     : 0;

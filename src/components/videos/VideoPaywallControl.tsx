@@ -270,7 +270,6 @@ function PaywallEditTrigger({
 }
 
 function PaywallEditor({
-  videoId: _videoId,
   existing,
   open,
   onOpenChange,
@@ -366,6 +365,10 @@ function PaywallEditor({
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
+          <p className="text-[11px] text-[#666]">
+            Snip keeps 5% + 30¢ per paid delivery. The remainder is paid to
+            your connected Stripe account.
+          </p>
           {err ? (
             <div className="text-xs text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
               {err}

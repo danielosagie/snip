@@ -6,9 +6,10 @@ import type { Id } from "@convex/_generated/dataModel";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { RotateCcw, Trash2, Briefcase, Film, FileSignature } from "lucide-react";
+import { RotateCcw, Trash2, Briefcase, Film, FileSignature, FileText } from "lucide-react";
 import { formatRelativeTime } from "@/lib/utils";
-import { projectPath, videoPath } from "@/lib/routes";
+import { contractPath, documentPath, projectPath, videoPath } from "@/lib/routes";
+import { friendlyError } from "@/lib/friendlyError";
 import { seoHead } from "@/lib/seo";
 
 export const Route = createFileRoute("/dashboard/trash")({
@@ -37,12 +38,15 @@ function TrashRoute() {
   const trashedProjects = useQuery(api.projects.listDeleted, {});
   const trashedVideos = useQuery(api.videos.listDeleted, {});
   const trashedContracts = useQuery(api.projects.listDeletedContracts, {});
+  const trashedDocumentItems = useQuery(api.contractsTable.listDeleted, {});
   const restoreProject = useMutation(api.projects.restore);
   const purgeProject = useMutation(api.projects.purge);
   const restoreVideo = useMutation(api.videos.restore);
   const purgeVideo = useMutation(api.videos.purge);
   const restoreContract = useMutation(api.projects.restoreContract);
   const purgeContract = useMutation(api.projects.purgeContract);
+  const restoreDocumentItem = useMutation(api.contractsTable.restore);
+  const purgeDocumentItem = useMutation(api.contractsTable.purge);
   const navigate = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -156,6 +160,43 @@ function TrashRoute() {
     }
   };
 
+  const handleRestoreDocumentItem = async (item: {
+    id: Id<"contracts">;
+    docType: "contract" | "document";
+    teamSlug: string;
+    projectId: Id<"projects">;
+  }) => {
+    setBusy(item.id);
+    try {
+      await restoreDocumentItem({ contractId: item.id });
+      navigate({
+        to:
+          item.docType === "document"
+            ? documentPath(item.teamSlug, item.projectId, item.id)
+            : contractPath(item.teamSlug, item.projectId, item.id),
+      });
+    } catch (error) {
+      alert(friendlyError(error, "Restore failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handlePurgeDocumentItem = async (
+    id: Id<"contracts">,
+    title: string,
+  ) => {
+    if (!confirm(`Permanently delete “${title}”? This can't be undone.`)) return;
+    setBusy(id);
+    try {
+      await purgeDocumentItem({ contractId: id });
+    } catch (error) {
+      alert(friendlyError(error, "Permanent delete failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // Merge projects + videos + contracts into one chronological feed
   // so the user sees "most recently deleted" first regardless of type.
   type Row =
@@ -188,6 +229,18 @@ function TrashRoute() {
         projectId: Id<"projects">;
         projectName: string;
         clientName?: string;
+        deletedAt: number;
+        deletedByName?: string;
+      }
+    | {
+        kind: "documentItem";
+        id: Id<"contracts">;
+        title: string;
+        docType: "contract" | "document";
+        teamSlug: string;
+        teamName: string;
+        projectId: Id<"projects">;
+        projectName: string;
         deletedAt: number;
         deletedByName?: string;
       };
@@ -225,12 +278,25 @@ function TrashRoute() {
       deletedAt: c.deletedAt,
       deletedByName: c.deletedByName,
     })),
+    ...(trashedDocumentItems ?? []).map<Row>((item) => ({
+      kind: "documentItem",
+      id: item._id,
+      title: item.title,
+      docType: item.docType,
+      teamSlug: item.teamSlug,
+      teamName: item.teamName,
+      projectId: item.projectId,
+      projectName: item.projectName,
+      deletedAt: item.deletedAt,
+      deletedByName: item.deletedByName,
+    })),
   ].sort((a, b) => b.deletedAt - a.deletedAt);
 
   const isLoading =
     trashedProjects === undefined ||
     trashedVideos === undefined ||
-    trashedContracts === undefined;
+    trashedContracts === undefined ||
+    trashedDocumentItems === undefined;
 
   return (
     <div className="h-full flex flex-col">
@@ -242,8 +308,8 @@ function TrashRoute() {
             Recently deleted
           </h1>
           <p className="text-sm text-[#666] mt-1 max-w-prose">
-            Anything you delete lands here — projects and videos. Restore
-            brings it back into its original folder. Permanent delete
+            Anything you delete lands here: projects, files, contracts, and
+            documents. Restore brings it back into its project. Permanent delete
             cascades through every related row and can't be undone.
           </p>
 
@@ -252,12 +318,56 @@ function TrashRoute() {
               <div className="text-sm text-[#888]">Loading…</div>
             ) : rows.length === 0 ? (
               <div className="border-2 border-dashed border-[#1a1a1a] p-8 text-center text-sm text-[#888]">
-                Nothing here. Deleted projects and videos show up in this
+                Nothing here. Deleted projects, files, contracts, and documents show up in this
                 list and stay restorable until you purge them.
               </div>
             ) : (
               <div className="border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
                 {rows.map((row) => {
+                  if (row.kind === "documentItem") {
+                    const isDocument = row.docType === "document";
+                    const Icon = isDocument ? FileText : FileSignature;
+                    return (
+                      <div key={row.id} className="flex items-center gap-4 px-4 py-3">
+                        <div className="w-9 h-9 flex-shrink-0 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center justify-center">
+                          <Icon className="h-4 w-4 text-[#888]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-sm text-[#1a1a1a] truncate flex items-center gap-2">
+                            {row.title}
+                            <Badge variant="secondary">
+                              {isDocument ? "Document" : "Contract"}
+                            </Badge>
+                            <Badge variant="secondary">{row.projectName}</Badge>
+                            <Badge variant="secondary">{row.teamName}</Badge>
+                          </div>
+                          <div className="text-xs font-mono text-[#888]">
+                            Deleted {formatRelativeTime(row.deletedAt)}
+                            {row.deletedByName ? ` by ${row.deletedByName}` : ""}
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void handleRestoreDocumentItem(row)}
+                          disabled={busy !== null}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                          {busy === row.id ? "…" : "Restore"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void handlePurgeDocumentItem(row.id, row.title)}
+                          disabled={busy !== null}
+                          className="text-[#dc2626] hover:text-[#dc2626] hover:bg-[#fef2f2]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />
+                          Forever
+                        </Button>
+                      </div>
+                    );
+                  }
                   if (row.kind === "contract") {
                     return (
                       <div

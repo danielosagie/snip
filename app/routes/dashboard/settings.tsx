@@ -257,6 +257,7 @@ type DesktopUpdateSnapshot = {
   version: string | null;
   percent: number;
   error: string | null;
+  requiresManualInstall: boolean;
 };
 
 /**
@@ -283,6 +284,9 @@ function DesktopUpdatesSection() {
 
   const status = snapshot?.status ?? "idle";
   const busy = checking || status === "checking" || status === "downloading";
+  const manualUpdateReady =
+    Boolean(snapshot?.requiresManualInstall) &&
+    (status === "available" || status === "downloaded");
 
   const check = async () => {
     if (!window.api) return;
@@ -295,6 +299,7 @@ function DesktopUpdatesSection() {
           version: prev?.version ?? null,
           percent: prev?.percent ?? 0,
           error: res.reason ?? "Update check failed.",
+          requiresManualInstall: prev?.requiresManualInstall ?? false,
         }));
       }
     } finally {
@@ -307,17 +312,23 @@ function DesktopUpdatesSection() {
       case "checking":
         return "Checking for updates…";
       case "available":
-        return `Update available${snapshot?.version ? ` (v${snapshot.version})` : ""} — downloading in the background…`;
+        return snapshot?.requiresManualInstall
+          ? `Update available${snapshot.version ? ` (v${snapshot.version})` : ""}.`
+          : `Update available${snapshot?.version ? ` (v${snapshot.version})` : ""} — downloading in the background…`;
       case "downloading":
         return `Downloading update… ${snapshot?.percent ?? 0}%`;
       case "downloaded":
-        return `Update ready${snapshot?.version ? ` (v${snapshot.version})` : ""}. Restart to install.`;
+        return snapshot?.requiresManualInstall
+          ? `Update ready${snapshot.version ? ` (v${snapshot.version})` : ""}.`
+          : `Update ready${snapshot?.version ? ` (v${snapshot.version})` : ""}. Restart to install.`;
       case "none":
         return "You're on the latest version.";
       case "error":
         return snapshot?.error ?? "Update check failed.";
       default:
-        return "Updates download automatically in the background and install on the next quit.";
+        return snapshot?.requiresManualInstall
+          ? "Updates are checked automatically. You choose when to install them."
+          : "Updates download automatically in the background and install on the next quit.";
     }
   })();
 
@@ -351,14 +362,14 @@ function DesktopUpdatesSection() {
           />
           Check for updates
         </button>
-        {status === "downloaded" ? (
+        {manualUpdateReady || status === "downloaded" ? (
           <button
             type="button"
             onClick={() => void window.api?.update.install()}
             className="inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#FF6600] bg-[#FF6600] text-[#f0f0e8] hover:bg-[#FF7A1F] transition-colors"
           >
             <DownloadCloud className="h-3.5 w-3.5" />
-            Restart &amp; install
+            {manualUpdateReady ? "Download update" : "Restart & install"}
           </button>
         ) : null}
       </div>

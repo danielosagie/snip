@@ -30,6 +30,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getS3Client, BUCKET_NAME } from "./s3";
 import { indexSearchable, removeSearchableForVideo } from "./search";
+import { trashFolderTree } from "./folders";
 
 const ID_SUFFIX_LEN = 6;
 
@@ -260,12 +261,26 @@ function buildVideoEntries(
   preferProxy: boolean,
 ): VideoListEntry[] {
   const live = videos.filter((vd) => !vd.deletedAt);
+  // Match the web project view: a version stack is one logical file. Without
+  // this the mounted drive could show hundreds of historical versions while
+  // the app showed one (or appeared empty after filtering).
+  const byLineage = new Map<string, Doc<"videos">[]>();
+  for (const video of live) {
+    const key = String(video.lineageId ?? video._id);
+    const group = byLineage.get(key) ?? [];
+    group.push(video);
+    byLineage.set(key, group);
+  }
+  const visible = Array.from(byLineage.values()).map((group) => {
+    group.sort((a, b) => b._creationTime - a._creationTime);
+    return group.find((video) => video.isCurrentVersion === true) ?? group[0];
+  });
   // Items are content-type agnostic — the `videos` table doubles as the
   // generic file table (PDFs, images, audio, .ai, .psd, anything). The
   // backend's markUploadComplete already routes non-video MIME types
   // through markAsReadyAsFile, so the desktop drive just surfaces whatever
   // landed.
-  const rows = live.map((vd) => {
+  const rows = visible.map((vd) => {
     // Keep the ORIGINAL name+extension even when serving a proxy — the drive
     // exposes one logical file per video whose bytes flip with proxy mode.
     const ext = extractExt(vd.s3Key ?? undefined) ?? extractExt(vd.title);
@@ -1620,22 +1635,7 @@ export const deletePathForDesktop = mutation({
       await removeSearchableForVideo(ctx, item.video._id).catch(() => {});
       return { type: "file" as const };
     }
-    const [children, videos] = await Promise.all([
-      ctx.db
-        .query("folders")
-        .withIndex("by_project_and_parent", (q) =>
-          q.eq("projectId", project._id).eq("parentFolderId", item.folder._id),
-        )
-        .collect(),
-      ctx.db
-        .query("videos")
-        .withIndex("by_folder", (q) => q.eq("folderId", item.folder._id))
-        .collect(),
-    ]);
-    if (children.length > 0 || videos.some((video) => !video.deletedAt)) {
-      throw new Error("Folder isn't empty. Delete or move its contents first.");
-    }
-    await ctx.db.delete(item.folder._id);
+    await trashFolderTree(ctx, item.folder, identityName(user));
     return { type: "folder" as const };
   },
 });

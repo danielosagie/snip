@@ -19,6 +19,7 @@ import {
   Copy,
   FolderInput,
   CheckSquare,
+  Check,
   Pencil,
   Tags,
 } from "lucide-react";
@@ -27,7 +28,7 @@ import {
   fileKindBucketFromContent,
   type FileKindBucket,
 } from "@/lib/fileTypes";
-import { FloatingImagePreview } from "@/components/FloatingImagePreview";
+import { MediaHoverPreview } from "@/components/media/MediaHoverPreview";
 import {
   ContextMenu,
   type ContextMenuEntry,
@@ -66,6 +67,7 @@ import { DashboardHeader } from "@/components/DashboardHeader";
 import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
 import { ShareFolderDialog } from "@/components/ShareFolderDialog";
 import { MoveToFolderDialog } from "@/components/MoveToFolderDialog";
+import { friendlyError } from "@/lib/friendlyError";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
@@ -169,7 +171,11 @@ function VideoIntentTarget({
 
   return (
     <div
-      className={`${className}${selected ? " ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]" : ""}`}
+      className={cn(
+        "relative",
+        className,
+        selected && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
+      )}
       onClick={(e) => {
         // In selection mode a plain click toggles. Otherwise Cmd/Ctrl+click
         // toggles a single item, Shift+click extends the range, and a plain
@@ -190,7 +196,7 @@ function VideoIntentTarget({
         }
         onOpen();
       }}
-      draggable={draggable}
+      draggable={draggable && !selectionMode}
       onDragStart={(e) => {
         if (!draggable) return;
         e.dataTransfer.effectAllowed = "move";
@@ -198,6 +204,17 @@ function VideoIntentTarget({
       }}
       {...prewarmIntentHandlers}
     >
+      {selectionMode ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute left-2 top-2 z-30 flex h-6 w-6 items-center justify-center border-2 border-[#1a1a1a]",
+            selected ? "bg-[#FF6600] text-white" : "bg-[#f0f0e8]",
+          )}
+        >
+          {selected ? <Check className="h-4 w-4" strokeWidth={3} /> : null}
+        </span>
+      ) : null}
       {children}
     </div>
   );
@@ -252,9 +269,14 @@ export default function ProjectPage({
   const updateVideoWorkflowStatus = useMutation(api.videos.updateWorkflowStatus);
   const moveVideoToFolder = useMutation(api.folders.moveVideoToFolder);
   const moveFolder = useMutation(api.folders.moveFolder);
+  const removeSelection = useMutation(api.folders.removeSelection);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
   const getProxyDownloadUrl = useAction(api.videoActions.getProxyDownloadUrl);
   const requestProxies = useAction(api.videoActions.requestProxies);
+  const contractDocuments = useQuery(
+    api.contractsTable.list,
+    resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
+  );
 
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sort, setSort] = useState<ProjectSortMode>("newest");
@@ -276,6 +298,13 @@ export default function ProjectPage({
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<Id<"videos">>>(
     () => new Set(),
   );
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<Id<"folders">>>(
+    () => new Set(),
+  );
+  const [selectedContractIds, setSelectedContractIds] = useState<
+    Set<Id<"contracts">>
+  >(() => new Set());
+  const [selectedLegacyContract, setSelectedLegacyContract] = useState(false);
   const [lastClickedVideoId, setLastClickedVideoId] = useState<Id<"videos"> | null>(
     null,
   );
@@ -291,19 +320,12 @@ export default function ProjectPage({
 
   const clearSelection = useCallback(() => {
     setSelectedVideoIds(new Set());
+    setSelectedFolderIds(new Set());
+    setSelectedContractIds(new Set());
+    setSelectedLegacyContract(false);
     setLastClickedVideoId(null);
     setSelectionMode(false);
   }, []);
-
-  // ESC clears the selection — quick exit when the user is done.
-  useEffect(() => {
-    if (selectedVideoIds.size === 0) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") clearSelection();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selectedVideoIds.size, clearSelection]);
 
   const shouldCanonicalize =
     !!context && !context.isCanonical && pathname !== context.canonicalPath;
@@ -442,21 +464,37 @@ export default function ProjectPage({
   // a bespoke bulk backend signature, and reuses the access checks.
   const handleBulkDelete = async () => {
     const ids = Array.from(selectedVideoIds);
-    if (ids.length === 0) return;
+    const folderIds = Array.from(selectedFolderIds);
+    const contractIds = Array.from(selectedContractIds);
+    if (
+      ids.length === 0 &&
+      folderIds.length === 0 &&
+      contractIds.length === 0 &&
+      !selectedLegacyContract
+    )
+      return;
+    const total =
+      ids.length + folderIds.length + contractIds.length + (selectedLegacyContract ? 1 : 0);
     if (
       !confirm(
-        `Move ${ids.length} item${ids.length === 1 ? "" : "s"} to the trash?`,
+        folderIds.length > 0 || contractIds.length > 0
+          ? `Delete ${total} selected item${total === 1 ? "" : "s"}? Nested folders will be removed; contained files, contracts, and documents remain recoverable in Recently deleted.`
+          : `Move ${ids.length} item${ids.length === 1 ? "" : "s"} to the trash?`,
       )
     )
       return;
     setBulkBusy("delete");
     try {
-      for (const videoId of ids) {
-        await deleteVideo({ videoId });
-      }
+      await removeSelection({
+        projectId: project._id,
+        videoIds: ids,
+        folderIds,
+        contractIds,
+        removeLegacyContract: selectedLegacyContract,
+      });
       clearSelection();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Delete failed.");
+      alert(friendlyError(e, "Delete failed."));
     } finally {
       setBulkBusy(null);
     }
@@ -856,18 +894,6 @@ export default function ProjectPage({
     [selectedVideoIds],
   );
 
-  // Hover-preview state for video cards in both the grid and list
-  // views. Shared parent state because each card lives inside a
-  // `.map()` — putting per-card useState here would violate rules of
-  // hooks. Storing only the hovered card's src + cursor position is
-  // enough to drive the floating preview.
-  const [videoHover, setVideoHover] = useState<{
-    videoId: Id<"videos">;
-    src: string;
-    x: number;
-    y: number;
-  } | null>(null);
-
   // {_id, title} for the selected videos — needed by the bulk rename preview.
   const selectedRenameItems = useMemo(
     () =>
@@ -899,6 +925,117 @@ export default function ProjectPage({
     return filtered;
   }, [folders, search, sort]);
 
+  const selectedCount =
+    selectedVideoIds.size +
+    selectedFolderIds.size +
+    selectedContractIds.size +
+    (selectedLegacyContract ? 1 : 0);
+  const hasSelectedFolders = selectedFolderIds.size > 0;
+  const hasSelectedDocuments = selectedContractIds.size > 0;
+  const hasNonFileSelection =
+    hasSelectedFolders || hasSelectedDocuments || selectedLegacyContract;
+
+  const handleFolderSelectionToggle = useCallback(
+    (folderId: Id<"folders">) => {
+      setSelectedFolderIds((previous) => {
+        const next = new Set(previous);
+        if (next.has(folderId)) next.delete(folderId);
+        else next.add(folderId);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleContractSelectionToggle = useCallback(
+    (contractId: Id<"contracts">) => {
+      setSelectedContractIds((previous) => {
+        const next = new Set(previous);
+        if (next.has(contractId)) next.delete(contractId);
+        else next.add(contractId);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const selectAllVisible = useCallback(() => {
+    setSelectionMode(true);
+    setSelectedVideoIds(new Set((filteredVideos ?? []).map((video) => video._id)));
+    setSelectedFolderIds(new Set((filteredFolders ?? []).map((folder) => folder._id)));
+    const q = search.trim().toLowerCase();
+    setSelectedContractIds(
+      new Set(
+        currentFolderId === null
+          ? (contractDocuments ?? [])
+              .filter((item) => !q || item.title.toLowerCase().includes(q))
+              .map((item) => item._id)
+          : [],
+      ),
+    );
+    const legacyMatches =
+      currentFolderId === null &&
+      Boolean(project?.contract) &&
+      (!q ||
+        project?.name.toLowerCase().includes(q) ||
+        project?.contract?.clientName?.toLowerCase().includes(q));
+    setSelectedLegacyContract(legacyMatches);
+  }, [contractDocuments, currentFolderId, filteredFolders, filteredVideos, project, search]);
+
+  // Finder-style project shortcuts. They work without first clicking Select,
+  // while inputs and editors retain their normal text shortcuts.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.matches("input, textarea, select, [contenteditable='true']") ||
+        target?.closest("[role='dialog']")
+      ) {
+        return;
+      }
+
+      const command = event.metaKey || event.ctrlKey;
+      if (command && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        selectAllVisible();
+        return;
+      }
+      if (
+        event.metaKey &&
+        event.key.toLowerCase() === "d" &&
+        selectedVideoIds.size > 0 &&
+        !hasNonFileSelection
+      ) {
+        event.preventDefault();
+        void handleBulkDuplicate();
+        return;
+      }
+      if (
+        (event.key === "Backspace" ||
+          event.key === "Delete" ||
+          (event.ctrlKey && event.key.toLowerCase() === "d")) &&
+        selectedCount > 0
+      ) {
+        event.preventDefault();
+        void handleBulkDelete();
+        return;
+      }
+      if (event.key === "Escape" && (selectionMode || selectedCount > 0)) {
+        event.preventDefault();
+        clearSelection();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    clearSelection,
+    hasNonFileSelection,
+    selectedCount,
+    selectedVideoIds.size,
+    selectionMode,
+    selectAllVisible,
+  ]);
+
   // Not found state
   if (context === null || project === null) {
     return (
@@ -923,91 +1060,90 @@ export default function ProjectPage({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Cursor-following video thumbnail preview. Rendered at the
-          page root so a single preview node serves both the grid and
-          the list view — per-card useState would violate rules of
-          hooks inside the `.map()` below. */}
-      <FloatingImagePreview
-        src={videoHover?.src ?? null}
-        alt="Video preview"
-        pos={videoHover ? { x: videoHover.x, y: videoHover.y } : null}
-      />
       {/* Floating selection toolbar — surfaces only when the user has
           multi-selected items. Drives the ad-hoc bundle share flow. */}
-      {selectedVideoIds.size > 0 ? (
+      {selectionMode || selectedCount > 0 ? (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] px-4 py-2.5 shadow-[4px_4px_0px_0px_var(--shadow-color)] max-w-[95vw] flex-wrap justify-center">
           <span className="font-mono text-xs uppercase tracking-wider mr-1">
-            {selectedVideoIds.size} selected
+            {selectedCount} selected
           </span>
           <button
             type="button"
             disabled={Boolean(bulkBusy)}
+            onClick={selectAllVisible}
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+          >
+            Select all <span className="font-mono opacity-70">⌘A</span>
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setSelectionShareOpen(true)}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-[#FF6600] text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#9A3412] disabled:opacity-40"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-[#FF6600] text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#9A3412] disabled:opacity-40"
           >
             <LinkIcon className="inline h-3.5 w-3.5 mr-1" />
             Share
           </button>
           <button
             type="button"
-            disabled={Boolean(bulkBusy)}
+            disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => void handleBulkDownload()}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
           >
             <Download className="inline h-3.5 w-3.5 mr-1" />
             {bulkBusy === "download" ? "Downloading…" : "Download"}
           </button>
           <button
             type="button"
-            disabled={Boolean(bulkBusy)}
+            disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setMoveOpen(true)}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
           >
             <FolderInput className="inline h-3.5 w-3.5 mr-1" />
             Move
           </button>
           <button
             type="button"
-            disabled={Boolean(bulkBusy)}
+            disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => void handleBulkDuplicate()}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
           >
             <Copy className="inline h-3.5 w-3.5 mr-1" />
-            {bulkBusy === "duplicate" ? "Duplicating…" : "Duplicate"}
+            {bulkBusy === "duplicate" ? "Duplicating…" : "Duplicate ⌘D"}
           </button>
           <button
             type="button"
-            disabled={Boolean(bulkBusy)}
+            disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setBulkRenameOpen(true)}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
           >
             <Pencil className="inline h-3.5 w-3.5 mr-1" />
             Rename
           </button>
           <button
             type="button"
-            disabled={Boolean(bulkBusy)}
+            disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setBulkMetaOpen(true)}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
           >
             <Tags className="inline h-3.5 w-3.5 mr-1" />
             Metadata
           </button>
           <button
             type="button"
-            disabled={Boolean(bulkBusy)}
+            disabled={Boolean(bulkBusy) || selectedCount === 0}
             onClick={() => void handleBulkDelete()}
-            className="px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#dc2626] hover:border-[#dc2626] disabled:opacity-40"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#dc2626] hover:border-[#dc2626] disabled:opacity-40"
           >
             <Trash2 className="inline h-3.5 w-3.5 mr-1" />
-            {bulkBusy === "delete" ? "Deleting…" : "Delete"}
+            {bulkBusy === "delete" ? "Deleting…" : "Delete ⌘⌫"}
           </button>
           <button
             type="button"
             onClick={clearSelection}
-            className="px-3 py-1 border-2 border-[#f0f0e8]/40 bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
+            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8]/40 bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
           >
-            Cancel
+            Done <span className="font-mono opacity-70">Esc</span>
           </button>
         </div>
       ) : null}
@@ -1217,6 +1353,9 @@ export default function ProjectPage({
               projectId={project._id}
               folders={filteredFolders ?? []}
               canEdit={canUpload}
+              selectedFolderIds={selectedFolderIds}
+              selectionMode={selectionMode}
+              onSelectToggle={(folderId) => handleFolderSelectionToggle(folderId)}
               onDropVideo={(videoId, folderId) =>
                 void handleMoveVideo(videoId, folderId)
               }
@@ -1234,6 +1373,17 @@ export default function ProjectPage({
               <ContractListSection
                 projectId={project._id}
                 teamSlug={resolvedTeamSlug}
+                projectName={project.name}
+                items={contractDocuments}
+                legacyContract={project.contract ?? null}
+                search={search}
+                selectedIds={selectedContractIds}
+                legacySelected={selectedLegacyContract}
+                selectionMode={selectionMode}
+                onSelectToggle={handleContractSelectionToggle}
+                onLegacySelectToggle={() =>
+                  setSelectedLegacyContract((selected) => !selected)
+                }
               />
             )}
             <div className="px-6 pt-4 pb-6">
@@ -1272,6 +1422,11 @@ export default function ProjectPage({
                       status={video.status}
                       canDelete={canUpload}
                       draggable={canUpload}
+                      selected={selectedVideoIds.has(video._id)}
+                      selectionMode={selectionMode}
+                      onSelectToggle={(mods) =>
+                        handleSelectionToggle(video._id, mods)
+                      }
                       onDelete={() => handleDeleteVideo(video._id)}
                       onOpen={
                         hasFocusedView
@@ -1321,28 +1476,6 @@ export default function ProjectPage({
                   >
                     <div
                       className="relative aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all"
-                      onMouseEnter={(e) =>
-                        thumbnailSrc &&
-                        setVideoHover({
-                          videoId: video._id,
-                          src: thumbnailSrc,
-                          x: e.clientX,
-                          y: e.clientY,
-                        })
-                      }
-                      onMouseMove={(e) =>
-                        thumbnailSrc &&
-                        setVideoHover((prev) =>
-                          prev?.videoId === video._id
-                            ? { ...prev, x: e.clientX, y: e.clientY }
-                            : prev,
-                        )
-                      }
-                      onMouseLeave={() =>
-                        setVideoHover((prev) =>
-                          prev?.videoId === video._id ? null : prev,
-                        )
-                      }
                     >
                       {thumbnailSrc ? (
                         <img
@@ -1355,6 +1488,14 @@ export default function ProjectPage({
                           <Play className="h-10 w-10 text-[#888]" />
                         </div>
                       )}
+                      {video.status === "ready" ? (
+                        <MediaHoverPreview
+                          videoId={video._id}
+                          title={video.title}
+                          posterUrl={thumbnailSrc}
+                          duration={video.duration}
+                        />
+                      ) : null}
                     {video.status === "ready" && video.duration && (
                       <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[11px] font-mono px-1.5 py-0.5">
                         {formatDuration(video.duration)}
@@ -1378,7 +1519,7 @@ export default function ProjectPage({
                       </div>
                     )}
                     {/* Hover menu */}
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-2 right-2 z-40 opacity-0 group-hover:opacity-100 transition-opacity">
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           asChild
@@ -1479,6 +1620,9 @@ export default function ProjectPage({
               projectId={project._id}
               folders={filteredFolders ?? []}
               canEdit={canUpload}
+              selectedFolderIds={selectedFolderIds}
+              selectionMode={selectionMode}
+              onSelectToggle={(folderId) => handleFolderSelectionToggle(folderId)}
               onDropVideo={(videoId, folderId) =>
                 void handleMoveVideo(videoId, folderId)
               }
@@ -1493,6 +1637,17 @@ export default function ProjectPage({
               <ContractListSection
                 projectId={project._id}
                 teamSlug={resolvedTeamSlug}
+                projectName={project.name}
+                items={contractDocuments}
+                legacyContract={project.contract ?? null}
+                search={search}
+                selectedIds={selectedContractIds}
+                legacySelected={selectedLegacyContract}
+                selectionMode={selectionMode}
+                onSelectToggle={handleContractSelectionToggle}
+                onLegacySelectToggle={() =>
+                  setSelectedLegacyContract((selected) => !selected)
+                }
               />
             )}
             <div className="divide-y-2 divide-[#1a1a1a]">
@@ -1518,6 +1673,11 @@ export default function ProjectPage({
                     status={video.status}
                     canDelete={canUpload}
                     draggable={canUpload}
+                    selected={selectedVideoIds.has(video._id)}
+                    selectionMode={selectionMode}
+                    onSelectToggle={(mods) =>
+                      handleSelectionToggle(video._id, mods)
+                    }
                     onDelete={() => handleDeleteVideo(video._id)}
                     onOpen={
                       hasFocusedView
@@ -1568,28 +1728,6 @@ export default function ProjectPage({
                   {/* Thumbnail */}
                   <div
                     className="relative w-44 aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shrink-0 shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all"
-                    onMouseEnter={(e) =>
-                      thumbnailSrc &&
-                      setVideoHover({
-                        videoId: video._id,
-                        src: thumbnailSrc,
-                        x: e.clientX,
-                        y: e.clientY,
-                      })
-                    }
-                    onMouseMove={(e) =>
-                      thumbnailSrc &&
-                      setVideoHover((prev) =>
-                        prev?.videoId === video._id
-                          ? { ...prev, x: e.clientX, y: e.clientY }
-                          : prev,
-                      )
-                    }
-                    onMouseLeave={() =>
-                      setVideoHover((prev) =>
-                        prev?.videoId === video._id ? null : prev,
-                      )
-                    }
                   >
                     {thumbnailSrc ? (
                       <img
@@ -1602,6 +1740,14 @@ export default function ProjectPage({
                         <Play className="h-6 w-6 text-[#888]" />
                       </div>
                     )}
+                    {video.status === "ready" ? (
+                      <MediaHoverPreview
+                        videoId={video._id}
+                        title={video.title}
+                        posterUrl={thumbnailSrc}
+                        duration={video.duration}
+                      />
+                    ) : null}
                     {video.status !== "ready" && (
                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                         <span className="text-white text-[10px] font-bold uppercase tracking-wider">

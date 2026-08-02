@@ -507,7 +507,7 @@ export default function Homepage() {
               Compare
             </Link>
             <a
-              href="/downloads/snip-desktop.pkg"
+              href="/downloads/snip-desktop.dmg"
               className="hover:text-[#131315] transition-colors inline-flex items-center gap-1.5"
               title="Download snip Desktop for macOS"
             >
@@ -586,7 +586,7 @@ export default function Homepage() {
                 Start for free
               </Link>
               <a
-                href="/downloads/snip-desktop.pkg"
+                href="/downloads/snip-desktop.dmg"
                 className={`${pill} border px-6 py-3 hover:bg-[#fafafa]`}
                 style={{ borderColor: LINE, color: INK }}
               >

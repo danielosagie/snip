@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,8 +22,7 @@ import { Button } from "@/components/ui/button";
  */
 export function AddOnsSection() {
   const addOns = useQuery(api.workspaceBilling.getMyAddOns, {});
-  const toggleAddOn = useMutation(api.workspaceBilling.toggleAddOn);
-  const setCustomDomain = useMutation(api.workspaceBilling.setCustomDomain);
+  const updateAddOn = useAction(api.workspaceBillingActions.updateAddOn);
 
   const [hostname, setHostname] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -43,7 +42,7 @@ export function AddOnsSection() {
     setBusy(addOn);
     setError(null);
     try {
-      await toggleAddOn({ addOn, enabled: next });
+      await updateAddOn({ addOn, enabled: next });
     } catch (e) {
       const data =
         typeof e === "object" && e !== null && "data" in e
@@ -65,7 +64,11 @@ export function AddOnsSection() {
     setBusy("customDomain");
     setError(null);
     try {
-      await setCustomDomain({ hostname: hostname.trim() || null });
+      await updateAddOn({
+        addOn: "customDomain",
+        enabled: true,
+        customDomain: hostname.trim(),
+      });
       setHostname("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't set custom domain.");
@@ -142,7 +145,10 @@ export function AddOnsSection() {
                   setBusy("customDomain");
                   setError(null);
                   try {
-                    await setCustomDomain({ hostname: null });
+                    await updateAddOn({
+                      addOn: "customDomain",
+                      enabled: false,
+                    });
                   } catch (err) {
                     setError(
                       err instanceof Error

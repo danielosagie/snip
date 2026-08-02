@@ -279,8 +279,7 @@ export const inviteMember = mutation({
 
     // Seat cap. On free tier, blocks once owner + 1 invitee is
     // reached (including any other pending invites the owner has
-    // out across their teams). Paid tiers pass through — overage
-    // seats are billed at $5/mo via the per-seat rate.
+    // out across their teams). Paid tiers include unlimited collaborators.
     await assertCanAddWorkspaceSeat(ctx, args.teamId);
 
     const token = generateToken();

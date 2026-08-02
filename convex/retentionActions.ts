@@ -16,8 +16,37 @@ import { deleteStreamAsset } from "./cloudflareStream";
 import { BUCKET_NAME, getS3Client } from "./s3";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { isEvictionEnabled, retentionHotDays } from "./retentionPolicy";
+import { trashCutoffMs } from "./trashPolicy";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function isNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as {
+    status?: number;
+    statusCode?: number;
+    code?: string;
+    name?: string;
+  };
+  return (
+    value.status === 404 ||
+    value.statusCode === 404 ||
+    value.code === "NoSuchKey" ||
+    value.name === "NotFoundError"
+  );
+}
+
+async function deleteTrashObjects(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  const s3 = getS3Client();
+  for (const key of keys) {
+    try {
+      await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
+    }
+  }
+}
 
 async function deleteProxyObjects(keys: string[]): Promise<void> {
   if (keys.length === 0) return;
@@ -191,10 +220,9 @@ export const purgeDeletedDuplicateAssets = internalAction({
 });
 
 /**
- * Daily cold-eviction sweep (wired into convex/crons.ts). Reclaims the
- * encoded ladder for videos that have gone cold, leaving the source in
- * place for lazy re-encode. Idempotent and self-throttling: processes one
- * batch per run, coldest first.
+ * Retained temporarily so already-enqueued jobs resolve safely after the
+ * custom eviction policy was retired. `isEvictionEnabled()` is intentionally
+ * always false; new code must rely on Mux native inactive-asset pricing.
  */
 export const runColdEviction = internalAction({
   args: {},
@@ -235,6 +263,132 @@ export const runColdEviction = internalAction({
     }
 
     return { evicted, skipped };
+  },
+});
+
+/**
+ * Daily hard-purge for items whose 30-day Recently Deleted recovery window
+ * has ended. Each target is claimed transactionally before any provider data
+ * is removed, then external deletion and database finalization run
+ * idempotently. Failures leave the claimed row for the next daily retry.
+ */
+export const purgeExpiredTrash = internalAction({
+  args: {},
+  returns: v.object({ purged: v.number(), retried: v.number(), skipped: v.number() }),
+  handler: async (ctx): Promise<{ purged: number; retried: number; skipped: number }> => {
+    const cutoffMs = trashCutoffMs();
+    const targets = await ctx.runQuery(internal.retention.listExpiredTrashTargets, {
+      cutoffMs,
+      limit: 100,
+    });
+    let purged = 0;
+    let retried = 0;
+    let skipped = 0;
+
+    for (const target of targets) {
+      const claimed = await ctx.runMutation(
+        internal.retention.claimExpiredTrashTarget,
+        { ...target, cutoffMs },
+      );
+      if (!claimed) {
+        skipped++;
+        continue;
+      }
+      const assets = await ctx.runQuery(
+        internal.retention.getExpiredTrashTargetAssets,
+        { ...target, cutoffMs },
+      );
+      if (!assets.eligible) {
+        skipped++;
+        continue;
+      }
+      try {
+        for (const assetId of assets.muxAssetIds) {
+          try {
+            await deleteMuxAsset(assetId);
+          } catch (error) {
+            if (!isNotFoundError(error)) throw error;
+          }
+        }
+        for (const streamUid of assets.streamUids) {
+          await deleteStreamAsset(streamUid);
+        }
+        await deleteTrashObjects(assets.objectKeys);
+        const finalized = await ctx.runMutation(
+          internal.retention.finalizeExpiredTrash,
+          { ...target, cutoffMs },
+        );
+        if (finalized) purged++;
+        else skipped++;
+      } catch (error) {
+        console.error("trash purge failed; will retry", {
+          ...target,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        retried++;
+      }
+    }
+    return { purged, retried, skipped };
+  },
+});
+
+/** Remove legacy upload-prewarmed previews that no paywall references. */
+export const purgeUnusedPreviewAssets = internalAction({
+  args: {},
+  returns: v.object({ purged: v.number(), skipped: v.number(), failed: v.number() }),
+  handler: async (ctx): Promise<{ purged: number; skipped: number; failed: number }> => {
+    const candidates = await ctx.runQuery(
+      internal.retention.listUnusedPreviewAssets,
+      { limit: 100 },
+    );
+    let purged = 0;
+    let skipped = 0;
+    const failed = 0;
+    for (const candidate of candidates) {
+      const detached = await ctx.runMutation(
+        internal.retention.detachUnusedPreviewAsset,
+        candidate,
+      );
+      if (!detached) {
+        skipped++;
+        continue;
+      }
+      await ctx.scheduler.runAfter(
+        0,
+        internal.retentionActions.deleteDetachedMuxAsset,
+        { muxAssetId: candidate.muxPreviewAssetId, attempt: 0 },
+      );
+      purged++;
+    }
+    return { purged, skipped, failed };
+  },
+});
+
+/** Provider-only deletion with bounded retries after a DB-safe detach. */
+export const deleteDetachedMuxAsset = internalAction({
+  args: { muxAssetId: v.string(), attempt: v.optional(v.number()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    try {
+      await deleteMuxAsset(args.muxAssetId);
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      const attempt = args.attempt ?? 0;
+      if (attempt >= 5) {
+        console.error("detached Mux asset delete exhausted retries", {
+          muxAssetId: args.muxAssetId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+      const retryDelayMs = Math.min(60 * 60 * 1000, 2 ** attempt * 60_000);
+      await ctx.scheduler.runAfter(
+        retryDelayMs,
+        internal.retentionActions.deleteDetachedMuxAsset,
+        { muxAssetId: args.muxAssetId, attempt: attempt + 1 },
+      );
+    }
+    return null;
   },
 });
 

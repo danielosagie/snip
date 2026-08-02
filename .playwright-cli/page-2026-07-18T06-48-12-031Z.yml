@@ -1,0 +1,375 @@
+- generic [ref=e2]:
+  - navigation [ref=e3]:
+    - generic [ref=e4]:
+      - link "snip snip." [ref=e5] [cursor=pointer]:
+        - /url: /
+        - img "snip" [ref=e7]
+        - generic [ref=e10]: snip.
+      - generic [ref=e11]:
+        - link "Product" [ref=e12] [cursor=pointer]:
+          - /url: "#product"
+        - link "Pricing" [ref=e13] [cursor=pointer]:
+          - /url: "#pricing"
+        - link "Compare" [ref=e14] [cursor=pointer]:
+          - /url: /compare/frameio
+        - link "Download" [ref=e15] [cursor=pointer]:
+          - /url: /downloads/snip-desktop.pkg
+      - generic [ref=e19]:
+        - link "Log in" [ref=e20] [cursor=pointer]:
+          - /url: /sign-in
+        - link "Start for free" [ref=e21] [cursor=pointer]:
+          - /url: /sign-up
+  - generic [ref=e22]:
+    - generic [ref=e23]:
+      - link "snip is open source — star it on GitHub" [ref=e25] [cursor=pointer]:
+        - /url: https://github.com/danielosagie/snip
+        - text: snip is open source
+        - generic [ref=e26]: — star it on GitHub
+      - heading "Client review that just works better." [level=1] [ref=e31]
+      - paragraph [ref=e33]: Frame-accurate review, contracts, and paid delivery for creative teams. One link does all of it — and your client never makes an account.
+      - generic [ref=e35]:
+        - link "Start for free" [ref=e36] [cursor=pointer]:
+          - /url: /sign-up
+        - link "Download for Mac" [ref=e37] [cursor=pointer]:
+          - /url: /downloads/snip-desktop.pkg
+      - generic [ref=e42]:
+        - generic [ref=e43]: Open source
+        - generic [ref=e44]: Flat $25/mo
+        - generic [ref=e45]: Unlimited seats
+        - generic [ref=e46]: No per-user fees
+    - generic [ref=e47]:
+      - tablist "Product areas" [ref=e48]:
+        - tab "Review" [selected] [ref=e49]
+        - tab "Contracts" [ref=e51]
+        - tab "Delivery" [ref=e52]
+        - tab "Drive" [ref=e53]
+      - generic [ref=e54]:
+        - generic [ref=e55]: snip — review
+        - generic [ref=e65]:
+          - generic [ref=e67]:
+            - generic [ref=e70]: 00:42:17:00
+            - generic [ref=e71]: v3 · ProRes
+          - generic [ref=e74]:
+            - generic [ref=e75]:
+              - generic [ref=e76]:
+                - generic [ref=e77]: M
+                - generic [ref=e78]: Matt
+                - generic [ref=e79]: 00:42
+              - paragraph [ref=e80]: That's great!
+            - generic [ref=e81]:
+              - generic [ref=e82]:
+                - generic [ref=e83]: A
+                - generic [ref=e84]: Ana
+                - generic [ref=e85]: 01:18
+              - paragraph [ref=e86]: Trim two frames here
+            - generic [ref=e87]: ✓ Approved
+  - generic [ref=e89]:
+    - heading "snip isn't just another review tool. It's everything your studio needs." [level=2] [ref=e91]: snip isn't just another review tool.It's everything your studio needs.
+    - generic [ref=e92]:
+      - generic [ref=e94]:
+        - generic [ref=e95]: 00:42:17 — “That's great!”
+        - generic [ref=e103]: Frame-accurate review
+      - generic [ref=e108]:
+        - generic [ref=e113]:
+          - generic [ref=e114]: Maya R.
+          - generic [ref=e115]: Signed
+        - generic [ref=e118]: Contracts built in
+      - generic [ref=e124]:
+        - generic [ref=e126]:
+          - generic [ref=e127]: final_master.mov
+          - generic [ref=e134]: Pay to unlock
+        - generic [ref=e135]: Paid delivery
+      - generic [ref=e141]:
+        - generic [ref=e143]:
+          - generic [ref=e144]:
+            - generic [ref=e147]: clients/2026/
+            - generic [ref=e148]: streamed
+          - generic [ref=e149]:
+            - generic [ref=e152]: raw_footage/
+            - generic [ref=e153]: streamed
+        - generic [ref=e154]: Cloud drive included
+  - generic [ref=e159]:
+    - generic [ref=e160]:
+      - generic [ref=e161]:
+        - generic [ref=e162]: ▶
+        - text: Introducing snip
+      - heading "A review suite that works like you do. Built by editors, for editors." [level=2] [ref=e163]: A review suite that works like you do.Built by editors, for editors.
+    - generic [ref=e164]:
+      - generic [ref=e166]:
+        - heading "Review without the back-and-forth" [level=3] [ref=e167]
+        - paragraph [ref=e168]: Comments pin to the exact frame. Threads resolve in place, and markers export straight to your NLE — no more “the part around two minutes in.”
+        - generic [ref=e169]:
+          - generic [ref=e170]: Matt
+          - generic [ref=e172]: “That's great!”
+          - generic [ref=e173]: ProRes
+          - generic [ref=e174]: Cinematic
+          - generic [ref=e175]: ✓ Approved
+      - generic [ref=e177]:
+        - heading "Contracts clients actually sign" [level=3] [ref=e178]
+        - paragraph [ref=e179]: Freeze the terms, verify by one-time code, and keep a court-grade audit trail — consent, hashes, and signatures in the same link as the cut.
+        - generic [ref=e180]:
+          - generic [ref=e181]: Maya R.
+          - generic [ref=e182]: OTP verified
+      - generic [ref=e186]:
+        - heading "Get paid before the download" [level=3] [ref=e187]
+        - paragraph [ref=e188]: Put final delivery behind a paywall. Clients watch a watermarked preview until the invoice clears — then downloads unlock themselves.
+        - generic [ref=e189]:
+          - generic [ref=e193]: highlights_4k.mp4
+          - generic [ref=e194]: $450 to unlock
+      - generic [ref=e196]:
+        - heading "Stream the cloud, locally" [level=3] [ref=e197]
+        - paragraph [ref=e198]: Mount your whole library like a local disk. Bytes stream straight from the edge — open a 40GB master without downloading it first.
+        - generic [ref=e199]:
+          - generic [ref=e200]:
+            - generic [ref=e203]: clients/2026/rooftop_wedding/
+            - generic [ref=e204]: streamed
+          - generic [ref=e205]:
+            - generic [ref=e208]: raw_a7siii_cards/
+            - generic [ref=e209]: streamed
+  - generic [ref=e212]:
+    - generic [ref=e213]:
+      - generic [ref=e214]: ▶
+      - text: End-to-end workflows
+    - heading "snip powers your favorite freelance editor." [level=2] [ref=e215]
+  - generic [ref=e217]:
+    - generic [ref=e218]:
+      - generic [ref=e219]:
+        - generic [ref=e220]: ▶
+        - text: Every workflow
+      - heading "Powering small teams with big clients. See how snip fits your workflow." [level=2] [ref=e221]: Powering small teams with big clients.See how snip fits your workflow.
+    - generic [ref=e222]:
+      - generic [ref=e224]:
+        - link "Video editors Cuts reviewed and approved without the email chain." [ref=e225] [cursor=pointer]:
+          - /url: /for/video-editors
+          - generic [ref=e226]:
+            - generic [ref=e227]: Video editors
+            - generic [ref=e228]: Cuts reviewed and approved without the email chain.
+        - link "Agencies Every client, every project, one flat bill." [ref=e232] [cursor=pointer]:
+          - /url: /for/agencies
+          - generic [ref=e233]:
+            - generic [ref=e234]: Agencies
+            - generic [ref=e235]: Every client, every project, one flat bill.
+        - link "Wedding & event filmmakers Paywalled finals that collect the balance for you." [ref=e239] [cursor=pointer]:
+          - /url: /sign-up
+          - generic [ref=e240]:
+            - generic [ref=e241]: Wedding & event filmmakers
+            - generic [ref=e242]: Paywalled finals that collect the balance for you.
+        - link "YouTube & podcast teams One drive for raw cards, cuts, and published masters." [ref=e246] [cursor=pointer]:
+          - /url: /sign-up
+          - generic [ref=e247]:
+            - generic [ref=e248]: YouTube & podcast teams
+            - generic [ref=e249]: One drive for raw cards, cuts, and published masters.
+      - img "Creative team filming on location" [ref=e255]
+  - generic [ref=e257]:
+    - generic [ref=e258]:
+      - generic [ref=e259]:
+        - generic [ref=e260]: ▶
+        - text: The rival
+      - heading "Everything you use Frame.io for. One flat price, whole team in." [level=2] [ref=e261]: Everything you use Frame.io for.One flat price, whole team in.
+    - generic [ref=e262]:
+      - generic [ref=e264]:
+        - generic [ref=e265]: The other guys
+        - generic [ref=e266]: Frame.io
+        - generic [ref=e267]:
+          - generic [ref=e268]: $19
+          - generic [ref=e269]: per user / month
+        - list [ref=e270]:
+          - listitem [ref=e271]:
+            - generic [ref=e272]: ×
+            - text: Complex interface
+          - listitem [ref=e273]:
+            - generic [ref=e274]: ×
+            - text: Punishes you for growing
+          - listitem [ref=e275]:
+            - generic [ref=e276]: ×
+            - text: Bloated ecosystem
+          - listitem [ref=e277]:
+            - generic [ref=e278]: ×
+            - text: Closed source
+      - generic [ref=e280]:
+        - generic [ref=e281]: The solution
+        - generic [ref=e282]: snip.
+        - generic [ref=e283]:
+          - generic [ref=e284]: $25
+          - generic [ref=e285]: flat total / month
+        - list [ref=e286]:
+          - listitem [ref=e287]: Stupidly fast
+          - listitem [ref=e290]: Invite the whole team
+          - listitem [ref=e293]: Just what you need
+          - listitem [ref=e296]: Fully open source
+        - generic [ref=e299]:
+          - generic [ref=e300]: Yearly savings · 5 users
+          - text: $840
+  - generic [ref=e302]:
+    - generic [ref=e303]:
+      - generic [ref=e304]:
+        - generic [ref=e305]: ▶
+        - text: How it works
+      - heading "Your first ten minutes on snip, painless. No onboarding call required." [level=2] [ref=e306]: Your first ten minutes on snip, painless.No onboarding call required.
+    - generic [ref=e307]:
+      - generic [ref=e308]:
+        - generic [ref=e309]: Min 1
+        - heading "Upload your cut." [level=3] [ref=e310]
+        - paragraph [ref=e311]: Drag the file in. Playback starts from the original instantly — no waiting on processing bars.
+      - generic [ref=e312]:
+        - generic [ref=e313]: Min 3
+        - heading "Send one link." [level=3] [ref=e314]
+        - paragraph [ref=e315]: Your client reviews, signs the contract, and pays in the same place. No account required.
+      - generic [ref=e316]:
+        - generic [ref=e317]: Min 10
+        - heading "Approved, signed, paid." [level=3] [ref=e318]
+        - paragraph [ref=e319]: Frame-accurate notes are in, the contract is countersigned, and delivery unlocks itself.
+  - generic [ref=e325]:
+    - heading "Built to protect the work. And make sure you get paid for it." [level=2] [ref=e328]: Built to protect the work.And make sure you get paid for it.
+    - generic [ref=e331]:
+      - generic [ref=e332]:
+        - generic [ref=e333]:
+          - generic [ref=e340]: SHA-256 frozen terms
+          - paragraph [ref=e341]: Contract terms are hashed and locked the moment you send them.
+        - generic [ref=e342]:
+          - generic [ref=e347]: OTP-verified signing
+          - paragraph [ref=e348]: Signers confirm identity with a one-time code — no accounts.
+        - generic [ref=e349]:
+          - generic [ref=e356]: Full audit trail
+          - paragraph [ref=e357]: Every open, consent, and signature is timestamped and kept.
+        - generic [ref=e358]:
+          - generic [ref=e365]: Watermarked previews
+          - paragraph [ref=e366]: Paywalled shares never serve the raw original file.
+        - generic [ref=e367]:
+          - generic [ref=e372]: Payments by Stripe
+          - paragraph [ref=e373]: Checkout and payouts run on Stripe end to end.
+        - generic [ref=e374]:
+          - generic [ref=e378]: Streams from the edge
+          - paragraph [ref=e379]: Bytes come straight from edge storage — no proxy in the way.
+        - generic [ref=e380]:
+          - generic [ref=e385]: Open source
+          - paragraph [ref=e386]: The whole codebase is on GitHub. Read it, fork it, trust it.
+      - generic [ref=e387]:
+        - generic [ref=e388]:
+          - generic [ref=e395]: SHA-256 frozen terms
+          - paragraph [ref=e396]: Contract terms are hashed and locked the moment you send them.
+        - generic [ref=e397]:
+          - generic [ref=e402]: OTP-verified signing
+          - paragraph [ref=e403]: Signers confirm identity with a one-time code — no accounts.
+        - generic [ref=e404]:
+          - generic [ref=e411]: Full audit trail
+          - paragraph [ref=e412]: Every open, consent, and signature is timestamped and kept.
+        - generic [ref=e413]:
+          - generic [ref=e420]: Watermarked previews
+          - paragraph [ref=e421]: Paywalled shares never serve the raw original file.
+        - generic [ref=e422]:
+          - generic [ref=e427]: Payments by Stripe
+          - paragraph [ref=e428]: Checkout and payouts run on Stripe end to end.
+        - generic [ref=e429]:
+          - generic [ref=e433]: Streams from the edge
+          - paragraph [ref=e434]: Bytes come straight from edge storage — no proxy in the way.
+        - generic [ref=e435]:
+          - generic [ref=e440]: Open source
+          - paragraph [ref=e441]: The whole codebase is on GitHub. Read it, fork it, trust it.
+  - generic [ref=e444]:
+    - blockquote [ref=e445]: “I built snip because I got tired of waiting for Frame.io to load. Video review should be instant.”
+    - generic [ref=e446]: — Casey Lund, founder
+  - generic [ref=e448]:
+    - generic [ref=e449]:
+      - generic [ref=e450]:
+        - generic [ref=e451]: ▶
+        - text: Pricing
+      - heading "Flat pricing. No seat math. Your whole team, one number." [level=2] [ref=e452]: Flat pricing. No seat math.Your whole team, one number.
+    - generic [ref=e453]:
+      - generic [ref=e455]:
+        - generic [ref=e456]: Basic
+        - generic [ref=e457]:
+          - generic [ref=e458]: $25
+          - generic [ref=e459]: /mo
+        - paragraph [ref=e460]: Unlimited everything, except storage.
+        - list [ref=e461]:
+          - listitem [ref=e462]: Unlimited seats
+          - listitem [ref=e465]: Unlimited projects
+          - listitem [ref=e468]: Unlimited clients
+          - listitem [ref=e471]: 100GB storage
+        - link "Get Basic" [ref=e474] [cursor=pointer]:
+          - /url: /sign-up
+      - generic [ref=e476]:
+        - generic [ref=e477]:
+          - generic [ref=e478]: Pro
+          - generic [ref=e479]: Big files
+        - generic [ref=e480]:
+          - generic [ref=e481]: $50
+          - generic [ref=e482]: /mo
+        - paragraph [ref=e483]: Literally the same thing, but more space.
+        - list [ref=e484]:
+          - listitem [ref=e485]: Unlimited seats
+          - listitem [ref=e488]: Unlimited projects
+          - listitem [ref=e491]: Unlimited clients
+          - listitem [ref=e494]: 1TB storage (whoa)
+        - link "Get Pro" [ref=e497] [cursor=pointer]:
+          - /url: /sign-up
+  - generic [ref=e500]:
+    - generic [ref=e501]:
+      - generic [ref=e502]: ▶
+      - text: Start today
+    - heading "Stop chasing. Start creating." [level=2] [ref=e503]
+    - generic [ref=e504]:
+      - link "Start for free" [ref=e505] [cursor=pointer]:
+        - /url: /sign-up
+      - link "See pricing" [ref=e506] [cursor=pointer]:
+        - /url: "#pricing"
+  - contentinfo [ref=e507]:
+    - generic [ref=e508]:
+      - generic [ref=e509]:
+        - generic [ref=e510]:
+          - generic [ref=e511]: Features
+          - list [ref=e514]:
+            - listitem [ref=e515]:
+              - link "[ ] Frame review" [ref=e516] [cursor=pointer]:
+                - /url: "#product"
+            - listitem [ref=e517]:
+              - link "[ ] Contracts" [ref=e518] [cursor=pointer]:
+                - /url: "#product"
+            - listitem [ref=e519]:
+              - link "[ ] Paid delivery" [ref=e520] [cursor=pointer]:
+                - /url: "#product"
+            - listitem [ref=e521]:
+              - link "[ ] Cloud drive" [ref=e522] [cursor=pointer]:
+                - /url: "#product"
+        - generic [ref=e523]:
+          - generic [ref=e524]: Compare
+          - list [ref=e527]:
+            - listitem [ref=e528]:
+              - link "[ ] vs Frame.io" [ref=e529] [cursor=pointer]:
+                - /url: /compare/frameio
+            - listitem [ref=e530]:
+              - link "[ ] vs Wipster" [ref=e531] [cursor=pointer]:
+                - /url: /compare/wipster
+            - listitem [ref=e532]:
+              - link "[ ] vs LucidLink" [ref=e533] [cursor=pointer]:
+                - /url: /compare/lucidlink
+        - generic [ref=e534]:
+          - generic [ref=e535]: Use cases
+          - list [ref=e538]:
+            - listitem [ref=e539]:
+              - link "[ ] Video editors" [ref=e540] [cursor=pointer]:
+                - /url: /for/video-editors
+            - listitem [ref=e541]:
+              - link "[ ] Agencies" [ref=e542] [cursor=pointer]:
+                - /url: /for/agencies
+        - generic [ref=e543]:
+          - generic [ref=e544]: General
+          - list [ref=e547]:
+            - listitem [ref=e548]:
+              - link "[ ] Pricing" [ref=e549] [cursor=pointer]:
+                - /url: /pricing
+            - listitem [ref=e550]:
+              - link "[ ] Sign in" [ref=e551] [cursor=pointer]:
+                - /url: /sign-in
+            - listitem [ref=e552]:
+              - link "[ ] Start free" [ref=e553] [cursor=pointer]:
+                - /url: /sign-up
+            - listitem [ref=e554]:
+              - link "[ ] GitHub" [ref=e555] [cursor=pointer]:
+                - /url: https://github.com/danielosagie/snip
+      - generic [ref=e556]:
+        - generic [ref=e557]:
+          - img "snip" [ref=e559]
+          - generic [ref=e562]: snip.
+        - generic [ref=e563]: Video review for creative teams — open source forever

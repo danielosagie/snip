@@ -7,15 +7,15 @@ import { Link } from "@tiptap/extension-link";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { FontFamily } from "@tiptap/extension-font-family";
+import { Placeholder } from "@tiptap/extension-placeholder";
 import { FontSize } from "./fontSizeExtension";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Google-Doc-style contract preview. Renders the contract HTML inside
- * a paper-styled surface (white background, 8.5" max width, generous
- * page margins, drop shadow) so the user feels like they're looking
- * at a printable document rather than a terminal printout.
+ * Focused document canvas. Renders editable HTML inside a paper-styled
+ * surface with an external formatting toolbar supplied by the route.
+ * Contract capabilities are deliberately absent from this component.
  *
  * Backed by Tiptap so the user can type directly into the preview.
  * When `auto` is true (default), the editor stays in sync with the
@@ -63,6 +63,14 @@ export function ContractDocPreview({
       TextStyle,
       FontFamily.configure({ types: ["textStyle"] }),
       FontSize,
+      Placeholder.configure({
+        placeholder: ({ node }) =>
+          node.type.name === "heading"
+            ? "Heading"
+            : "Start writing…",
+        emptyEditorClass: "is-editor-empty",
+        emptyNodeClass: "is-empty",
+      }),
     ],
     content: html,
     editable,
@@ -118,7 +126,7 @@ export function ContractDocPreview({
           palette. */}
       <article
         className={cn(
-          "w-full max-w-[816px] bg-white text-[#1a1a1a] border-y-2 border-[#1a1a1a] shadow-none sm:border-2 sm:shadow-[6px_6px_0px_0px_var(--shadow-color)]",
+          "w-full max-w-[816px] bg-[#fffefa] text-[#1a1a1a] border-y-2 border-[#1a1a1a] shadow-none sm:border-2 sm:shadow-[6px_6px_0px_0px_var(--shadow-color)]",
           // Page padding (1 inch = 96px) — visible on top + bottom
           // so the user can see when content fills the page.
           "px-5 py-8 sm:px-[96px] sm:py-[96px]",
@@ -153,6 +161,13 @@ export function ContractDocPreview({
           .snip-contract-doc li { margin: 0.2em 0; }
           .snip-contract-doc strong { font-weight: 700; }
           .snip-contract-doc em { font-style: italic; }
+          .snip-contract-doc .is-empty:first-child::before {
+            color: #8a8a82;
+            content: attr(data-placeholder);
+            float: left;
+            height: 0;
+            pointer-events: none;
+          }
         `}</style>
         <div className="snip-contract-doc">
           <EditorContent editor={editor} />

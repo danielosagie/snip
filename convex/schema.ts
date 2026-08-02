@@ -29,6 +29,18 @@ export default defineSchema({
     ),
     stripeConnectChargesEnabled: v.optional(v.boolean()),
     stripeConnectPayoutsEnabled: v.optional(v.boolean()),
+    // What Stripe is still waiting on before this account can charge or
+    // pay out. Mirrors account.requirements; kept so the billing UI can
+    // name the actual blocker ("an ID document") instead of a generic
+    // "finish setup". Absent = never refreshed, which is not the same as
+    // "nothing due" — treat it as unknown, not clear.
+    stripeConnectRequirements: v.optional(
+      v.object({
+        currentlyDue: v.array(v.string()),
+        pastDue: v.array(v.string()),
+        disabledReason: v.union(v.string(), v.null()),
+      })
+    ),
     // Shared secret used by the DaVinci Resolve / Premiere plugin to
     // authenticate against /timelines/snapshot. Rotatable. The plugin
     // sends it as `Authorization: Bearer <token>`. Owner-only mutation
@@ -184,8 +196,10 @@ export default defineSchema({
      */
     deletedAt: v.optional(v.number()),
     deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
   })
     .index("by_team", ["teamId"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_team_and_deleted", ["teamId", "deletedAt"]),
 
   // Subfolders inside a project — Google-Drive-style nesting. Optional
@@ -407,6 +421,7 @@ export default defineSchema({
     // it can be restored or purged. Mirrors the same pattern on projects.
     deletedAt: v.optional(v.number()),
     deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
     // ── Retention / hot-cold lifecycle ───────────────────────────────
     // Wall-clock of the most recent playback (review player, share
     // page, or paid delivery). Drives the hot/cold split: a video not
@@ -430,6 +445,8 @@ export default defineSchema({
     storageClass: v.optional(v.union(v.literal("cloud"), v.literal("drive"))),
   })
     .index("by_project", ["projectId"])
+    .index("by_s3_key", ["s3Key"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_public_id", ["publicId"])
     .index("by_mux_upload_id", ["muxUploadId"])
     .index("by_mux_asset_id", ["muxAssetId"])
@@ -754,11 +771,10 @@ export default defineSchema({
 
   /**
    * Account-level subscription. One per Clerk user (the `ownerClerkId`).
-   * Pricing is flat-base + per-seat-overage: the user pays `baseCents`
-   * each month for `includedSeats` collaborators, and `perSeatCents`
-   * for each seat beyond that. A "seat" is a distinct
-   * teamMember.userClerkId across all teams the owner participates
-   * in (computed; not stored).
+   * Pricing is a flat monthly fee for managed storage capacity. Paid
+   * tiers include unlimited collaborators; free keeps a small invite
+   * cap as an anti-abuse measure. Legacy seat-price fields remain so
+   * existing rows and enterprise metering stay compatible.
    *
    * This replaces per-team `teams.plan` for SaaS billing. The
    * `teams.plan` field stays for now to ease migration, but the
@@ -777,10 +793,15 @@ export default defineSchema({
     baseCents: v.number(),
     perSeatCents: v.number(),
     includedSeats: v.number(),
+    // Snapshot of the storage entitlement when the subscription was
+    // created. Existing customers keep their original capacity when
+    // public plan limits change.
+    storageLimitBytes: v.optional(v.number()),
     currency: v.string(),
     currentPeriodEnd: v.optional(v.number()),
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
+    cancelAtPeriodEnd: v.optional(v.boolean()),
     canceledAt: v.optional(v.number()),
     // Enterprise pay-as-you-go: separate metered Stripe Price IDs for
     // storage / egress / seats / transcription. Only populated when
@@ -809,6 +830,16 @@ export default defineSchema({
         customDomain: v.optional(v.string()),
         // Public API tier — rate limits relax, signed access tokens.
         apiTier: v.optional(v.boolean()),
+      }),
+    ),
+    // Stripe SubscriptionItem ids for idempotent add/remove operations. Kept
+    // separate from feature configuration (for example the domain hostname)
+    // so webhook reconciliation never loses product state.
+    stripeAddOnItemIds: v.optional(
+      v.object({
+        whiteLabel: v.optional(v.string()),
+        customDomain: v.optional(v.string()),
+        apiTier: v.optional(v.string()),
       }),
     ),
     /**
@@ -850,15 +881,12 @@ export default defineSchema({
     .index("by_owner_period", ["workspaceOwnerClerkId", "periodStart"]),
 
   /**
-   * Multi-contract container, native to snip. Replaces the singleton
-   * `projects.contract` embedded field, which stays for one release as
-   * a read-fallback during migration (see contractsBackfill.ts). A
-   * project can have an unbounded number of these — typical agency
-   * relationships need a master agreement, per-engagement SOWs, an NDA
-   * for new collaborators, etc.
+   * Project documents. Plain documents are the base capability: editable
+   * HTML, versions, and project ownership. A row becomes signable only after
+   * explicit promotion to `docType: "contract"`; contract-only metadata may
+   * then be attached without making the writing experience contract-shaped.
    *
-   * Designed to support a Documenso-equivalent e-sign flow in-product,
-   * without calling out to an external API:
+   * The contract workflow supports native e-signing in-product:
    *   • `contentHtml` is the editable contract body (Tiptap output).
    *   • `signablePdfS3Key` holds the rendered PDF generated when the
    *     author hits "Send for signature" (R2-cached).
@@ -878,9 +906,8 @@ export default defineSchema({
       v.literal("release"),
       v.literal("custom"),
     ),
-    // Unified editor label. Documents and contracts share the same capabilities
-    // (templates, versions, recipients, signature fields and audit history);
-    // this value only controls taxonomy and the route shown to the user.
+    // Capability boundary. Documents are editable content. Contracts add the
+    // signing state machine, recipients, fields, and legal audit history.
     docType: v.optional(v.union(v.literal("contract"), v.literal("document"))),
     // Editable body (Tiptap HTML) + the wizard-generated clauses (same
     // shape as projects.contract.clauses).
@@ -956,8 +983,11 @@ export default defineSchema({
     createdByClerkId: v.string(),
     createdByName: v.string(),
     deletedAt: v.optional(v.number()),
+    deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
   })
     .index("by_project", ["projectId"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_project_and_status", ["projectId", "status"])
     .index("by_status", ["status"]),
 
@@ -1063,6 +1093,7 @@ export default defineSchema({
       v.literal("voided"),
       v.literal("reminder_sent"),
       v.literal("completed"),
+      v.literal("converted_to_contract"),
     ),
     actorName: v.optional(v.string()),
     actorEmail: v.optional(v.string()),
@@ -1162,9 +1193,11 @@ export default defineSchema({
     deletedAt: v.number(),
     deletedByClerkId: v.string(),
     deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
   })
     .index("by_project", ["projectId"])
     .index("by_team", ["teamId"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_team_and_deleted_at", ["teamId", "deletedAt"]),
 
   /**

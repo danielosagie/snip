@@ -58,6 +58,22 @@ export interface FileTypeMeta {
 const PROJECT_FILE_EXTS = new Set([
   "prproj", "drp", "aaf", "xml", "fcpxml", "edl", "cube", "lut", "ale",
 ]);
+const VIDEO_EXTS = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi", "mxf"]);
+const IMAGE_EXTS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "avif",
+  "heic",
+  "heif",
+  "tif",
+  "tiff",
+  "bmp",
+  "svg",
+]);
+const AUDIO_EXTS = new Set(["mp3", "wav", "m4a", "aac", "flac", "ogg", "aiff"]);
 
 export function fileKindFromContentType(
   contentType: string | undefined | null,
@@ -67,9 +83,9 @@ export function fileKindFromContentType(
   const ext = (filename ?? "").split(".").pop()?.toLowerCase() ?? "";
 
   if (ext && PROJECT_FILE_EXTS.has(ext)) return "project-file";
-  if (ct.startsWith("video/")) return "video";
-  if (ct.startsWith("image/")) return "image";
-  if (ct.startsWith("audio/")) return "audio";
+  if (ct.startsWith("video/") || VIDEO_EXTS.has(ext)) return "video";
+  if (ct.startsWith("image/") || IMAGE_EXTS.has(ext)) return "image";
+  if (ct.startsWith("audio/") || AUDIO_EXTS.has(ext)) return "audio";
   if (ct === "application/pdf" || ext === "pdf") return "pdf";
   if (
     ct.includes("wordprocessingml") ||

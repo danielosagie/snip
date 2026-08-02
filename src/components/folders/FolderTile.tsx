@@ -3,7 +3,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useMutation } from "convex/react";
 import { useState } from "react";
-import { Folder, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { Check, Folder, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
+import { friendlyError } from "@/lib/friendlyError";
 
 /**
  * Single folder card. Small, dense — meant to live in a horizontal row at
@@ -28,6 +29,13 @@ interface Props {
   name: string;
   itemCount: number;
   canEdit: boolean;
+  selected?: boolean;
+  selectionMode?: boolean;
+  onSelectToggle?: (event: {
+    metaKey: boolean;
+    ctrlKey: boolean;
+    shiftKey: boolean;
+  }) => void;
   onDropVideo?: (videoId: Id<"videos">, targetFolderId: Id<"folders">) => void;
   onDropFolder?: (
     droppedFolderId: Id<"folders">,
@@ -43,6 +51,9 @@ export function FolderTile({
   name,
   itemCount,
   canEdit,
+  selected,
+  selectionMode,
+  onSelectToggle,
   onDropVideo,
   onDropFolder,
   onDropFiles,
@@ -84,19 +95,38 @@ export function FolderTile({
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete folder "${name}"? It must be empty.`)) return;
+    if (
+      !confirm(
+        `Delete folder "${name}" and all nested folders? Contained files will remain recoverable in Recently deleted.`,
+      )
+    )
+      return;
     try {
       await removeFolder({ folderId });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Delete failed.");
+      alert(friendlyError(e, "Delete failed."));
     }
   };
 
   return (
     <article
       data-snip-folder-drop-target="true"
-      onClick={open}
-      draggable={canEdit && !editing}
+      onClick={(e) => {
+        if (
+          onSelectToggle &&
+          (selectionMode || e.metaKey || e.ctrlKey || e.shiftKey)
+        ) {
+          e.preventDefault();
+          onSelectToggle({
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+          });
+          return;
+        }
+        open();
+      }}
+      draggable={canEdit && !editing && !selectionMode}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("application/x-snip-folder", folderId);
@@ -141,12 +171,24 @@ export function FolderTile({
         }
       }}
       className={cn(
-        "group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] cursor-pointer transition-colors w-full min-w-0",
+        "group relative flex min-h-12 items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] cursor-pointer transition-[background-color,box-shadow] w-full min-w-0",
         dropKind
           ? "bg-[#FF6600] text-[#f0f0e8]"
           : "bg-[#f0f0e8] hover:bg-[#e8e8e0]",
+        selected && !dropKind && "bg-[#fff1e8] shadow-[inset_0_0_0_2px_#FF6600]",
       )}
     >
+      {selectionMode ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center border-2 border-[#1a1a1a]",
+            selected ? "bg-[#FF6600] text-white" : "bg-[#f0f0e8]",
+          )}
+        >
+          {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+        </span>
+      ) : null}
       <Folder
         className={cn("h-5 w-5 flex-shrink-0", dropKind ? "text-[#f0f0e8]" : "text-[#888]")}
         strokeWidth={1.75}
@@ -183,14 +225,17 @@ export function FolderTile({
       </div>
       {canEdit ? (
         <div
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
+          className={cn(
+            "transition-opacity",
+            selectionMode ? "hidden" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+          )}
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="p-1 hover:bg-[#1a1a1a] hover:text-[#f0f0e8]"
+                className="inline-flex h-10 w-10 items-center justify-center hover:bg-[#1a1a1a] hover:text-[#f0f0e8]"
               >
                 <MoreVertical className="h-3.5 w-3.5" />
               </button>

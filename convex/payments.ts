@@ -6,6 +6,7 @@ import {
 } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 import { shareCapabilities } from "./shareAccess";
+import { requireTeamAccess } from "./auth";
 
 /**
  * Per-delivery payments — V8 isolate side (queries, internal mutations).
@@ -360,6 +361,77 @@ export const getGrantUnlockState = query({
       // Downloads require the link to allow them and, when paywalled, payment.
       canDownload:
         isOwner || (shareLink.allowDownload && (!paywalled || paid)),
+    };
+  },
+});
+
+/**
+ * Earnings rollup for the Billing & Invoices page: what clients paid this
+ * team through paywalled links, net of the platform fee.
+ *
+ * `settlement` matters here and is not cosmetic. "connect" rows went
+ * straight to the team's Stripe account. "platform" rows were collected
+ * by the platform because Connect onboarding wasn't finished, so the
+ * operator still owes that money manually — the UI must not present it as
+ * paid out. Legacy rows (settlement absent) were always Connect charges.
+ */
+export const getTeamEarnings = query({
+  args: {
+    teamId: v.id("teams"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireTeamAccess(ctx, args.teamId);
+
+    const rows = await ctx.db
+      .query("payments")
+      .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
+      .collect();
+
+    const succeeded = rows.filter((r) => r.status === "succeeded");
+
+    let grossCents = 0;
+    let feeCents = 0;
+    let owedByPlatformCents = 0;
+    for (const r of succeeded) {
+      const fee = r.applicationFeeAmountCents ?? 0;
+      grossCents += r.amountCents;
+      feeCents += fee;
+      // Absent settlement = legacy Connect charge, already routed.
+      if (r.settlement === "platform") {
+        owedByPlatformCents += r.amountCents - fee;
+      }
+    }
+
+    const limit = Math.max(1, Math.min(args.limit ?? 10, 100));
+    const recent = succeeded
+      .sort((a, b) => (b.paidAt ?? b._creationTime) - (a.paidAt ?? a._creationTime))
+      .slice(0, limit)
+      .map((r) => {
+        const fee = r.applicationFeeAmountCents ?? 0;
+        return {
+          id: r._id,
+          videoId: r.videoId,
+          paidAt: r.paidAt ?? r._creationTime,
+          grossCents: r.amountCents,
+          feeCents: fee,
+          netCents: r.amountCents - fee,
+          currency: r.currency,
+          clientEmail: r.clientEmail ?? null,
+          // "held" is not a Stripe state — it means we collected on the
+          // platform account because this team can't receive payouts yet.
+          routedTo: r.settlement === "platform" ? ("held" as const) : ("connect" as const),
+        };
+      });
+
+    return {
+      saleCount: succeeded.length,
+      grossCents,
+      feeCents,
+      netCents: grossCents - feeCents,
+      owedByPlatformCents,
+      currency: succeeded[0]?.currency ?? "usd",
+      recent,
     };
   },
 });

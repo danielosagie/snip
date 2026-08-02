@@ -6,34 +6,21 @@ import { action, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { isFeatureEnabled } from "./featureFlags";
+import { computeApplicationFee } from "./paymentsPolicy";
 
 /**
  * Node-only side of payments. Lives here (and not in payments.ts) because
  * the Stripe Node SDK isn't allowed in Convex V8 isolates — Convex requires
  * files with "use node" to only export actions.
  *
- * Platform fee: 0% for v1. Configurable via VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS
- * (e.g. 100 = 1%) if you decide to take a cut later.
+ * Delivery fee: a percentage plus a small fixed amount. This covers
+ * destination-charge processing costs and leaves a modest platform margin.
  */
-
-const PLATFORM_FEE_BASIS_POINTS = (() => {
-  const raw = process.env.VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS;
-  if (!raw) return 0;
-  const parsed = parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 5000) return 0;
-  return parsed;
-})();
 
 function getStripe(): Stripe | null {
   const secret = process.env.STRIPE_SECRET_KEY;
   if (!secret) return null;
   return new Stripe(secret);
-}
-
-function computeApplicationFee(amountCents: number): number {
-  if (PLATFORM_FEE_BASIS_POINTS <= 0) return 0;
-  const fee = Math.floor((amountCents * PLATFORM_FEE_BASIS_POINTS) / 10000);
-  return Math.max(0, fee);
 }
 
 // Mirror of stripeConnectActions.deriveConnectStatus — duplicated because
@@ -195,11 +182,19 @@ export const createCheckoutForGrant = action({
       (lookup.bundleName
         ? `Final delivery: ${lookup.bundleName}`
         : `Final delivery: ${lookup.video.title}`);
+    const platformFeeAmount = computeApplicationFee(amountCents);
     const applicationFeeAmount =
-      settlement.mode === "connect" ? computeApplicationFee(amountCents) : 0;
+      settlement.mode === "connect" ? platformFeeAmount : 0;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      submit_type: "pay",
+      custom_text: {
+        submit: {
+          message:
+            "Payment unlocks the original delivery immediately. Keep your receipt email for future access.",
+        },
+      },
       line_items: [
         {
           price_data: {
@@ -247,7 +242,9 @@ export const createCheckoutForGrant = action({
       stripeConnectAccountId:
         settlement.mode === "connect" ? settlement.accountId : undefined,
       settlement: settlement.mode,
-      applicationFeeAmountCents: applicationFeeAmount,
+      // Platform-collected payments are settled manually; recording the same
+      // fee keeps the seller net consistent with Connect destination charges.
+      applicationFeeAmountCents: platformFeeAmount,
     });
 
     return { status: "ok", url: session.url };
@@ -314,13 +311,19 @@ export const createCheckoutForVideo = action({
     const paywall = lookup.video.paywall;
     const productName =
       paywall.description ?? `Download: ${lookup.video.title}`;
+    const platformFeeAmount = computeApplicationFee(paywall.priceCents);
     const applicationFeeAmount =
-      settlement.mode === "connect"
-        ? computeApplicationFee(paywall.priceCents)
-        : 0;
+      settlement.mode === "connect" ? platformFeeAmount : 0;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      submit_type: "pay",
+      custom_text: {
+        submit: {
+          message:
+            "Payment unlocks the original file immediately. Keep your receipt email for future access.",
+        },
+      },
       line_items: [
         {
           price_data: {
@@ -363,7 +366,7 @@ export const createCheckoutForVideo = action({
       stripeConnectAccountId:
         settlement.mode === "connect" ? settlement.accountId : undefined,
       settlement: settlement.mode,
-      applicationFeeAmountCents: applicationFeeAmount,
+      applicationFeeAmountCents: platformFeeAmount,
     });
 
     return { status: "ok", url: session.url };

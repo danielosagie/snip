@@ -6,6 +6,7 @@ import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { getIdentity } from "./auth";
 import { isFeatureEnabled } from "./featureFlags";
+import { extractConnectRequirements } from "./stripeConnect";
 
 /**
  * Stripe Connect actions (Node side). Creates Express accounts on demand,
@@ -239,6 +240,7 @@ export const refreshAccountStatus = action({
       status: accountStatus,
       chargesEnabled: account.charges_enabled ?? false,
       payoutsEnabled: account.payouts_enabled ?? false,
+      requirements: extractConnectRequirements(account),
     });
 
     return {

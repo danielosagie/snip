@@ -1,6 +1,6 @@
 import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
 import { v } from "convex/values";
-import { api, components, internal } from "./_generated/api";
+import { components, internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import {
   internalQuery,
@@ -348,7 +348,7 @@ export const create = mutation({
         } else {
           await ctx.scheduler.runAfter(
             0,
-            api.videoActions.ensurePreviewAssetForVideo,
+            internal.videoActions.ensurePreviewAssetForVideo,
             { videoId: args.videoId },
           );
         }

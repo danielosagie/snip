@@ -611,7 +611,13 @@ function DriveTab({
 
 function UpdatesPanel() {
   const [version, setVersion] = useState<string | null>(null);
-  const [update, setUpdate] = useState<UpdateState>({ status: "idle", version: null, percent: 0, error: null });
+  const [update, setUpdate] = useState<UpdateState>({
+    status: "idle",
+    version: null,
+    percent: 0,
+    error: null,
+    requiresManualInstall: false,
+  });
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
@@ -665,9 +671,9 @@ function UpdatesPanel() {
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{label}</div>
           {note ? <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{note}</div> : null}
         </div>
-        {update.status === "downloaded" ? (
+        {(update.requiresManualInstall && update.status === "available") || update.status === "downloaded" ? (
           <button className="primary" onClick={() => void install()}>
-            Restart &amp; install
+            {update.requiresManualInstall ? "Download update" : "Restart & install"}
           </button>
         ) : (
           <button

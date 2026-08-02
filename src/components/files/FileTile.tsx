@@ -9,6 +9,7 @@ import {
   Download,
   Trash2,
   ExternalLink,
+  Check,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -43,6 +44,13 @@ interface FileTileProps {
   status: string;
   canDelete?: boolean;
   draggable?: boolean;
+  selected?: boolean;
+  selectionMode?: boolean;
+  onSelectToggle?: (event: {
+    metaKey: boolean;
+    ctrlKey: boolean;
+    shiftKey: boolean;
+  }) => void;
   onDelete?: () => void;
   /** When set, clicking the tile body opens the focused view instead of
    *  downloading (used for image/gif/pdf, which have a real detail view).
@@ -60,6 +68,9 @@ export function FileTile({
   status,
   canDelete,
   draggable,
+  selected,
+  selectionMode,
+  onSelectToggle,
   onDelete,
   onOpen,
 }: FileTileProps) {
@@ -73,7 +84,7 @@ export function FileTile({
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
   const isReady = status === "ready";
-  const isImage = contentType?.startsWith("image/") ?? false;
+  const isImage = meta.kind === "image";
 
   // Fetch a signed URL for image files so the tile renders the actual
   // image as a thumbnail instead of a generic icon. Best-effort — we
@@ -109,8 +120,23 @@ export function FileTile({
 
   return (
     <article
-      onClick={() => (onOpen ? onOpen() : void handleDownload())}
-      draggable={draggable}
+      onClick={(e) => {
+        if (
+          onSelectToggle &&
+          (selectionMode || e.metaKey || e.ctrlKey || e.shiftKey)
+        ) {
+          e.preventDefault();
+          onSelectToggle({
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+          });
+          return;
+        }
+        if (onOpen) onOpen();
+        else void handleDownload();
+      }}
+      draggable={draggable && !selectionMode}
       onDragStart={(e) => {
         if (!draggable) return;
         e.dataTransfer.effectAllowed = "move";
@@ -119,6 +145,7 @@ export function FileTile({
       className={cn(
         "group flex flex-col cursor-pointer",
         !isReady && "opacity-70",
+        selected && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
       )}
     >
       <div
@@ -128,6 +155,17 @@ export function FileTile({
         onMouseMove={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
         onMouseLeave={() => setHoverPos(null)}
       >
+        {selectionMode ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute bottom-2 left-2 z-10 flex h-6 w-6 items-center justify-center border-2 border-[#1a1a1a]",
+              selected ? "bg-[#FF6600] text-white" : "bg-[#f0f0e8]",
+            )}
+          >
+            {selected ? <Check className="h-4 w-4" strokeWidth={3} /> : null}
+          </span>
+        ) : null}
         {thumbnailSrc ? (
           <img
             src={thumbnailSrc}
@@ -159,7 +197,10 @@ export function FileTile({
 
         {/* Download / more menu, top-right (visible on hover) */}
         <div
-          className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+          className={cn(
+            "absolute top-2 right-2 gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity",
+            selectionMode ? "hidden" : "flex",
+          )}
           onClick={(e) => e.stopPropagation()}
         >
           <button
@@ -245,6 +286,9 @@ export function FileListRow({
   status,
   canDelete,
   draggable,
+  selected,
+  selectionMode,
+  onSelectToggle,
   onDelete,
   onOpen,
 }: FileTileProps) {
@@ -257,7 +301,7 @@ export function FileListRow({
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
   const isReady = status === "ready";
-  const isImage = contentType?.startsWith("image/") ?? false;
+  const isImage = meta.kind === "image";
 
   useEffect(() => {
     if (!isImage || !isReady) return;
@@ -287,15 +331,44 @@ export function FileListRow({
 
   return (
     <div
-      onClick={() => (onOpen ? onOpen() : void handleDownload())}
-      draggable={draggable}
+      onClick={(e) => {
+        if (
+          onSelectToggle &&
+          (selectionMode || e.metaKey || e.ctrlKey || e.shiftKey)
+        ) {
+          e.preventDefault();
+          onSelectToggle({
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+          });
+          return;
+        }
+        if (onOpen) onOpen();
+        else void handleDownload();
+      }}
+      draggable={draggable && !selectionMode}
       onDragStart={(e) => {
         if (!draggable) return;
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("application/x-snip-video", videoId);
       }}
-      className="group flex items-center gap-3 px-3 py-2 border-b border-[#ccc] hover:bg-[#e8e8e0] cursor-pointer"
+      className={cn(
+        "group flex min-h-12 items-center gap-3 px-3 py-2 border-b border-[#ccc] hover:bg-[#e8e8e0] cursor-pointer",
+        selected && "bg-[#fff1e8] shadow-[inset_4px_0_0_#FF6600]",
+      )}
     >
+      {selectionMode ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center border-2 border-[#1a1a1a]",
+            selected ? "bg-[#FF6600] text-white" : "bg-[#f0f0e8]",
+          )}
+        >
+          {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+        </span>
+      ) : null}
       <div
         className="flex-shrink-0 w-9 h-9 flex items-center justify-center border-2 border-[#1a1a1a] overflow-hidden"
         style={{ background: meta.tileBg, cursor: thumbnailSrc ? "zoom-in" : undefined }}
@@ -317,7 +390,7 @@ export function FileListRow({
           {fileSize != null ? ` · ${formatBytes(fileSize)}` : ""}
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
+      <div className={cn("items-center gap-1 flex-shrink-0", selectionMode ? "hidden" : "flex")}>
         <button
           type="button"
           onClick={(e) => {

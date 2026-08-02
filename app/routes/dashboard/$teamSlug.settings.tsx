@@ -30,7 +30,7 @@ function TeamSettingsLayout() {
   return (
     <div className="h-full flex flex-col">
       <nav className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 pt-4">
-        <div className="max-w-3xl mx-auto flex gap-1">
+        <div className="max-w-3xl flex gap-1">
           {TABS.map((tab) => {
             const target = `${basePath}${tab.suffix}`;
             // Active match: exact for the index, prefix for sub-routes.

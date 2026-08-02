@@ -40,6 +40,7 @@ import {
   isCloudflareStreamConfigured,
 } from "./cloudflareStream";
 import { resolvePlaybackProvider, defaultPlaybackProvider } from "./providers/playbackProvider";
+import { shouldDeferEncodingForPolicy } from "./encodingPolicy";
 
 const GIBIBYTE = 1024 ** 3;
 const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
@@ -950,6 +951,43 @@ export const getPlaybackSession = action({
       return { url: urls.hlsUrl, posterUrl: urls.thumbnailUrl };
     }
 
+    if (!video.muxPlaybackId) {
+      throw new Error("Video not found or not ready");
+    }
+    const playbackId = await ensurePublicPlaybackId(ctx, {
+      videoId: args.videoId,
+      muxAssetId: video.muxAssetId,
+      muxPlaybackId: video.muxPlaybackId,
+    });
+    return buildPublicPlaybackSession(playbackId);
+  },
+});
+
+/**
+ * Lightweight authenticated playback session for project-card hover previews.
+ * Unlike a real watch, this deliberately does not update retention activity.
+ */
+export const getHoverPreviewSession = action({
+  args: { videoId: v.id("videos") },
+  returns: v.object({
+    url: v.string(),
+    posterUrl: v.string(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ url: string; posterUrl: string }> => {
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+    if (!video || video.status !== "ready") {
+      throw new Error("Video not found or not ready");
+    }
+    if (resolvePlaybackProvider(video) === "cloudflare_stream") {
+      if (!video.streamUid) throw new Error("Stream video is missing its uid");
+      const urls = buildStreamPlaybackUrls(video.streamUid);
+      return { url: urls.hlsUrl, posterUrl: urls.thumbnailUrl };
+    }
     if (!video.muxPlaybackId) {
       throw new Error("Video not found or not ready");
     }
@@ -2107,7 +2145,7 @@ export const getSharedPaywalledPlayback = action({
         // action is idempotent and reuses the global overlay.
         await ctx.scheduler.runAfter(
           0,
-          api.videoActions.ensurePreviewAssetForVideo,
+          internal.videoActions.ensurePreviewAssetForVideo,
           { videoId: video._id },
         );
         return pending;
@@ -2247,7 +2285,7 @@ export const retryPreviewAssetForShareLink = action({
     });
     await ctx.scheduler.runAfter(
       0,
-      api.videoActions.ensurePreviewAssetForVideo,
+      internal.videoActions.ensurePreviewAssetForVideo,
       { videoId: video._id },
     );
     return { status: "ok" as const };
@@ -2255,14 +2293,13 @@ export const retryPreviewAssetForShareLink = action({
 });
 
 /**
- * Pre-warm the watermarked Mux preview asset for a video. Scheduled the
- * moment `markAsReady` flips a video to ready — by the time anyone creates
- * a paywalled share link, the preview asset is already ingesting (and
- * usually finished). Uses a single global overlay PNG; per-recipient
+ * Prepare the watermarked Mux preview asset for a paywalled video. Scheduled
+ * when an owner enables a video/share paywall, never for an ordinary upload.
+ * Uses a single global overlay PNG; per-recipient
  * forensic attribution rides in the signed playback JWT + Convex logs
  * issued at viewing time, not burned into the pixels. Idempotent.
  */
-export const ensurePreviewAssetForVideo = action({
+export const ensurePreviewAssetForVideo = internalAction({
   args: {
     videoId: v.id("videos"),
   },
@@ -2308,7 +2345,7 @@ export const ensurePreviewAssetForVideo = action({
       };
     }
 
-    const video = await ctx.runQuery(api.videos.getForPreviewGen, {
+    const video = await ctx.runQuery(internal.videos.getForPreviewGen, {
       videoId: args.videoId,
     });
     if (!video?.s3Key || !video.contentType) {
@@ -2336,7 +2373,7 @@ export const ensurePreviewAssetForVideo = action({
     if (video.status !== "ready") {
       return {
         status: "notReady" as const,
-        reason: `Source upload not finished (status=${video.status}). markAsReady will reschedule once Mux finishes the full asset.`,
+        reason: `Source upload not finished (status=${video.status}). Retry when the source is ready.`,
       };
     }
 
@@ -2501,7 +2538,7 @@ export const ensurePreviewAssetForShareLink = action({
       };
     }
 
-    const video = await ctx.runQuery(api.videos.getForPreviewGen, {
+    const video = await ctx.runQuery(internal.videos.getForPreviewGen, {
       videoId: targetVideoId,
     });
     if (!video?.s3Key || !video.contentType) {
@@ -2588,11 +2625,9 @@ export const ensurePreviewAssetForShareLink = action({
 // `requestEncoding` below, which runs the normal pipeline.
 //
 // Decision is driven by env: LAZY_ENCODE_DEFAULT={never|free|always}.
-//   never   — default; existing behavior, encode on upload.
-//   free    — defer for free-tier workspaces only.
-//   always  — defer everywhere (use during a Cloudflare Stream cutover,
-//             since Stream's storage is so cheap that delaying encode
-//             is essentially free).
+//   never   — opt out and encode every upload immediately.
+//   free    — default; defer for free-tier workspaces only.
+//   always  — defer everywhere (an explicit operator override).
 
 /**
  * Kicks off encoding for a video, routing to the provider chosen by
@@ -2653,21 +2688,11 @@ async function shouldDeferEncoding(
     internal.workspaceBilling.getProjectStoragePolicy,
     { projectId },
   );
-  // Drive-first workspaces never eagerly encode — the cloud ladder only
-  // materializes on the first watch (re-encode) or for paid delivery.
-  if (policy.driveFirst) return true;
-
-  const mode = (process.env.LAZY_ENCODE_DEFAULT ?? "never")
-    .trim()
-    .toLowerCase();
-  if (mode === "never" || mode === "off" || mode === "false" || mode === "") {
-    return false;
-  }
-  if (mode === "always" || mode === "all" || mode === "true") {
-    return true;
-  }
-  if (mode !== "free") return false;
-  return policy.tier === "free";
+  return shouldDeferEncodingForPolicy({
+    configuredMode: process.env.LAZY_ENCODE_DEFAULT,
+    tier: policy.tier,
+    driveFirst: policy.driveFirst,
+  });
 }
 
 /**

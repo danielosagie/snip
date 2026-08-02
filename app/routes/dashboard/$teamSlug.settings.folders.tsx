@@ -70,7 +70,7 @@ function FolderPermissionsRoute() {
 
   if (!team) {
     return (
-      <main className="max-w-3xl mx-auto p-6">
+      <main className="max-w-3xl p-6">
         <p className="text-sm text-[#666]">Loading team…</p>
       </main>
     );
@@ -115,7 +115,7 @@ function FolderPermissionsRoute() {
   };
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-6">
+    <main className="max-w-3xl p-6 space-y-6">
       <div>
         <div className="flex items-center gap-2 text-[#888] text-xs font-bold uppercase tracking-wider">
           <FolderTree className="h-3.5 w-3.5" />

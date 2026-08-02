@@ -123,13 +123,7 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
   };
 
   const hardCapped = seatUsage?.hardCapped ?? false;
-  const overageCents = seatUsage?.perSeatCents ?? 0;
-  const isOverageInvite =
-    !!seatUsage &&
-    !hardCapped &&
-    seatUsage.plan !== "free" &&
-    seatUsage.seatsUsed + seatUsage.pendingInvites >=
-      seatUsage.includedSeats;
+  const unlimitedCollaborators = seatUsage?.unlimitedSeats ?? false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -145,28 +139,31 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
           <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
             <div className="flex items-baseline justify-between gap-2">
               <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-                Seats · {seatUsage.label}
+                Collaborators · {seatUsage.label}
               </div>
               <div className="text-xs font-mono text-[#1a1a1a]">
-                {seatUsage.seatsUsed + seatUsage.pendingInvites} /{" "}
-                {seatUsage.includedSeats} included
+                {unlimitedCollaborators
+                  ? `${seatUsage.seatsUsed + seatUsage.pendingInvites} active + pending`
+                  : `${seatUsage.seatsUsed + seatUsage.pendingInvites} / ${seatUsage.includedSeats} included`}
               </div>
             </div>
-            <div className="mt-2 h-1.5 border border-[#1a1a1a] bg-[#f0f0e8] relative">
-              <div
-                className={`absolute inset-y-0 left-0 ${
-                  hardCapped ? "bg-[#b91c1c]" : "bg-[#C2410C]"
-                }`}
-                style={{
-                  width: `${Math.min(
-                    100,
-                    ((seatUsage.seatsUsed + seatUsage.pendingInvites) /
-                      Math.max(seatUsage.includedSeats, 1)) *
+            {!unlimitedCollaborators ? (
+              <div className="mt-2 h-1.5 border border-[#1a1a1a] bg-[#f0f0e8] relative">
+                <div
+                  className={`absolute inset-y-0 left-0 ${
+                    hardCapped ? "bg-[#b91c1c]" : "bg-[#C2410C]"
+                  }`}
+                  style={{
+                    width: `${Math.min(
                       100,
-                  )}%`,
-                }}
-              />
-            </div>
+                      ((seatUsage.seatsUsed + seatUsage.pendingInvites) /
+                        Math.max(seatUsage.includedSeats, 1)) *
+                        100,
+                    )}%`,
+                  }}
+                />
+              </div>
+            ) : null}
             {hardCapped ? (
               <p className="mt-2 text-xs text-[#1a1a1a]">
                 Free workspaces are capped at {seatUsage.includedSeats} seats.{" "}
@@ -179,13 +176,9 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
                 </Link>
                 .
               </p>
-            ) : isOverageInvite ? (
+            ) : unlimitedCollaborators ? (
               <p className="mt-2 text-xs text-[#666]">
-                You're at the included-seat limit. The next invite adds{" "}
-                <span className="font-mono font-bold text-[#1a1a1a]">
-                  ${(overageCents / 100).toFixed(2)}/mo
-                </span>{" "}
-                to your subscription.
+                Your paid storage plan includes unlimited collaborators.
               </p>
             ) : seatUsage.pendingInvites > 0 ? (
               <p className="mt-2 text-[10px] font-mono text-[#888]">
@@ -240,9 +233,7 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
               ? "Upgrade to invite more"
               : isLoading
                 ? "Sending..."
-                : isOverageInvite
-                  ? `Send invite · +$${(overageCents / 100).toFixed(2)}/mo`
-                  : "Send invite"}
+                : "Send invite"}
           </Button>
           {inviteError ? (
             <div className="text-xs text-[#dc2626] font-bold">

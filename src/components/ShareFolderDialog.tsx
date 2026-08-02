@@ -345,6 +345,11 @@ export function ShareFolderDialog({
                       />
                     </div>
                   </div>
+                  <p className="text-[11px] text-[#666]">
+                    Snip keeps 5% + 30¢ per paid delivery. Stripe shows the
+                    full charge to your client and sends the remainder to your
+                    connected account.
+                  </p>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
                       Client email (for invoice + watermark)

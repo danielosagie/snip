@@ -1,13 +1,11 @@
 /**
  * Playback provider abstraction.
  *
- * Today every video goes through Mux. The unit COGS shows that's the
- * single largest line item per paid customer — for typical creative
- * teams, encoding alone is roughly 50% of the gross cost of revenue.
- * Cloudflare Stream is ~10–15× cheaper for the same encode + delivery
- * profile, so the long-term plan is to route paid-tier traffic to
- * Stream while keeping Mux on the free tier and on watermarked
- * paywalled deliveries (Mux's signed-playback story is more mature).
+ * New review uploads default to Mux. Mux is currently the best fit for this
+ * workload: signed paywall delivery is complete and its native inactive-asset
+ * pricing avoids a custom eviction/re-encode tradeoff. Cloudflare Stream stays
+ * available as an explicitly configured fallback/provider, but it is not
+ * assumed to be cheaper.
  *
  * This file is the *contract* every provider has to satisfy. The
  * `convex/mux.ts` module covers most of the Mux side already; the new
@@ -49,11 +47,8 @@ export type PlaybackProviderKey = "mux" | "cloudflare_stream";
  *   1. `PLAYBACK_PROVIDER_DEFAULT` env, if set to a concrete value —
  *      forces every new upload to that provider regardless of tier.
  *      Use this during the dual-write phase of the cutover.
- *   2. `PLAYBACK_PROVIDER_BY_TIER` env, if set to "true" — routes
- *      free-tier uploads to Stream (cheap) and keeps paid tiers on
- *      Mux (mature watermarking + signed playback). This is the
- *      shipping cutover mode once we've verified Stream's
- *      equivalence on the surfaces paid customers depend on.
+ *   2. `PLAYBACK_PROVIDER_BY_TIER` env, if set to "true" — legacy opt-in
+ *      routing for free-tier uploads to Stream, while paid tiers stay on Mux.
  *   3. Otherwise → `"mux"`. Existing deployments keep their behavior
  *      until they opt in.
  *
@@ -77,8 +72,7 @@ export function defaultPlaybackProvider(plan?: string): PlaybackProviderKey {
     const normalized = plan.trim().toLowerCase();
     if (normalized === "free") return "cloudflare_stream";
     // basic / pro / studio (legacy) / enterprise → keep Mux. The
-    // watermarked-preview pipeline + signed-playback story is more
-    // mature on Mux; flipping paid tiers waits on Stream equivalence.
+    // Watermarked previews and signed paywall playback are complete on Mux.
     return "mux";
   }
 

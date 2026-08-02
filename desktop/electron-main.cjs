@@ -18,6 +18,7 @@ const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://snipfilm.vercel.app").
 
 const SETTINGS_DIR = path.join(app.getPath("userData"));
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
+let settingsCache = null;
 
 // ---- Settings persistence ----------------------------------------------------
 
@@ -111,6 +112,13 @@ function transformSecrets(settings, fn) {
 }
 
 async function loadSettings() {
+  // Decrypting through Electron safeStorage touches the macOS Keychain. This
+  // function is called by several background loops and by every WebDAV read,
+  // so decrypting on every call can repeatedly trigger the "snip Safe
+  // Storage" approval dialog when Keychain access is not permanently granted.
+  // Keep one decrypted in-memory snapshot and only touch Keychain again after
+  // an explicit settings write or an app relaunch.
+  if (settingsCache) return settingsCache;
   try {
     const raw = await fs.readFile(SETTINGS_FILE, "utf8");
     const parsed = JSON.parse(raw);
@@ -120,12 +128,14 @@ async function loadSettings() {
     for (const key of Object.keys(DEFAULT_FEATURES)) {
       features[key] = { ...DEFAULT_FEATURES[key], ...(features[key] || {}) };
     }
-    return transformSecrets(
+    settingsCache = transformSecrets(
       { ...DEFAULT_SETTINGS, ...parsed, features },
       decryptSecret,
     );
+    return settingsCache;
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    settingsCache = { ...DEFAULT_SETTINGS };
+    return settingsCache;
   }
 }
 
@@ -140,6 +150,9 @@ async function saveSettings(settings) {
   } catch {
     // best-effort on platforms without POSIX perms
   }
+  // Store the caller's already-decrypted value. Do not read the encrypted file
+  // back through safeStorage just to refresh the cache.
+  settingsCache = settings;
 }
 
 // Live Convex auth pushed from the signed-in renderer (the web app running
@@ -2764,6 +2777,7 @@ let updateState = {
   version: null,
   percent: 0,
   error: null,
+  requiresManualInstall: false,
 };
 // Set when the user explicitly triggers an install so the quit path knows to
 // hand off to Squirrel rather than hard-exit.
@@ -2775,12 +2789,41 @@ function emitUpdateStatus() {
   }
 }
 
+function installedAppRequiresManualUpdate() {
+  if (process.platform !== "darwin" || !app.isPackaged || typeof process.getuid !== "function") {
+    return false;
+  }
+
+  const executable = app.getPath("exe");
+  const appBundle = executable.replace(/\/Contents\/MacOS\/[^/]+$/, "");
+  if (!appBundle.endsWith(".app")) return false;
+
+  try {
+    // A .pkg installs the bundle as root. Squirrel.Mac then asks to add a
+    // privileged helper every time an automatic install retries. Only use its
+    // silent quit-time path for user-owned bundles (normally installed from
+    // the DMG); system-managed copies update through an explicit DMG download.
+    return fssync.statSync(appBundle).uid !== process.getuid();
+  } catch {
+    return false;
+  }
+}
+
+function latestDesktopDmgUrl() {
+  const filename = process.arch === "x64" ? "snip-desktop-x64.dmg" : "snip-desktop.dmg";
+  return `${WEB_APP_URL}/downloads/${filename}`;
+}
+
 function setupAutoUpdater() {
+  const requiresManualInstall = installedAppRequiresManualUpdate();
+  updateState = { ...updateState, requiresManualInstall };
   // Download in the background, but don't swap the bundle mid-session — an
   // editor with the mounted drive open shouldn't get yanked. Install lands on
   // the next quit (autoInstallOnAppQuit) or on explicit "Restart & install".
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Root-owned .pkg installs are deliberately manual: silently retrying them
+  // creates the recurring macOS "add a new helper tool" approval dialog.
+  autoUpdater.autoDownload = !requiresManualInstall;
+  autoUpdater.autoInstallOnAppQuit = !requiresManualInstall;
   autoUpdater.logger = {
     info: (m) => console.log("[updater]", m),
     warn: (m) => console.warn("[updater]", m),
@@ -2909,6 +2952,13 @@ ipcMain.handle("update:check", async () => {
 });
 
 ipcMain.handle("update:install", async () => {
+  if (
+    updateState.requiresManualInstall &&
+    (updateState.status === "available" || updateState.status === "downloaded")
+  ) {
+    await shell.openExternal(latestDesktopDmgUrl());
+    return { ok: true, manual: true };
+  }
   if (updateState.status !== "downloaded") return { ok: false, reason: "no-update" };
   isQuittingForUpdate = true;
   // Detach the FUSE mount before Squirrel swaps the app bundle — otherwise the

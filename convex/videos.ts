@@ -8,7 +8,7 @@ import { resolveBundleVideos, resolveBundleFolders } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
 import { indexSearchable, removeSearchableForVideo } from "./search";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { prefEnabled, resolveUserEmail } from "./notifications";
 
 const workflowStatusValidator = v.union(
@@ -996,6 +996,14 @@ export const setPaywall = mutation({
         description: args.paywall.description?.trim() || undefined,
       },
     });
+    // Preview encoding is a paywall cost, not an upload cost. Start it only
+    // when the owner enables the paywall; the action's atomic claim keeps
+    // retries and concurrent share creation idempotent.
+    await ctx.scheduler.runAfter(
+      0,
+      internal.videoActions.ensurePreviewAssetForVideo,
+      { videoId: args.videoId },
+    );
   },
 });
 
@@ -1154,6 +1162,9 @@ export const restore = mutation({
         "The project this video belongs to is also in the trash. Restore the project first.",
       );
     }
+    if (video.trashPurgeStartedAt) {
+      throw new Error("This item has passed its 30-day recovery window and is being permanently deleted.");
+    }
     if (!video.deletedAt) return;
     await ctx.db.patch(args.videoId, {
       deletedAt: undefined,
@@ -1241,6 +1252,32 @@ export const purge = mutation({
     if (!video.deletedAt) {
       throw new Error("Move the video to the trash first.");
     }
+
+    const sourceRefs = video.s3Key
+      ? await ctx.db
+          .query("videos")
+          .withIndex("by_s3_key", (q) => q.eq("s3Key", video.s3Key))
+          .collect()
+      : [];
+    const sourceIsExclusive = sourceRefs.every((ref) => ref._id === video._id);
+    await ctx.scheduler.runAfter(
+      0,
+      internal.retentionActions.purgeReplacedAssets,
+      {
+        s3Keys: [
+          ...(video.s3Key && sourceIsExclusive ? [video.s3Key] : []),
+          ...(video.imagePreviewS3Key ? [video.imagePreviewS3Key] : []),
+          ...(video.sequenceFrameKeys ?? []),
+          ...(video.staticRenditions ?? [])
+            .map((rendition) => rendition.r2Key)
+            .filter((key): key is string => Boolean(key)),
+        ],
+        muxAssetIds: [video.muxAssetId, video.muxPreviewAssetId].filter(
+          (id): id is string => Boolean(id),
+        ),
+        streamUid: video.streamUid,
+      },
+    );
 
     const comments = await ctx.db
       .query("comments")
@@ -1384,14 +1421,13 @@ export const reconcileUploadedObjectMetadata = internalMutation({
     const actualSize = Number.isFinite(args.fileSize) ? Math.max(0, args.fileSize) : 0;
     const sizeDelta = actualSize - declaredSize;
 
-    // Drive-first workspaces serve the source from the connected
-    // drive/LucidLink mount, so it doesn't count against the cloud
-    // storage cap — skip the quota assert and tag the row so usage
-    // queries exclude it.
+    // Drive-first changes playback/encoding policy, not billing. The
+    // source still lives in Snip-managed object storage and counts
+    // toward the workspace capacity.
     const team = await ctx.db.get(project.teamId);
     const driveFirst = team?.driveFirstStorage === true;
 
-    if (!driveFirst && sizeDelta > 0) {
+    if (sizeDelta > 0) {
       await assertTeamCanStoreBytes(ctx, project.teamId, sizeDelta);
     }
 
@@ -1476,6 +1512,7 @@ export const claimDeferredEncoding = internalMutation({
       lastViewedAt: Date.now(),
       renditionEvictedAt: undefined,
     });
+
     return true;
   },
 });
@@ -1622,15 +1659,17 @@ export const markAsReady = internalMutation({
       renditionEvictedAt: undefined,
     });
 
-    // Pre-warm the watermarked preview asset right as the full asset
-    // becomes available. By the time anyone creates a paywalled share
-    // link against this video, the preview is already in Mux and ready
-    // for instant playback. Skipped if the video already has a preview
-    // asset (legacy lazy path) — the action itself is idempotent.
-    if (!before?.muxPreviewAssetId) {
+    // A paywall may be configured while ingest is still running. Its first
+    // preview attempt returns notReady; retry exactly when the source becomes
+    // ready, but never create a preview for an ordinary review upload.
+    const paywalledLinks = await ctx.db
+      .query("shareLinks")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .collect();
+    if (before?.paywall || paywalledLinks.some((link) => Boolean(link.paywall))) {
       await ctx.scheduler.runAfter(
         0,
-        api.videoActions.ensurePreviewAssetForVideo,
+        internal.videoActions.ensurePreviewAssetForVideo,
         { videoId: args.videoId },
       );
     }
@@ -1794,13 +1833,9 @@ export const setStreamRefs = internalMutation({
 });
 
 /**
- * Stream's equivalent of `markAsReady`. The two differ in one
- * important way: `markAsReady` pre-warms a Mux *watermarked preview*
- * asset for paywalled delivery, which would fire a broken Mux job
- * against a Stream-hosted video. Paywalled/watermarked delivery is
- * still Mux-only (see the cutover plan), so Stream videos skip that
- * pre-warm — a paywalled link on a Stream video will mint its preview
- * on demand later.
+ * Stream's equivalent of `markAsReady`. Review playback stays on Stream;
+ * an explicitly enabled paywall may still create its Mux watermarked preview
+ * from the source object because that signed-delivery pipeline is Mux-only.
  *
  * `muxPlaybackId` is set to the stream uid as a "has playback"
  * sentinel so the player's `isPlayable` gate + thumbnail logic work
@@ -1830,8 +1865,19 @@ export const markStreamReady = internalMutation({
       encodingDeferred: undefined,
     });
 
-    // Provider-agnostic "long upload finished" email (no Mux preview
-    // pre-warm — that's the key difference from markAsReady).
+    const paywalledLinks = await ctx.db
+      .query("shareLinks")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .collect();
+    if (before?.paywall || paywalledLinks.some((link) => Boolean(link.paywall))) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.videoActions.ensurePreviewAssetForVideo,
+        { videoId: args.videoId },
+      );
+    }
+
+    // Provider-agnostic "long upload finished" email.
     try {
       if (before && before.status !== "ready") {
         const elapsed = Date.now() - before._creationTime;
@@ -2229,7 +2275,7 @@ export const getVideoByMuxPreviewAssetId = internalQuery({
 });
 
 /** Lightweight read used by ensurePreviewAssetForVideo before triggering ingest. */
-export const getForPreviewGen = query({
+export const getForPreviewGen = internalQuery({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
     const video = await ctx.db.get(args.videoId);
@@ -2251,7 +2297,7 @@ export const getForPreviewGen = query({
 
 /**
  * Atomic claim used by `ensurePreviewAssetForVideo` to fence concurrent
- * schedulers (e.g. one from `markAsReady` + one from `shareLinks.create`
+ * schedulers (e.g. video-level and share-link paywalls enabled together
  * for the same video). Inside a single Convex mutation the read+patch is
  * transactional, so exactly one caller observes `claimed: true` for a
  * given `(videoId, generation)` race. An in-flight claim is considered

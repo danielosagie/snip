@@ -36,6 +36,7 @@ export interface OutlineSection {
 }
 
 interface Props {
+  label?: string;
   sections: OutlineSection[];
   activeSectionId: string | null;
   onSelect: (sectionId: string) => void;
@@ -66,6 +67,7 @@ interface Props {
 }
 
 export function ContractSectionOutline({
+  label = "Sections",
   sections,
   activeSectionId,
   onSelect,
@@ -93,7 +95,7 @@ export function ContractSectionOutline({
     >
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b-2 border-[#1a1a1a]">
         <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-          Sections
+          {label}
         </div>
         <button
           type="button"
@@ -113,7 +115,7 @@ export function ContractSectionOutline({
         ) : (
           sections.map((s) => {
             const isActive = activeSectionId === s.id;
-            const isExpanded = expandedId === s.id;
+            const isExpanded = Boolean(renderSectionBody) && expandedId === s.id;
             return (
               <div
                 key={s.id}
@@ -127,10 +129,10 @@ export function ContractSectionOutline({
                     type="button"
                     onClick={() => onSelect(s.id)}
                     className={cn(
-                      "flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors flex-1 min-w-0 border-l-2",
+                      "flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
                       isActive
-                        ? "border-[#FF6600] font-bold text-[#1a1a1a]"
-                        : "border-transparent text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                        ? "bg-[#FFEDD5] font-bold text-[#1a1a1a]"
+                        : "text-[#1a1a1a] hover:bg-[#e8e8e0]",
                     )}
                   >
                     {s.required ? (
@@ -160,25 +162,27 @@ export function ContractSectionOutline({
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedId(isExpanded ? null : s.id)
-                    }
-                    className="px-2 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] flex-shrink-0"
-                    title={isExpanded ? "Collapse section" : "Edit section answers"}
-                    aria-label={
-                      isExpanded
-                        ? "Collapse section"
-                        : "Edit section answers"
-                    }
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    )}
-                  </button>
+                  {renderSectionBody ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedId(isExpanded ? null : s.id)
+                      }
+                      className="flex-shrink-0 px-2 text-[#888] hover:bg-[#e8e8e0] hover:text-[#1a1a1a]"
+                      title={isExpanded ? "Collapse section" : "Edit section answers"}
+                      aria-label={
+                        isExpanded
+                          ? "Collapse section"
+                          : "Edit section answers"
+                      }
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  ) : null}
                 </div>
                 {isExpanded ? (
                   <div className="px-3 py-3 border-t border-[#ccc]">

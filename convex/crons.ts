@@ -20,19 +20,20 @@ crons.daily(
 );
 
 /**
- * Daily cold-eviction sweep. Reclaims the encoded ladder (Mux/Stream +
- * mirrored R2 proxies) for videos that haven't been watched within
- * RETENTION_HOT_DAYS, leaving the source in place for lazy re-encode on
- * the next watch. No-op on deployments where eviction is disabled
- * (single-tenant / demo — see `retention.isEvictionEnabled`).
- *
- * 04:00 UTC — after the usage roll-up so a video isn't evicted in the
- * same hour its final storage delta is metered.
+ * Recently Deleted is a 30-day recovery window, not permanent storage.
+ * Purge source objects, provider assets, previews, and database rows daily.
  */
 crons.daily(
-  "evict cold video renditions",
+  "purge expired recently deleted items",
   { hourUTC: 4, minuteUTC: 0 },
-  internal.retentionActions.runColdEviction,
+  internal.retentionActions.purgeExpiredTrash,
+  {},
+);
+
+crons.daily(
+  "purge unused watermarked preview assets",
+  { hourUTC: 5, minuteUTC: 0 },
+  internal.retentionActions.purgeUnusedPreviewAssets,
   {},
 );
 

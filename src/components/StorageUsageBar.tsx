@@ -101,19 +101,19 @@ export function StorageUsageBar({
         <Stat
           label="On drive"
           value={formatBytes(usage.driveBytes)}
-          hint="not billed"
+          hint="managed source"
         />
       </dl>
       <p className="text-[11px] text-[#888] mt-2 leading-snug max-w-prose">
         Clips you haven&apos;t watched in 30 days are archived to cut storage
-        cost — the source stays put and the player rebuilds full quality on the
-        next watch. <span className="text-[#666]">Archived still counts toward your cap; on-drive doesn&apos;t.</span>
+        cost. The source stays put and the player rebuilds full quality on the
+        next watch. <span className="text-[#666]">All Snip-managed source files count toward your storage capacity.</span>
       </p>
 
       {isFree ? (
         <p className="text-xs text-[#666] mt-3 max-w-prose">
-          Free workspaces get 50 GB. Upgrade to Basic or Pro for more
-          space and bigger uploads.
+          Free workspaces get 25 GB. Upgrade to Basic or Pro for more
+          space and unlimited collaborators.
         </p>
       ) : null}
     </section>

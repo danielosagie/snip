@@ -21,6 +21,12 @@ interface Props {
   projectId: Id<"projects">;
   folders: FolderSummary[];
   canEdit: boolean;
+  selectedFolderIds?: Set<Id<"folders">>;
+  selectionMode?: boolean;
+  onSelectToggle?: (
+    folderId: Id<"folders">,
+    event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean },
+  ) => void;
   onDropVideo?: (videoId: Id<"videos">, targetFolderId: Id<"folders">) => void;
   onDropFolder?: (
     droppedFolderId: Id<"folders">,
@@ -34,6 +40,9 @@ export function FolderRow({
   projectId,
   folders,
   canEdit,
+  selectedFolderIds,
+  selectionMode,
+  onSelectToggle,
   onDropVideo,
   onDropFolder,
   onDropFiles,
@@ -55,6 +64,9 @@ export function FolderRow({
             name={f.name}
             itemCount={f.itemCount}
             canEdit={canEdit}
+            selected={selectedFolderIds?.has(f._id)}
+            selectionMode={selectionMode}
+            onSelectToggle={(event) => onSelectToggle?.(f._id, event)}
             onDropVideo={onDropVideo}
             onDropFolder={onDropFolder}
             onDropFiles={onDropFiles}

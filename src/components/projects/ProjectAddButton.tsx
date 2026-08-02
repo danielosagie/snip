@@ -7,6 +7,7 @@ import { Plus, Upload, FolderPlus, FileSignature, FileText } from "lucide-react"
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { contractPath, documentPath } from "@/lib/routes";
+import { friendlyError } from "@/lib/friendlyError";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,9 +40,9 @@ export function ProjectAddButton({
 }: Props) {
   const navigate = useNavigate();
   const createFolder = useMutation(api.folders.create);
-  const createContract = useMutation(api.contractsTable.create);
+  const createDocumentItem = useMutation(api.contractsTable.create);
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const [creatingContract, setCreatingContract] = useState(false);
+  const [creatingDocumentItem, setCreatingDocumentItem] = useState(false);
 
   const handleAddFolder = async () => {
     if (creatingFolder) return;
@@ -55,22 +56,22 @@ export function ProjectAddButton({
         parentFolderId: currentFolderId ?? undefined,
       });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't create folder.");
+      alert(friendlyError(e, "Couldn't create folder."));
     } finally {
       setCreatingFolder(false);
     }
   };
 
-  // Contracts and documents are the same editor and capability model; docType
-  // only seeds the label and route grouping.
+  // Documents start as focused writing surfaces. Contracts opt into the
+  // recipient and signing workflow from creation.
   const handleAdd = async (docType: "contract" | "document") => {
-    if (creatingContract) return;
+    if (creatingDocumentItem) return;
     const label = docType === "document" ? "document" : "contract";
     const raw = prompt(`${label[0].toUpperCase()}${label.slice(1)} title`, `Untitled ${label}`);
     if (!raw) return;
-    setCreatingContract(true);
+    setCreatingDocumentItem(true);
     try {
-      const contractId = await createContract({
+      const documentId = await createDocumentItem({
         projectId,
         title: raw.trim() || `Untitled ${label}`,
         kind: docType === "document" ? "custom" : "sow",
@@ -82,13 +83,13 @@ export function ProjectAddButton({
       navigate({
         to:
           docType === "document"
-            ? documentPath(teamSlug, projectId, contractId)
-            : contractPath(teamSlug, projectId, contractId),
+            ? documentPath(teamSlug, projectId, documentId)
+            : contractPath(teamSlug, projectId, documentId),
       });
     } catch (e) {
-      alert(e instanceof Error ? e.message : `Couldn't create ${label}.`);
+      alert(friendlyError(e, `Couldn't create ${label}.`));
     } finally {
-      setCreatingContract(false);
+      setCreatingDocumentItem(false);
     }
   };
 
@@ -116,18 +117,18 @@ export function ProjectAddButton({
           Add folder
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => void handleAdd("contract")}
-          disabled={creatingContract}
-        >
-          <FileSignature className="mr-2 h-4 w-4" />
-          Add contract
-        </DropdownMenuItem>
-        <DropdownMenuItem
           onClick={() => void handleAdd("document")}
-          disabled={creatingContract}
+          disabled={creatingDocumentItem}
         >
           <FileText className="mr-2 h-4 w-4" />
           Add document
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => void handleAdd("contract")}
+          disabled={creatingDocumentItem}
+        >
+          <FileSignature className="mr-2 h-4 w-4" />
+          Add contract
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

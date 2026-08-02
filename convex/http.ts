@@ -4,11 +4,61 @@ import { httpAction } from "./_generated/server";
 import type Stripe from "stripe";
 import { components, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { resolvePlanFromStripePriceId } from "./billingHelpers";
+import { extractConnectRequirements } from "./stripeConnect";
 
 const http = httpRouter();
 
 function getSubscriptionPriceId(subscription: Stripe.Subscription): string | undefined {
-  return subscription.items.data[0]?.price?.id;
+  return subscription.items.data.find((item) =>
+    Boolean(resolvePlanFromStripePriceId(item.price?.id)),
+  )?.price?.id;
+}
+
+type AddOnKey = "whiteLabel" | "customDomain" | "apiTier";
+
+const ADD_ON_PRICE_ENV: Record<AddOnKey, readonly string[]> = {
+  whiteLabel: [
+    "STRIPE_PRICE_ADDON_WHITE_LABEL_MONTHLY",
+    "STRIPE_PRICE_ADDON_WHITE_LABEL_ANNUAL",
+  ],
+  customDomain: [
+    "STRIPE_PRICE_ADDON_CUSTOM_DOMAIN_MONTHLY",
+    "STRIPE_PRICE_ADDON_CUSTOM_DOMAIN_ANNUAL",
+  ],
+  apiTier: [
+    "STRIPE_PRICE_ADDON_API_TIER_MONTHLY",
+    "STRIPE_PRICE_ADDON_API_TIER_ANNUAL",
+  ],
+};
+
+function getSubscriptionAddOnItems(subscription: Stripe.Subscription) {
+  const result: {
+    whiteLabel?: string;
+    customDomain?: string;
+    customDomainHostname?: string;
+    apiTier?: string;
+  } = {};
+  let configuredOrFound = false;
+  for (const addOn of Object.keys(ADD_ON_PRICE_ENV) as AddOnKey[]) {
+    const configuredPrices = ADD_ON_PRICE_ENV[addOn]
+      .map((name) => process.env[name]?.trim())
+      .filter((id): id is string => Boolean(id));
+    if (configuredPrices.length) configuredOrFound = true;
+    const item = subscription.items.data.find(
+      (candidate) =>
+        candidate.metadata?.snip_add_on === addOn ||
+        configuredPrices.includes(candidate.price.id),
+    );
+    if (!item) continue;
+    configuredOrFound = true;
+    result[addOn] = item.id;
+    if (addOn === "customDomain") {
+      const hostname = item.metadata?.custom_domain_hostname;
+      if (hostname) result.customDomainHostname = hostname;
+    }
+  }
+  return configuredOrFound ? result : undefined;
 }
 
 function getSubscriptionOrgId(subscription: Stripe.Subscription): string | undefined {
@@ -30,6 +80,16 @@ function getSubscriptionPlanMetadata(
 ): string | undefined {
   const plan = subscription.metadata.plan;
   return typeof plan === "string" && plan.length > 0 ? plan : undefined;
+}
+
+function getSubscriptionCadence(
+  subscription: Stripe.Subscription,
+): "monthly" | "annual" | undefined {
+  return subscription.metadata.cadence === "annual"
+    ? "annual"
+    : subscription.metadata.cadence === "monthly"
+      ? "monthly"
+      : undefined;
 }
 
 function getSubscriptionPeriodEnd(
@@ -79,6 +139,9 @@ async function syncBothBillingSurfaces(
         plan: getSubscriptionPlanMetadata(subscription),
         status: subscription.status,
         currentPeriodEnd: getSubscriptionPeriodEnd(subscription),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+        billingCadence: getSubscriptionCadence(subscription),
+        addOnItems: getSubscriptionAddOnItems(subscription),
       },
     ),
   ]);
@@ -132,6 +195,7 @@ registerRoutes(http, components.stripe, {
         status: deriveConnectStatusFromAccount(account),
         chargesEnabled: account.charges_enabled ?? false,
         payoutsEnabled: account.payouts_enabled ?? false,
+        requirements: extractConnectRequirements(account),
       });
     },
     // Client paid for a paywalled share link.

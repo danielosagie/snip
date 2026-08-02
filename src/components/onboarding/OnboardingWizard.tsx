@@ -248,7 +248,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
                 </h1>
                 <p className="mt-2 text-sm text-[#666]">
                   Free workspaces include{" "}
-                  <span className="font-semibold text-[#1a1a1a]">50 GB</span> —
+                  <span className="font-semibold text-[#1a1a1a]">25 GB</span> —
                   no card required. Get your first clip in:
                 </p>
               </div>

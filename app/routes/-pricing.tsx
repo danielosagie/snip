@@ -43,7 +43,7 @@ export default function PricingPage() {
               <ul className="space-y-4 text-lg font-bold flex-grow mb-8">
                 <li className="flex items-center gap-3">
                   <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
-                  Unlimited seats
+                  Owner + 1 collaborator
                 </li>
                 <li className="flex items-center gap-3">
                   <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
@@ -55,7 +55,7 @@ export default function PricingPage() {
                 </li>
                 <li className="flex items-center gap-3">
                   <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
-                  50 GB Storage
+                  25 GB Storage
                 </li>
               </ul>
 
@@ -73,7 +73,7 @@ export default function PricingPage() {
                 Basic
               </div>
               <div className="text-6xl font-black tracking-tighter mb-4">
-                $20<span className="text-2xl text-[#888]">/mo</span>
+                $25<span className="text-2xl text-[#888]">/mo</span>
               </div>
               <p className="text-lg font-medium text-[#1a1a1a] mb-8">
                 Real projects, real footage, no babysitting.
@@ -94,7 +94,7 @@ export default function PricingPage() {
                 </li>
                 <li className="flex items-center gap-3">
                   <span className="text-[#FF6600] text-2xl">&#10003;</span>{" "}
-                  2 TB Storage
+                  500 GB Storage
                 </li>
               </ul>
 
@@ -137,7 +137,7 @@ export default function PricingPage() {
                   Unlimited clients
                 </li>
                 <li className="flex items-center gap-3">
-                  <span className="text-[#FFB380] text-2xl">&#10003;</span> 5 TB
+                  <span className="text-[#FFB380] text-2xl">&#10003;</span> 2 TB
                   Storage
                 </li>
               </ul>
@@ -226,8 +226,8 @@ export default function PricingPage() {
           <div className="divide-y-2 divide-[#1a1a1a] border-y-2 border-[#1a1a1a]">
             {[
               {
-                q: "What counts as a seat?",
-                a: "Anyone on your team. Invite everyone — editors, producers, clients. No extra charge.",
+                q: "Do you charge per collaborator?",
+                a: "No. Basic and Pro include unlimited collaborators. Free includes the owner and one collaborator.",
               },
               {
                 q: "Can clients review without an account?",
@@ -235,7 +235,7 @@ export default function PricingPage() {
               },
               {
                 q: "What happens if I hit the storage limit?",
-                a: "Upgrade to Basic ($20/mo, 2 TB) or Pro ($50/mo, 5 TB) for more space, or delete old projects to free up room.",
+                a: "Upgrade to Basic ($25/mo, 500 GB) or Pro ($50/mo, 2 TB), or delete old projects to free up room.",
               },
               {
                 q: "Is there a free trial?",

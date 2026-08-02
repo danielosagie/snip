@@ -249,7 +249,7 @@ export default function TeamSettingsPage() {
       />
 
       <div className="flex-1 overflow-auto">
-        <div className="max-w-3xl mx-auto px-6 lg:px-8 py-8 space-y-10">
+        <div className="max-w-3xl px-6 lg:px-8 py-8 space-y-10">
           {/* ── Team identity ── */}
           <section>
             <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1">
