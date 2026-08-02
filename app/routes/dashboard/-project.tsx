@@ -22,6 +22,7 @@ import {
   Check,
   Pencil,
   Tags,
+  FolderPlus,
 } from "lucide-react";
 import { FileTile, FileListRow } from "@/components/files/FileTile";
 import {
@@ -43,6 +44,7 @@ import {
   type ProjectSortMode,
 } from "@/components/projects/ProjectToolbar";
 import { ProjectAddButton } from "@/components/projects/ProjectAddButton";
+import { ProjectBackgroundMenu } from "@/components/projects/ProjectBackgroundMenu";
 import { FolderRow } from "@/components/folders/FolderRow";
 import { ContractListSection } from "@/components/contracts/ContractListSection";
 import {
@@ -53,7 +55,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Id } from "@convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
-import { videoPath } from "@/lib/routes";
+import { videoPath, contractPath, documentPath } from "@/lib/routes";
 import { prefetchHlsRuntime, prefetchMuxPlaybackManifest } from "@/lib/muxPlayback";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import {
@@ -116,6 +118,9 @@ type VideoIntentTargetProps = {
    *  video — this is what the header "Select" button turns on so users
    *  don't have to know the Cmd/Ctrl/Shift shortcuts. */
   selectionMode?: boolean;
+  /** When provided, dropping ANOTHER video onto this one combines the two
+   *  into a new folder (Finder-style). Self-drops are ignored upstream. */
+  onCombine?: (draggedVideoId: Id<"videos">) => void;
   onOpen: () => void;
   onSelectToggle?: (
     event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean },
@@ -152,11 +157,13 @@ function VideoIntentTarget({
   draggable,
   selected,
   selectionMode,
+  onCombine,
   onOpen,
   onSelectToggle,
   children,
 }: VideoIntentTargetProps) {
   const convex = useConvex();
+  const [combineActive, setCombineActive] = useState(false);
   const prewarmIntentHandlers = useRoutePrewarmIntent(() => {
     prewarmVideo(convex, {
       teamSlug,
@@ -175,7 +182,42 @@ function VideoIntentTarget({
         "relative",
         className,
         selected && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
+        combineActive && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
       )}
+      onDragOver={
+        onCombine
+          ? (e) => {
+              // Only react to a dragged video; ignore folder drags and
+              // arbitrary desktop files. A self-drop can't be detected here
+              // (the payload isn't readable during dragover) so we let it
+              // highlight, then no-op on drop.
+              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+                return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "copy";
+              if (!combineActive) setCombineActive(true);
+            }
+          : undefined
+      }
+      onDragLeave={onCombine ? () => setCombineActive(false) : undefined}
+      onDrop={
+        onCombine
+          ? (e) => {
+              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+                return;
+              e.preventDefault();
+              e.stopPropagation();
+              setCombineActive(false);
+              const draggedId = e.dataTransfer.getData(
+                "application/x-snip-video",
+              );
+              if (draggedId && draggedId !== videoId) {
+                onCombine(draggedId as Id<"videos">);
+              }
+            }
+          : undefined
+      }
       onClick={(e) => {
         // In selection mode a plain click toggles. Otherwise Cmd/Ctrl+click
         // toggles a single item, Shift+click extends the range, and a plain
@@ -204,6 +246,12 @@ function VideoIntentTarget({
       }}
       {...prewarmIntentHandlers}
     >
+      {combineActive ? (
+        <div className="pointer-events-none absolute left-1 top-1 z-20 inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#FF6600] px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[#f0f0e8]">
+          <FolderPlus className="h-3 w-3" />
+          New folder
+        </div>
+      ) : null}
       {selectionMode ? (
         <span
           aria-hidden="true"
@@ -270,6 +318,9 @@ export default function ProjectPage({
   const moveVideoToFolder = useMutation(api.folders.moveVideoToFolder);
   const moveFolder = useMutation(api.folders.moveFolder);
   const removeSelection = useMutation(api.folders.removeSelection);
+  const createFolder = useMutation(api.folders.create);
+  const createFolderWithItems = useMutation(api.folders.createWithItems);
+  const createContract = useMutation(api.contractsTable.create);
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
   const getProxyDownloadUrl = useAction(api.videoActions.getProxyDownloadUrl);
   const requestProxies = useAction(api.videoActions.requestProxies);
@@ -314,6 +365,12 @@ export default function ProjectPage({
   // header "Select" button so the multi-select shortcuts are discoverable.
   const [selectionMode, setSelectionMode] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  // Folder id that should auto-enter inline rename — set right after a
+  // background "New folder" or a drag-combine creates one, so the user can
+  // name it immediately (Finder-style). Cleared once the tile consumes it.
+  const [renameFolderId, setRenameFolderId] = useState<Id<"folders"> | null>(
+    null,
+  );
   const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
   const [bulkMetaOpen, setBulkMetaOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState<null | string>(null);
@@ -456,6 +513,93 @@ export default function ProjectPage({
       }
     },
     [moveFolder],
+  );
+
+  // ─── Finder-style create + combine ─────────────────────────────────────
+  // folders.create / createWithItems throw on duplicate names, so we dedup
+  // client-side ("New Folder", "New Folder 2", …) against the current level
+  // before calling. The name comparison is case-insensitive to match the
+  // backend uniqueness rule.
+  const uniqueNewFolderName = useCallback(() => {
+    const base = "New Folder";
+    const taken = new Set(
+      (folders ?? []).map((f) => f.name.trim().toLowerCase()),
+    );
+    if (!taken.has(base.toLowerCase())) return base;
+    for (let i = 2; i < 1000; i += 1) {
+      const candidate = `${base} ${i}`;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
+    // Practically unreachable; fall back to a timestamp suffix.
+    return `${base} ${Date.now()}`;
+  }, [folders]);
+
+  // Background "New folder": create at the current level with a deduped name,
+  // then drop the user straight into the tile's inline rename.
+  const handleNewFolder = useCallback(async () => {
+    if (!resolvedProjectId) return;
+    try {
+      const newId = await createFolder({
+        projectId: resolvedProjectId,
+        name: uniqueNewFolderName(),
+        parentFolderId: currentFolderId ?? undefined,
+      });
+      setRenameFolderId(newId);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't create folder.");
+    }
+  }, [createFolder, resolvedProjectId, currentFolderId, uniqueNewFolderName]);
+
+  // Background "New document" / "New contract" — mirrors ProjectAddButton's
+  // handleAdd: create the draft, then navigate into its editor.
+  const handleCreateDoc = useCallback(
+    async (docType: "contract" | "document") => {
+      if (!resolvedProjectId) return;
+      const label = docType === "document" ? "document" : "contract";
+      try {
+        const contractId = await createContract({
+          projectId: resolvedProjectId,
+          title: `Untitled ${label}`,
+          kind: docType === "document" ? "custom" : "sow",
+          docType,
+          contentHtml: "",
+        });
+        navigate({
+          to:
+            docType === "document"
+              ? documentPath(resolvedTeamSlug, resolvedProjectId, contractId)
+              : contractPath(resolvedTeamSlug, resolvedProjectId, contractId),
+        });
+      } catch (e) {
+        alert(e instanceof Error ? e.message : `Couldn't create ${label}.`);
+      }
+    },
+    [createContract, navigate, resolvedProjectId, resolvedTeamSlug],
+  );
+
+  // Drag-combine: dropping `draggedVideoId` onto `targetVideoId` creates a new
+  // folder at the current level containing BOTH, then opens it for rename.
+  const handleCombineVideos = useCallback(
+    async (targetVideoId: Id<"videos">, draggedVideoId: Id<"videos">) => {
+      if (!resolvedProjectId || targetVideoId === draggedVideoId) return;
+      try {
+        const newId = await createFolderWithItems({
+          projectId: resolvedProjectId,
+          parentFolderId: currentFolderId ?? undefined,
+          name: uniqueNewFolderName(),
+          videoIds: [targetVideoId, draggedVideoId],
+        });
+        setRenameFolderId(newId);
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Couldn't combine into a folder.");
+      }
+    },
+    [
+      createFolderWithItems,
+      resolvedProjectId,
+      currentFolderId,
+      uniqueNewFolderName,
+    ],
   );
 
   // ─── Bulk actions on the multi-selection ──────────────────────────────
@@ -1344,8 +1488,15 @@ export default function ProjectPage({
           </div>
         ) : viewMode === "grid" ? (
           /* Grid View - Responsive tiles */
+          <ProjectBackgroundMenu
+            canEdit={canUpload}
+            onNewFolder={() => void handleNewFolder()}
+            onUploadFiles={openFilePicker}
+            onNewDocument={() => void handleCreateDoc("document")}
+            onNewContract={() => void handleCreateDoc("contract")}
+          >
           <div className={cn(
-            "transition-opacity duration-300",
+            "min-h-full transition-opacity duration-300",
             isLoadingData ? "opacity-0" : "opacity-100"
           )}>
             <FolderRow
@@ -1365,6 +1516,8 @@ export default function ProjectPage({
               onDropFiles={(files, targetId) =>
                 requestUpload(files, project._id, targetId)
               }
+              renameFolderId={renameFolderId}
+              onRenameConsumed={() => setRenameFolderId(null)}
             />
             {/* Contracts share folder-tile styling and sit alongside
                 them as the project's organizational/metadata strip.
@@ -1428,6 +1581,12 @@ export default function ProjectPage({
                         handleSelectionToggle(video._id, mods)
                       }
                       onDelete={() => handleDeleteVideo(video._id)}
+                      onCombine={
+                        canUpload
+                          ? (draggedId) =>
+                              void handleCombineVideos(video._id, draggedId)
+                          : undefined
+                      }
                       onOpen={
                         hasFocusedView
                           ? () =>
@@ -1465,6 +1624,12 @@ export default function ProjectPage({
                     draggable={canUpload}
                     selected={selectedVideoIds.has(video._id)}
                     selectionMode={selectionMode}
+                    onCombine={
+                      canUpload
+                        ? (draggedId) =>
+                            void handleCombineVideos(video._id, draggedId)
+                        : undefined
+                    }
                     onSelectToggle={(mods) =>
                       handleSelectionToggle(video._id, mods)
                     }
@@ -1609,10 +1774,18 @@ export default function ProjectPage({
               </div>
             </div>
           </div>
+          </ProjectBackgroundMenu>
         ) : (
           /* List View - Horizontal rows */
+          <ProjectBackgroundMenu
+            canEdit={canUpload}
+            onNewFolder={() => void handleNewFolder()}
+            onUploadFiles={openFilePicker}
+            onNewDocument={() => void handleCreateDoc("document")}
+            onNewContract={() => void handleCreateDoc("contract")}
+          >
           <div className={cn(
-            "transition-opacity duration-300",
+            "min-h-full transition-opacity duration-300",
             isLoadingData ? "opacity-0" : "opacity-100"
           )}>
             <FolderRow
@@ -1632,6 +1805,8 @@ export default function ProjectPage({
               onDropFiles={(files, targetId) =>
                 requestUpload(files, project._id, targetId)
               }
+              renameFolderId={renameFolderId}
+              onRenameConsumed={() => setRenameFolderId(null)}
             />
             {currentFolderId === null && (
               <ContractListSection
@@ -1679,6 +1854,12 @@ export default function ProjectPage({
                       handleSelectionToggle(video._id, mods)
                     }
                     onDelete={() => handleDeleteVideo(video._id)}
+                    onCombine={
+                      canUpload
+                        ? (draggedId) =>
+                            void handleCombineVideos(video._id, draggedId)
+                        : undefined
+                    }
                     onOpen={
                       hasFocusedView
                         ? () =>
@@ -1716,6 +1897,12 @@ export default function ProjectPage({
                   draggable={canUpload}
                   selected={selectedVideoIds.has(video._id)}
                   selectionMode={selectionMode}
+                  onCombine={
+                    canUpload
+                      ? (draggedId) =>
+                          void handleCombineVideos(video._id, draggedId)
+                      : undefined
+                  }
                   onSelectToggle={(mods) =>
                     handleSelectionToggle(video._id, mods)
                   }
@@ -1865,6 +2052,7 @@ export default function ProjectPage({
             })}
             </div>
           </div>
+          </ProjectBackgroundMenu>
         )}
         {/* Timeline history used to live here as a panel under the grid.
             Pulled out so each file owns its own per-file version dropdown

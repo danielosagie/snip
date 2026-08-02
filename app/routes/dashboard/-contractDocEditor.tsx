@@ -1,6 +1,6 @@
 import { Link, Navigate, useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@convex/_generated/api";
@@ -9,10 +9,16 @@ import { Input } from "@/components/ui/input";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ContractDocPreview } from "@/components/contracts/ContractDocPreview";
 import { ContractToolbar } from "@/components/contracts/ContractToolbar";
-import { useHeadings } from "@/components/contracts/DocumentOutline";
+import { DocumentOutline, useHeadings } from "@/components/contracts/DocumentOutline";
 import { ContractSectionOutline } from "@/components/contracts/ContractSectionOutline";
 import { SignatureFieldsSheet } from "@/components/contracts/SignatureFieldsSheet";
 import { ContractWizardFullScreen } from "@/components/contracts/ContractWizardFullScreen";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { contractPath, documentPath, projectPath } from "@/lib/routes";
 import { friendlyError } from "@/lib/friendlyError";
@@ -126,8 +132,10 @@ export function DocumentEditorPage({
   const [fieldsSheetOpen, setFieldsSheetOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [outlineOpen, setOutlineOpen] = useState(mode === "contract");
-  const [mobileOutlineOpen, setMobileOutlineOpen] = useState(false);
+  // The sections outline is a Sheet (slide-over), not a persistent rail —
+  // same affordance for documents and contracts. Starts closed.
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  // Document history panel, independent of the outline.
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
@@ -207,6 +215,8 @@ export function DocumentEditorPage({
       .setTextSelection(pos + 1)
       .scrollIntoView()
       .run();
+    // Picking a section dismisses the overlay so you land on the scroll spot.
+    setOutlineOpen(false);
   };
 
   if (data === undefined) {
@@ -354,6 +364,49 @@ export function DocumentEditorPage({
           </div>
         </div>
 
+        {/* Sections — one affordance for both modes: a nav button that opens
+            the outline as a slide-over Sheet (no persistent rail). */}
+        <button
+          type="button"
+          onClick={() => setOutlineOpen(true)}
+          title="Sections"
+          aria-label="Sections"
+          className="inline-flex items-center gap-1.5 px-3 h-9 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider bg-[#f0f0e8] text-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] active:translate-y-[2px] active:translate-x-[2px] transition-all flex-shrink-0"
+        >
+          <PanelLeft className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Sections</span>
+        </button>
+
+        {/* Contract ⇄ Document toggle — same editor, signing surface only shows
+            for contracts. Draft-only (signing state can't change after send). */}
+        <div className="flex items-center border-2 border-[#1a1a1a] flex-shrink-0">
+          {(["contract", "document"] as const).map((t) => {
+            const current = (data.contract.docType ?? "contract") === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                disabled={data.contract.status !== "draft" || current}
+                onClick={() =>
+                  void updateContract({ contractId, docType: t })
+                }
+                title={
+                  data.contract.status !== "draft"
+                    ? "Only drafts can switch type"
+                    : `Treat as ${t}`
+                }
+                className={cn(
+                  "h-8 px-3 text-[10px] font-bold uppercase tracking-wider transition-colors disabled:cursor-default",
+                  current
+                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
+                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50",
+                )}
+              >
+                {t}
+              </button>
+            );
+          })}
+        </div>
         {isDocument ? (
           <>
             <button
@@ -408,104 +461,18 @@ export function DocumentEditorPage({
       ) : null}
 
       <div className="flex-1 overflow-y-auto">
+        {/* No persistent outline column anymore — the editor body owns the
+            width; sections live in the Sheet opened from the nav. Contracts
+            still keep their right-hand signing column. */}
         <div
           className={cn(
-            "mx-auto grid max-w-7xl grid-cols-1 gap-6 px-3 py-3 sm:px-6 sm:py-8",
-            isDocument
-              ? detailsOpen
-                ? "lg:grid-cols-[auto_minmax(0,1fr)_320px]"
-                : "lg:grid-cols-[auto_minmax(0,1fr)]"
-              : "lg:grid-cols-[auto_minmax(0,1fr)_320px]",
+            "max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 gap-6",
+            !isDocument && "lg:grid-cols-[1fr_320px]",
           )}
         >
-          <div className="lg:hidden">
-            <button
-              type="button"
-              onClick={() => setMobileOutlineOpen((open) => !open)}
-              className="flex min-h-11 w-full items-center justify-between border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 text-xs font-bold uppercase tracking-wider"
-              aria-expanded={mobileOutlineOpen}
-            >
-              <span className="inline-flex items-center gap-2">
-                <PanelLeft className="h-4 w-4" />
-                {isDocument ? "Outline" : "Sections & templates"}
-              </span>
-              <ChevronDown
-                className={cn("h-4 w-4 transition-transform", mobileOutlineOpen && "rotate-180")}
-              />
-            </button>
-            {mobileOutlineOpen ? (
-              <ContractSectionOutline
-                label={isDocument ? "Outline" : "Sections"}
-                mobile
-                sections={outlineSections}
-                activeSectionId={activeSectionId}
-                onSelect={(sectionId) => {
-                  scrollToSection(sectionId);
-                  setMobileOutlineOpen(false);
-                }}
-                onCollapse={() => setMobileOutlineOpen(false)}
-                renderSectionBody={
-                  isDocument
-                    ? undefined
-                    : () => (
-                        <div className="text-[11px] font-mono text-[#888]">
-                          Edit this section directly in the document.
-                        </div>
-                      )
-                }
-                onRunWizard={
-                  !isDocument && data.contract.status === "draft"
-                    ? () => setWizardOpen(true)
-                    : undefined
-                }
-                runWizardLabel={
-                  clauseSections ? "Re-run wizard" : "Generate sections"
-                }
-              />
-            ) : null}
-          </div>
-          {outlineOpen ? (
-            <div className="hidden lg:flex self-start max-h-[calc(100vh-10rem)] border-y-2 border-l-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a]">
-              <ContractSectionOutline
-                label={isDocument ? "Outline" : "Sections"}
-                sections={outlineSections}
-                activeSectionId={activeSectionId}
-                onSelect={scrollToSection}
-                onCollapse={() => setOutlineOpen(false)}
-                renderSectionBody={
-                  isDocument
-                    ? undefined
-                    : () => (
-                        <div className="text-[11px] font-mono text-[#888]">
-                          Edit this section directly in the document.
-                        </div>
-                      )
-                }
-                onRunWizard={
-                  !isDocument && data.contract.status === "draft"
-                    ? () => setWizardOpen(true)
-                    : undefined
-                }
-                runWizardLabel={
-                  clauseSections ? "Re-run wizard" : "Generate sections"
-                }
-              />
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setOutlineOpen(true)}
-              title="Show sections"
-              aria-label="Show sections"
-              className="hidden lg:inline-flex h-8 w-8 items-center justify-center self-start border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
-            >
-              <PanelLeft className="h-4 w-4" />
-            </button>
-          )}
-          <DocumentCanvas
+          <ContractBody
             contract={data.contract}
             editor={editor}
-            isDocument={isDocument}
             onEditorReady={setEditor}
             onRunWizard={
               !isDocument && data.contract.status === "draft"
@@ -539,7 +506,44 @@ export function DocumentEditorPage({
         </div>
       </div>
 
-      {!isDocument ? (
+      {/* Sections outline — slide-over Sheet, identical affordance for both
+          documents (live H1–H3 headings) and contracts (wizard clauses, with
+          a heading fallback + Generate-sections action). */}
+      <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
+        <SheetContent side="left" className="max-w-sm p-0">
+          <SheetHeader className="border-b-2 border-[#1a1a1a] px-3 py-2">
+            <SheetTitle className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+              Sections
+            </SheetTitle>
+          </SheetHeader>
+          {isDocument ? (
+            <DocumentOutline editor={editor} onOpenChange={setOutlineOpen} inSheet />
+          ) : (
+            <ContractSectionOutline
+              inSheet
+              sections={outlineSections}
+              activeSectionId={activeSectionId}
+              onSelect={scrollToSection}
+              onCollapse={() => setOutlineOpen(false)}
+              renderSectionBody={() => (
+                <div className="text-[11px] font-mono text-[#888]">
+                  Edit this section directly in the document.
+                </div>
+              )}
+              onRunWizard={
+                data.contract.status === "draft"
+                  ? () => setWizardOpen(true)
+                  : undefined
+              }
+              runWizardLabel={
+                clauseSections ? "Re-run wizard" : "Generate sections"
+              }
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {!isDocument && (
         <SignatureFieldsSheet
           open={fieldsSheetOpen}
           onOpenChange={setFieldsSheetOpen}
@@ -549,7 +553,7 @@ export function DocumentEditorPage({
           fields={data.fields}
           isDraft={data.contract.status === "draft"}
         />
-      ) : null}
+      )}
 
       {!isDocument && wizardOpen ? (
         <ContractWizardFullScreen
@@ -569,19 +573,18 @@ export function DocumentEditorPage({
   );
 }
 
-function DocumentCanvas({
+
+function ContractBody({
   contract,
   editor,
-  isDocument,
   onEditorReady,
   onOpenFields,
   onRunWizard,
 }: {
   contract: ContractDoc;
   editor: Editor | null;
-  isDocument: boolean;
   onEditorReady: (editor: Editor) => void;
-  /** Opens the shared signature-field placement surface. */
+  /** Omitted for plain documents — hides the toolbar's "Fields" button. */
   onOpenFields?: () => void;
   /** Omitted unless the contract is a draft — opens the setup wizard. */
   onRunWizard?: () => void;
@@ -590,31 +593,7 @@ function DocumentCanvas({
   const [body, setBody] = useState<string>(contract.contentHtml ?? "");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveAttempt, setSaveAttempt] = useState(0);
-  const latestBodyRef = useRef(body);
-  const persistedBodyRef = useRef(contract.contentHtml ?? "");
   const isEditable = contract.status === "draft";
-
-  latestBodyRef.current = body;
-  persistedBodyRef.current = contract.contentHtml ?? "";
-
-  // Route changes should not discard the final sub-second edit that has not
-  // reached the debounce yet. Convex mutations survive the component unmount.
-  useEffect(
-    () => () => {
-      if (
-        isEditable &&
-        latestBodyRef.current !== persistedBodyRef.current
-      ) {
-        void update({
-          contractId: contract._id,
-          contentHtml: latestBodyRef.current,
-        });
-      }
-    },
-    [contract._id, isEditable, update],
-  );
 
   // Re-sync local state if the contract row changes from outside (e.g.
   // a coworker editing) — but only when we don't have local edits in
@@ -637,83 +616,37 @@ function DocumentCanvas({
       try {
         await update({ contractId: contract._id, contentHtml: body });
         setDirty(false);
-        setSaveError(null);
-      } catch (error) {
-        setSaveError(friendlyError(error, "Autosave failed."));
       } finally {
         setSaving(false);
       }
-    }, saveAttempt > 0 ? 0 : 800);
+    }, 1200);
     return () => clearTimeout(timer);
-  }, [body, contract._id, contract.contentHtml, dirty, isEditable, saveAttempt, update]);
-
-  const saveStatus = isEditable ? (
-    <span
-      className={cn(
-        "inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider",
-        saveError ? "text-[#dc2626]" : "text-[#888]",
-      )}
-      role={saveError ? "alert" : undefined}
-    >
-      {saving
-        ? "Saving…"
-        : saveError
-          ? saveError
-          : dirty
-            ? "Unsaved"
-            : "Saved"}
-      {saveError ? (
-        <button
-          type="button"
-          onClick={() => {
-            setSaveError(null);
-            setSaveAttempt((attempt) => attempt + 1);
-          }}
-          className="border-2 border-[#dc2626] px-2 py-1 font-bold hover:bg-[#dc2626] hover:text-[#f0f0e8]"
-        >
-          Retry
-        </button>
-      ) : null}
-    </span>
-  ) : (
-    <span className="text-[10px] font-mono uppercase tracking-wider text-[#888]">
-      Read only
-    </span>
-  );
+  }, [body, contract._id, contract.contentHtml, dirty, isEditable, update]);
 
   return (
-    <div
-      className={cn(
-        "-mx-3 border-y-2 border-[#1a1a1a] bg-[#f0f0e8] sm:mx-0 sm:border-2",
-        isDocument
-          ? "overflow-hidden"
-          : "p-3 sm:p-6 sm:shadow-[4px_4px_0px_0px_#1a1a1a]",
-      )}
-    >
-      {isDocument ? (
-        <div className="flex min-h-8 items-center justify-end border-b-2 border-[#1a1a1a] px-3 py-1.5">
-          {saveStatus}
+    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] p-6">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h2 className="text-xl font-black uppercase tracking-tighter text-[#1a1a1a]">
+          Body
+        </h2>
+        <div className="flex items-center gap-3">
+          {onRunWizard && (
+            <button
+              type="button"
+              onClick={onRunWizard}
+              className="inline-flex items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2.5 h-7 text-[10px] font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] transition-colors"
+              title="Generate the contract from a few questions"
+            >
+              Run setup wizard
+            </button>
+          )}
+          {isEditable && (
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#888]">
+              {saving ? "Saving…" : dirty ? "Unsaved" : "Saved"}
+            </span>
+          )}
         </div>
-      ) : (
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-xl font-black uppercase tracking-tighter text-[#1a1a1a]">
-            Contract body
-          </h2>
-          <div className="flex items-center gap-3">
-            {onRunWizard ? (
-              <button
-                type="button"
-                onClick={onRunWizard}
-                className="inline-flex min-h-11 items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2.5 text-[10px] font-bold uppercase tracking-wider text-[#1a1a1a] transition-colors hover:bg-[#FFEDD5] sm:min-h-7"
-                title="Generate the contract from a few questions"
-              >
-                Run setup wizard
-              </button>
-            ) : null}
-            {saveStatus}
-          </div>
-        </div>
-      )}
+      </div>
       <ContractToolbar
         editor={editor && !editor.isDestroyed ? editor : null}
         onOpenFields={onOpenFields}
@@ -726,8 +659,6 @@ function DocumentCanvas({
         onChange={(next) => {
           setBody(next);
           setDirty(true);
-          setSaveError(null);
-          setSaveAttempt(0);
         }}
       />
     </div>

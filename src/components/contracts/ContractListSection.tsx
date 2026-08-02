@@ -101,7 +101,13 @@ export function ContractListSection({
   return (
     // Match FolderRow: dense top-padding, plain mono header, no
     // shadow on the section container.
-    <section className="flex flex-col gap-4 px-6 pt-4">
+    // stopPropagation on right-click so a contract tile never triggers the
+    // project's background context menu — contracts aren't part of the
+    // create/combine background gesture.
+    <section
+      className="flex flex-col gap-4 px-6 pt-4"
+      onContextMenu={(e) => e.stopPropagation()}
+    >
       {/* ── Contracts — signing lifecycle lives here ─────────────── */}
       <div className="order-2">
         <div className="flex items-center justify-between mb-2">
