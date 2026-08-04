@@ -592,6 +592,10 @@ function ContractBody({
   const update = useMutation(api.contractsTable.update);
   const [body, setBody] = useState<string>(contract.contentHtml ?? "");
   const [saving, setSaving] = useState(false);
+  // A rejected autosave used to vanish: try/finally with no catch left an
+  // unhandled rejection, the indicator still read "Unsaved", and closing
+  // the tab discarded the draft.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const isEditable = contract.status === "draft";
 
@@ -602,6 +606,18 @@ function ContractBody({
     if (dirty) return;
     setBody(contract.contentHtml ?? "");
   }, [contract._id, contract.contentHtml, dirty]);
+
+  // Unsaved work must survive a stray Cmd+W. Browsers show their own
+  // generic prompt; returnValue just has to be set.
+  useEffect(() => {
+    if (!isEditable || (!dirty && !saveError)) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty, saveError, isEditable]);
 
   // Debounced autosave: wait 1.2s after the last keystroke. Matches the
   // single-contract editor's feel without a heavy CRDT layer.
@@ -616,6 +632,13 @@ function ContractBody({
       try {
         await update({ contractId: contract._id, contentHtml: body });
         setDirty(false);
+        setSaveError(null);
+      } catch (error) {
+        // Stay dirty so the next keystroke or Retry attempts again and the
+        // local draft is never dropped on the floor.
+        setSaveError(
+          error instanceof Error ? error.message : "Couldn't save changes.",
+        );
       } finally {
         setSaving(false);
       }
@@ -641,10 +664,35 @@ function ContractBody({
             </button>
           )}
           {isEditable && (
-            <span className="text-[10px] font-mono uppercase tracking-wider text-[#888]">
-              {saving ? "Saving…" : dirty ? "Unsaved" : "Saved"}
+            <span
+              className={cn(
+                "text-[10px] font-mono uppercase tracking-wider",
+                saveError ? "text-[#dc2626]" : "text-[#888]",
+              )}
+              title={saveError ?? undefined}
+            >
+              {saving
+                ? "Saving…"
+                : saveError
+                  ? "Couldn't save"
+                  : dirty
+                    ? "Unsaved"
+                    : "Saved"}
             </span>
           )}
+          {isEditable && saveError && !saving ? (
+            <button
+              type="button"
+              onClick={() => {
+                // Re-arm the debounce; the draft is still in `body`.
+                setSaveError(null);
+                setDirty(true);
+              }}
+              className="text-[10px] font-mono uppercase tracking-wider text-[#1a1a1a] underline underline-offset-2"
+            >
+              Retry
+            </button>
+          ) : null}
         </div>
       </div>
       <ContractToolbar

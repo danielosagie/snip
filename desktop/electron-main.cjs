@@ -79,6 +79,39 @@ const SECRET_PATHS = [
   ["storage", "sessionToken"],
 ];
 const ENC_PREFIX = "enc:v1:";
+/**
+ * Placeholder handed to the renderer in place of a real secret.
+ *
+ * The main process loads the REMOTE web app, so anything reachable from
+ * the renderer is reachable by an XSS or a compromised deploy. The
+ * renderer only ever passes secrets through in a read-modify-write, so
+ * it can work with a sentinel: settings:get redacts, and settings:set
+ * restores the stored value wherever the sentinel comes back.
+ */
+const REDACTED = "__snip_redacted__";
+
+/** Replace stored secrets with the sentinel before crossing the IPC boundary. */
+function redactSecretsForRenderer(settings) {
+  return transformSecrets(settings, (value) =>
+    typeof value === "string" && value.length > 0 ? REDACTED : value,
+  );
+}
+
+/**
+ * Put back any secret the renderer echoed as the sentinel. A real value
+ * (for example freshly minted storage credentials) is written through.
+ */
+function restoreRedactedSecrets(incoming, current) {
+  const out = { ...incoming, storage: { ...(incoming.storage || {}) } };
+  for (const parts of SECRET_PATHS) {
+    if (parts.length === 1) {
+      if (out[parts[0]] === REDACTED) out[parts[0]] = current?.[parts[0]];
+    } else if (out[parts[0]] && out[parts[0]][parts[1]] === REDACTED) {
+      out[parts[0]][parts[1]] = current?.[parts[0]]?.[parts[1]];
+    }
+  }
+  return out;
+}
 
 function encryptSecret(value) {
   if (typeof value !== "string" || value.length === 0) return value;
@@ -294,9 +327,12 @@ function reportProgress(payload) {
   }
 }
 
-ipcMain.handle("settings:get", async () => loadSettings());
+ipcMain.handle("settings:get", async () =>
+  redactSecretsForRenderer(await loadSettings()),
+);
 ipcMain.handle("settings:set", async (_event, next) => {
-  await saveSettings(next);
+  const current = await loadSettings();
+  await saveSettings(restoreRedactedSecrets(next, current));
   // Re-evaluate background loops against the new flags.
   await reconcileFeatures().catch((err) => {
     console.error("reconcileFeatures failed after settings:set:", err);

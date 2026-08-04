@@ -53,7 +53,32 @@ function Toggle({
 
 export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
   const config = useQuery(api.shareLinks.getAccessConfig, { linkId });
-  const setAccess = useMutation(api.shareLinks.setAccess);
+  const rawSetAccess = useMutation(api.shareLinks.setAccess);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [accessPending, setAccessPending] = useState(false);
+
+  /**
+   * Every access control used to fire-and-forget. A rejected mutation left
+   * the UI showing the new value while the link kept its old audience —
+   * an owner could believe a link was restricted when it was public.
+   * Surface the failure instead; the query is the source of truth and
+   * re-renders the real value underneath.
+   */
+  const setAccess = async (args: Parameters<typeof rawSetAccess>[0]) => {
+    setAccessPending(true);
+    setAccessError(null);
+    try {
+      await rawSetAccess(args);
+    } catch (error) {
+      setAccessError(
+        error instanceof Error
+          ? error.message
+          : "Couldn't update access. It hasn't changed.",
+      );
+    } finally {
+      setAccessPending(false);
+    }
+  };
   const addInvite = useMutation(api.shareLinks.addInvite);
   const updateInviteRole = useMutation(api.shareLinks.updateInviteRole);
   const removeInvite = useMutation(api.shareLinks.removeInvite);
@@ -89,6 +114,15 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
 
   return (
     <div className="space-y-4 border-t-2 border-[#1a1a1a] bg-[#e8e8e0] p-3">
+      {accessError ? (
+        <div
+          role="status"
+          className="rounded-xl border border-[#E8B9BD] bg-[#FFF5F5] px-3 py-2 text-sm text-[#8A2B34]"
+        >
+          {accessError}
+        </div>
+      ) : null}
+
       {/* General access */}
       <div className="space-y-1.5">
         <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#888]">
@@ -104,6 +138,7 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
                 generalAccess: e.target.value as "anyone" | "invite",
               })
             }
+            disabled={accessPending}
             className={SELECT_CLASS}
           >
             <option value="anyone">Anyone with the link</option>
