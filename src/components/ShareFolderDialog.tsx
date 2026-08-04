@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeTime } from "@/lib/utils";
 import { ShareAccessPanel } from "@/components/share/ShareAccessPanel";
+import { publicShareUrl } from "@/lib/publicUrl";
 
 /**
  * Folder-level share. A live "folder" bundle (new uploads to the folder
@@ -122,7 +123,7 @@ export function ShareFolderDialog({
         paywall: paywallArg,
         clientEmail: opts.clientEmail || undefined,
       });
-      const url = `${window.location.origin}/share/${created.token}`;
+      const url = publicShareUrl(created.token);
       setCreatedUrl(url);
       void copy(url, "new");
     } catch (error) {
@@ -419,7 +420,7 @@ export function ShareFolderDialog({
           ) : (
             <div className="border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
               {existingLinks.map((link) => {
-                const url = `${typeof window !== "undefined" ? window.location.origin : ""}/share/${link.token}`;
+                const url = publicShareUrl(link.token);
                 return (
                   <div key={link._id} className="bg-[#f0f0e8]">
                   <div

@@ -1,4 +1,4 @@
-const SITE_URL = "https://snip.film";
+export const SITE_URL = "https://snip.film";
 const SITE_NAME = "snip";
 const DEFAULT_OG_IMAGE = "/og/default.png";
 

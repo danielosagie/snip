@@ -25,6 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { publicShareUrl } from "@/lib/publicUrl";
 
 /**
  * Slim sibling of ShareDialog used when the user has multi-selected items
@@ -111,7 +112,7 @@ export function ShareSelectionDialog({
         paywall: paywallArg,
         clientEmail: opts.clientEmail || undefined,
       });
-      const url = `${window.location.origin}/share/${created.token}`;
+      const url = publicShareUrl(created.token);
       setCreatedUrl(url);
       try {
         await navigator.clipboard.writeText(url);

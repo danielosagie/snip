@@ -875,9 +875,17 @@ function startLanCacheServer() {
         reject(err);
       };
       server.once("error", onError);
+      // NOTE: no host argument means every interface (0.0.0.0), which is
+      // intentional — the point of the LAN cache is to serve peers. But
+      // there is no authentication on this listener, so anyone who can
+      // reach this machine on `port` can read cached file bytes. The
+      // feature is opt-in and defaults to disabled; it should not be
+      // enabled on an untrusted network until a shared token is added.
       server.listen(port, () => {
         server.off("error", onError);
-        pushLog?.(`lanCache: serving ${mountPath} on port ${port}`);
+        pushLog?.(
+          `lanCache: serving ${mountPath} on port ${port} to ALL interfaces with no authentication — only enable on a trusted network`,
+        );
         resolve();
       });
     }).catch(() => {

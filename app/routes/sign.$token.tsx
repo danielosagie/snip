@@ -77,7 +77,9 @@ function SignPage() {
   const { token } = useParams({ from: "/sign/$token" });
   const data = useQuery(api.contractsTable.getByToken, { token });
 
-  const [submitted, setSubmitted] = useState(false);
+  // Terminal state must name which outcome happened: a shared boolean
+  // made a decline render as "Signed".
+  const [outcome, setOutcome] = useState<"signed" | "declined" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [typedName, setTypedName] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -157,21 +159,22 @@ function SignPage() {
     );
   }
 
-  if (submitted || data.recipient.status === "signed") {
+  if (outcome === "declined" || data.recipient.status === "declined") {
+    return (
+      <CenteredShell>
+        <TerminalCard title="Declined">
+          You declined to sign this document. The sender has been notified.
+        </TerminalCard>
+      </CenteredShell>
+    );
+  }
+
+  if (outcome === "signed" || data.recipient.status === "signed") {
     return (
       <CenteredShell>
         <TerminalCard title="Signed">
           Thank you. A copy of the signed document will be emailed to you
           shortly.
-        </TerminalCard>
-      </CenteredShell>
-    );
-  }
-  if (data.recipient.status === "declined") {
-    return (
-      <CenteredShell>
-        <TerminalCard title="Declined">
-          You declined to sign this document.
         </TerminalCard>
       </CenteredShell>
     );
@@ -215,7 +218,7 @@ function SignPage() {
         fieldValues: fvPayload.length > 0 ? fvPayload : undefined,
       });
       if (!res.ok) throw new Error(res.error ?? "Failed to sign.");
-      setSubmitted(true);
+      setOutcome("signed");
     } catch (err) {
       console.error("sign failed", err);
       alert(err instanceof Error ? err.message : "Failed to sign.");
@@ -232,7 +235,7 @@ function SignPage() {
         reason: declineReason.trim(),
       });
       if (!res.ok) throw new Error(res.error ?? "Failed to decline.");
-      setSubmitted(true);
+      setOutcome("declined");
     } catch (err) {
       console.error("decline failed", err);
       alert(err instanceof Error ? err.message : "Failed to decline.");

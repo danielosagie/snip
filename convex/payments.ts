@@ -3,8 +3,9 @@ import {
   internalMutation,
   internalQuery,
   query,
+  type MutationCtx,
 } from "./_generated/server";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { shareCapabilities } from "./shareAccess";
 import { requireTeamAccess } from "./auth";
 
@@ -175,12 +176,17 @@ export const recordPaymentSucceeded = internalMutation({
     if (!payment) return null;
 
     const now = Date.now();
+    // Guard against a duplicate webhook double-counting the sale.
+    const alreadyCounted = payment.status === "succeeded";
     await ctx.db.patch(payment._id, {
       status: "succeeded",
       paidAt: now,
       stripePaymentIntentId:
         args.stripePaymentIntentId ?? payment.stripePaymentIntentId,
     });
+    if (!alreadyCounted) {
+      await applyEarningsDelta(ctx, payment, 1);
+    }
 
     if (payment.grantId) {
       const grant = await ctx.db.get(payment.grantId);
@@ -214,6 +220,9 @@ export const recordPaymentRefunded = internalMutation({
     if (!payment) return null;
 
     const now = Date.now();
+    if (payment.status === "succeeded") {
+      await applyEarningsDelta(ctx, payment, -1);
+    }
     await ctx.db.patch(payment._id, {
       status: "refunded",
       refundedAt: now,
@@ -375,6 +384,15 @@ export const getGrantUnlockState = query({
  * operator still owes that money manually — the UI must not present it as
  * paid out. Legacy rows (settlement absent) were always Connect charges.
  */
+/**
+ * Earnings for the Billing & Invoices page.
+ *
+ * Reads a maintained aggregate plus an indexed slice of recent sales, so
+ * cost is O(limit) rather than O(all payments this team has ever taken).
+ * A team whose aggregate has never been built returns `totals: null` —
+ * the UI must render that as unknown rather than as zero, because zero
+ * and "not yet computed" are very different numbers to show a seller.
+ */
 export const getTeamEarnings = query({
   args: {
     teamId: v.id("teams"),
@@ -382,56 +400,197 @@ export const getTeamEarnings = query({
   },
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId);
+    const limit = Math.max(1, Math.min(args.limit ?? 10, 50));
+
+    const aggregate = await ctx.db
+      .query("teamEarnings")
+      .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
+      .unique();
 
     const rows = await ctx.db
       .query("payments")
-      .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
-      .collect();
+      .withIndex("by_team_status_paid", (q) =>
+        q.eq("teamId", args.teamId).eq("status", "succeeded"),
+      )
+      .order("desc")
+      .take(limit);
 
-    const succeeded = rows.filter((r) => r.status === "succeeded");
-
-    let grossCents = 0;
-    let feeCents = 0;
-    let owedByPlatformCents = 0;
-    for (const r of succeeded) {
+    const recent = await Promise.all(
+      rows.map(async (r) => {
       const fee = r.applicationFeeAmountCents ?? 0;
-      grossCents += r.amountCents;
-      feeCents += fee;
-      // Absent settlement = legacy Connect charge, already routed.
-      if (r.settlement === "platform") {
-        owedByPlatformCents += r.amountCents - fee;
-      }
-    }
-
-    const limit = Math.max(1, Math.min(args.limit ?? 10, 100));
-    const recent = succeeded
-      .sort((a, b) => (b.paidAt ?? b._creationTime) - (a.paidAt ?? a._creationTime))
-      .slice(0, limit)
-      .map((r) => {
-        const fee = r.applicationFeeAmountCents ?? 0;
-        return {
-          id: r._id,
-          videoId: r.videoId,
-          paidAt: r.paidAt ?? r._creationTime,
-          grossCents: r.amountCents,
-          feeCents: fee,
-          netCents: r.amountCents - fee,
-          currency: r.currency,
-          clientEmail: r.clientEmail ?? null,
-          // "held" is not a Stripe state — it means we collected on the
-          // platform account because this team can't receive payouts yet.
-          routedTo: r.settlement === "platform" ? ("held" as const) : ("connect" as const),
-        };
-      });
+      const video = await ctx.db.get(r.videoId);
+      return {
+        id: r._id,
+        videoId: r.videoId,
+        fileName: video?.title ?? "Deleted file",
+        paidAt: r.paidAt ?? r._creationTime,
+        grossCents: r.amountCents,
+        feeCents: fee,
+        netCents: r.amountCents - fee,
+        currency: r.currency,
+        clientEmail: r.clientEmail ?? null,
+        // Not a Stripe state: we collected on the platform account
+        // because this team cannot receive payouts yet.
+        routedTo:
+          r.settlement === "platform" ? ("held" as const) : ("connect" as const),
+      };
+      }),
+    );
 
     return {
-      saleCount: succeeded.length,
-      grossCents,
-      feeCents,
-      netCents: grossCents - feeCents,
-      owedByPlatformCents,
-      currency: succeeded[0]?.currency ?? "usd",
+      totals: aggregate
+        ? {
+            saleCount: aggregate.saleCount,
+            grossCents: aggregate.grossCents,
+            feeCents: aggregate.feeCents,
+            netCents: aggregate.grossCents - aggregate.feeCents,
+            owedByPlatformCents: aggregate.owedByPlatformCents,
+            currency: aggregate.currency,
+          }
+        : null,
       recent,
     };
+  },
+});
+
+/**
+ * Apply one payment's contribution to its team's running totals.
+ * `sign` is +1 when a payment succeeds and -1 when it refunds.
+ */
+async function applyEarningsDelta(
+  ctx: MutationCtx,
+  payment: Doc<"payments">,
+  sign: 1 | -1,
+) {
+  const fee = payment.applicationFeeAmountCents ?? 0;
+  const owed =
+    payment.settlement === "platform" ? payment.amountCents - fee : 0;
+
+  const existing = await ctx.db
+    .query("teamEarnings")
+    .withIndex("by_team", (q) => q.eq("teamId", payment.teamId))
+    .unique();
+
+  if (!existing) {
+    // Only seed from a positive delta. Seeding from a refund would
+    // record negative lifetime totals for a team we never aggregated.
+    if (sign < 0) return;
+    await ctx.db.insert("teamEarnings", {
+      teamId: payment.teamId,
+      saleCount: 1,
+      grossCents: payment.amountCents,
+      feeCents: fee,
+      owedByPlatformCents: owed,
+      currency: payment.currency,
+    });
+    return;
+  }
+
+  await ctx.db.patch(existing._id, {
+    saleCount: Math.max(0, existing.saleCount + sign),
+    grossCents: Math.max(0, existing.grossCents + sign * payment.amountCents),
+    feeCents: Math.max(0, existing.feeCents + sign * fee),
+    owedByPlatformCents: Math.max(0, existing.owedByPlatformCents + sign * owed),
+    currency: existing.currency || payment.currency,
+  });
+}
+
+/**
+ * Build or continue a team's earnings aggregate from historical rows.
+ *
+ * Paginated on purpose: a team with a long payment history cannot be
+ * summed in one transaction, which is the very limit this aggregate
+ * exists to avoid. Call repeatedly until `done` is true. Idempotent per
+ * page via `computedThroughCreationTime`.
+ */
+export const backfillTeamEarnings = internalMutation({
+  args: {
+    teamId: v.id("teams"),
+    batchSize: v.optional(v.number()),
+  },
+  returns: v.object({
+    done: v.boolean(),
+    scanned: v.number(),
+    throughCreationTime: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const batch = Math.max(1, Math.min(args.batchSize ?? 200, 500));
+    const existing = await ctx.db
+      .query("teamEarnings")
+      .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
+      .unique();
+    const cursor = existing?.computedThroughCreationTime ?? 0;
+
+    const page = await ctx.db
+      .query("payments")
+      .withIndex("by_team_status_paid", (q) =>
+        q.eq("teamId", args.teamId).eq("status", "succeeded"),
+      )
+      .order("asc")
+      .filter((q) => q.gt(q.field("_creationTime"), cursor))
+      .take(batch);
+
+    let saleCount = existing?.saleCount ?? 0;
+    let grossCents = existing?.grossCents ?? 0;
+    let feeCents = existing?.feeCents ?? 0;
+    let owedByPlatformCents = existing?.owedByPlatformCents ?? 0;
+    let currency = existing?.currency ?? "usd";
+    let through = cursor;
+
+    for (const r of page) {
+      const fee = r.applicationFeeAmountCents ?? 0;
+      saleCount += 1;
+      grossCents += r.amountCents;
+      feeCents += fee;
+      if (r.settlement === "platform") owedByPlatformCents += r.amountCents - fee;
+      currency = r.currency || currency;
+      through = Math.max(through, r._creationTime);
+    }
+
+    const patch = {
+      teamId: args.teamId,
+      saleCount,
+      grossCents,
+      feeCents,
+      owedByPlatformCents,
+      currency,
+      computedThroughCreationTime: through,
+    };
+    if (existing) {
+      await ctx.db.patch(existing._id, patch);
+    } else {
+      await ctx.db.insert("teamEarnings", patch);
+    }
+
+    return {
+      done: page.length < batch,
+      scanned: page.length,
+      throughCreationTime: through,
+    };
+  },
+});
+
+/**
+ * Resolve a payment row to the Stripe PaymentIntent behind it, for the
+ * seller-facing receipt link.
+ *
+ * NOTE: reconstructed from its call site in paymentsActions.getReceiptUrl
+ * after an accidental overwrite — verify it matches what you intended.
+ * Access is enforced here because the calling action does not check it
+ * itself; a receipt URL exposes buyer details and must not be reachable
+ * by anyone outside the selling team.
+ */
+export const lookupReceiptForPayment = internalQuery({
+  args: { paymentId: v.id("payments") },
+  returns: v.union(
+    v.object({ stripePaymentIntentId: v.string() }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    const payment = await ctx.db.get(args.paymentId);
+    if (!payment) return null;
+    await requireTeamAccess(ctx, payment.teamId);
+    if (!payment.stripePaymentIntentId) return null;
+    return { stripePaymentIntentId: payment.stripePaymentIntentId };
   },
 });

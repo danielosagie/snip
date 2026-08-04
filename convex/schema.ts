@@ -685,9 +685,35 @@ export default defineSchema({
     .index("by_share_link", ["shareLinkId"])
     .index("by_grant", ["grantId"])
     .index("by_team", ["teamId"])
+    // Recent-sales feed on the billing page. Without the status/paidAt
+    // suffix the query has to collect every payment the team has ever
+    // taken just to show ten rows.
+    .index("by_team_status_paid", ["teamId", "status", "paidAt"])
     .index("by_video", ["videoId"])
     .index("by_checkout_session", ["stripeCheckoutSessionId"])
     .index("by_payment_intent", ["stripePaymentIntentId"]),
+
+  /**
+   * Running earnings totals per team, maintained transactionally as
+   * payments succeed and refund.
+   *
+   * Totals cannot be derived on read without scanning the team's whole
+   * payment history, which is exactly the unbounded read this table
+   * exists to remove. `computedThroughCreationTime` marks how far a
+   * backfill has progressed; a team with no row has never been
+   * aggregated and its totals must be shown as unknown, not as zero.
+   */
+  teamEarnings: defineTable({
+    teamId: v.id("teams"),
+    saleCount: v.number(),
+    grossCents: v.number(),
+    feeCents: v.number(),
+    // Collected on the platform account because Connect onboarding was
+    // unfinished — the operator still owes this to the team.
+    owedByPlatformCents: v.number(),
+    currency: v.string(),
+    computedThroughCreationTime: v.optional(v.number()),
+  }).index("by_team", ["teamId"]),
 
   // Folder-as-version model for the desktop sync app. Editors name folders
   // however they normally would (final_v12, color_pass_b, etc.); the row

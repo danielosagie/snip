@@ -327,6 +327,9 @@ export const getMySubscription = query({
           includedSeats: DEFAULT_TIER.includedSeats,
           storageLimitBytes: DEFAULT_TIER.storageBytes,
           currency: DEFAULT_TIER.currency,
+          // Present so the returned union always carries the field; a
+          // workspace with no Stripe subscription has no cadence.
+          billingCadence: undefined as "monthly" | "annual" | undefined,
           currentPeriodEnd: undefined,
           stripeCustomerId: undefined,
           stripeSubscriptionId: undefined,

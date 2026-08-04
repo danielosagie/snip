@@ -43,7 +43,20 @@ import { resolvePlaybackProvider, defaultPlaybackProvider } from "./providers/pl
 import { shouldDeferEncodingForPolicy } from "./encodingPolicy";
 
 const GIBIBYTE = 1024 ** 3;
-const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
+const TEBIBYTE = 1024 ** 4;
+/**
+ * Ceiling for a single presigned PUT. This is a protocol limit on one
+ * request body, not a limit on how big a file may be — anything larger
+ * must go through multipart.
+ */
+const MAX_SINGLE_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
+/**
+ * Ceiling for a stored object however it arrived. R2 and S3 both allow
+ * 5 TiB via multipart. Applying the single-PUT limit here instead was
+ * silently deleting successfully uploaded multi-GB files after the
+ * bytes had already landed.
+ */
+const MAX_OBJECT_SIZE_BYTES = 5 * TEBIBYTE;
 const MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024;
 
 // Mux ingest is gated by content type — only actual video types route to
@@ -249,13 +262,26 @@ function normalizeContentType(contentType: string | null | undefined): string {
     .toLowerCase();
 }
 
-function validateUploadRequestOrThrow(args: { fileSize: number; contentType: string }) {
+function validateUploadRequestOrThrow(
+  args: { fileSize: number; contentType: string },
+  // Multipart callers pass "multipart": the 5 GiB single-request ceiling
+  // does not apply to them.
+  transport: "single-put" | "multipart" = "single-put",
+) {
   if (!Number.isFinite(args.fileSize) || args.fileSize < 0) {
     throw new Error("File size can't be negative.");
   }
 
-  if (args.fileSize > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
-    throw new Error("File is too large for direct upload (5 GiB max).");
+  const ceiling =
+    transport === "multipart"
+      ? MAX_OBJECT_SIZE_BYTES
+      : MAX_SINGLE_PUT_FILE_SIZE_BYTES;
+  if (args.fileSize > ceiling) {
+    throw new Error(
+      transport === "multipart"
+        ? "File is too large to store (5 TiB max)."
+        : "File is too large for direct upload (5 GiB max).",
+    );
   }
 
   // Accept any content type. Mux processing is gated separately on whether
@@ -448,7 +474,7 @@ export const startMultipartUpload = action({
     partSize: number;
   }> => {
     await requireVideoMemberAccess(ctx, args.videoId);
-    const contentType = validateUploadRequestOrThrow(args);
+    const contentType = validateUploadRequestOrThrow(args, "multipart");
     const key = await allocateOriginalUploadKey(ctx, args.videoId, args.filename);
     const result = await getS3Client().send(
       new CreateMultipartUploadCommand({
@@ -662,8 +688,8 @@ async function markUploadCompleteImpl(
         throw new Error("Uploaded file metadata is unavailable.");
       }
       const contentLength = contentLengthRaw;
-      if (contentLength > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
-        throw new Error("Video file is too large for direct upload.");
+      if (contentLength > MAX_OBJECT_SIZE_BYTES) {
+        throw new Error("Video file is too large to store.");
       }
 
       const normalizedContentType =

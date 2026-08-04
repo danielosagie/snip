@@ -19,6 +19,7 @@ import {
   DownloadCloud,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { softCard, softButton, softButtonPrimary, softTabClass } from "@/components/soft";
 import { seoHead } from "@/lib/seo";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 
@@ -59,19 +60,19 @@ function SettingsRoute() {
     <div className="h-full flex flex-col">
       <DashboardHeader paths={[{ label: "Account settings" }]} />
 
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="max-w-3xl">
-          <h1 className="text-3xl font-black tracking-tight text-[#1a1a1a]">
+      <div className="surface-soft flex-1 overflow-y-auto bg-[#FAFAFA] px-4 py-8 text-[#131315] sm:px-8 lg:px-14 lg:py-10">
+        <div className="w-full max-w-[1120px]">
+          <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">
             Settings
           </h1>
-          <p className="text-sm text-[#666] mt-1">
+          <p className="mt-1 max-w-prose text-sm leading-5 text-[#6E6E73]">
             Manage your account, notification preferences, and connected
             integrations. Team-scoped settings live in the team settings page.
           </p>
 
-          {/* Brutalist tab strip — matches the team settings page. */}
-          <nav className="border-b-2 border-[#1a1a1a] mt-6">
-            <div className="flex gap-1">
+          {/* Soft pill tabs — matches the team settings page. */}
+          <nav className="mt-5">
+            <div className="flex flex-wrap gap-1.5">
               {SETTINGS_TABS.map((tab) => {
                 const isActive = activeTab === tab.value;
                 return (
@@ -79,11 +80,7 @@ function SettingsRoute() {
                     key={tab.value}
                     type="button"
                     onClick={() => setActiveTab(tab.value)}
-                    className={
-                      isActive
-                        ? "px-4 py-2 text-sm font-bold border-2 border-[#1a1a1a] border-b-0 bg-[#f0f0e8] text-[#1a1a1a] -mb-[2px] relative z-10"
-                        : "px-4 py-2 text-sm font-bold text-[#666] hover:text-[#1a1a1a] border-2 border-transparent"
-                    }
+                    className={softTabClass(isActive)}
                   >
                     {tab.label}
                   </button>
@@ -92,7 +89,7 @@ function SettingsRoute() {
             </div>
           </nav>
 
-          <div className="mt-4">
+          <div className="mt-3.5 space-y-3.5">
             {activeTab === "profile" ? (
               <ProfileTab
                 name={user?.fullName ?? user?.firstName ?? ""}
@@ -120,8 +117,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-6 mb-4">
-      <h2 className="font-black text-lg tracking-tight">{title}</h2>
+    <section className={cn(softCard, "mb-3.5")}>
+      <h2 className="text-base font-semibold leading-[22px]">{title}</h2>
       {description ? (
         <p className="text-xs text-[#666] mt-0.5">{description}</p>
       ) : null}
@@ -355,7 +352,7 @@ function DesktopUpdatesSection() {
           type="button"
           onClick={() => void check()}
           disabled={busy}
-          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors disabled:opacity-50"
+          className={cn(softButton, "inline-flex items-center gap-2")}
         >
           <RefreshCw
             className={cn("h-3.5 w-3.5", busy && "animate-spin")}
@@ -366,7 +363,7 @@ function DesktopUpdatesSection() {
           <button
             type="button"
             onClick={() => void window.api?.update.install()}
-            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#FF6600] bg-[#FF6600] text-[#f0f0e8] hover:bg-[#FF7A1F] transition-colors"
+            className={cn(softButtonPrimary, "inline-flex items-center gap-2")}
           >
             <DownloadCloud className="h-3.5 w-3.5" />
             {manualUpdateReady ? "Download update" : "Restart & install"}
@@ -485,13 +482,13 @@ function IntegrationRow({
   const hint =
     status === "configured" ? configuredHint : notConfiguredHint;
   return (
-    <div className="border-2 border-[#1a1a1a] p-4 flex flex-col sm:flex-row gap-3">
-      <div className="w-9 h-9 flex items-center justify-center border-2 border-[#1a1a1a] bg-[#e8e8e0] flex-shrink-0">
+    <div className="flex flex-col gap-3 rounded-xl border border-[#E8E8EC] bg-white p-4 sm:flex-row">
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[#E8E8EC] bg-[#F1F1F3]">
         {icon}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="font-black text-sm tracking-tight">{label}</h3>
+          <h3 className="text-sm font-semibold">{label}</h3>
           <StatusBadge status={status} />
         </div>
         <p className="text-xs text-[#666] mt-1">{description}</p>

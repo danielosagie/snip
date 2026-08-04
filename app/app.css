@@ -543,6 +543,26 @@ body {
   color-scheme: light;
 }
 
+/* Paper's Billing & Invoices artboard is deliberately soft and light even
+   when the surrounding desktop shell is using another theme. */
+/* Scoped soft skin for the account-level pages (billing, team members,
+   settings). `.surface-billing-soft` is the original billing-only name,
+   kept as an alias so that page keeps working; `.surface-soft` is the
+   general one to reach for on new surfaces. */
+.surface-soft,
+.surface-billing-soft {
+  --background: #fafafa;
+  --surface: #ffffff;
+  --surface-alt: #fafafa;
+  --foreground: #131315;
+  --foreground-muted: #6e6e73;
+  --foreground-subtle: #a0a0a5;
+  --border: #e8e8ec;
+  --border-subtle: #e8e8ec;
+  color-scheme: light;
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+}
+
 /* Primitive geometry inside client surfaces */
 .surface-client .ui-card {
   border-radius: 16px;

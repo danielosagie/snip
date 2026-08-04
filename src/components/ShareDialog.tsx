@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeTime } from "@/lib/utils";
 import { ShareAccessPanel } from "@/components/share/ShareAccessPanel";
+import { publicShareUrl, publicWatchUrl } from "@/lib/publicUrl";
 
 interface ShareDialogProps {
   videoId: Id<"videos">;
@@ -178,7 +179,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   };
 
   const handleCopyLink = (token: string) => {
-    const url = `${window.location.origin}/share/${token}`;
+    const url = publicShareUrl(token);
     navigator.clipboard.writeText(url);
     setCopiedId(token);
     setTimeout(() => setCopiedId(null), 2000);
@@ -186,7 +187,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
 
   const handleCopyPublicLink = () => {
     if (!video?.publicId) return;
-    const url = `${window.location.origin}/watch/${video.publicId}`;
+    const url = publicWatchUrl(video.publicId);
     navigator.clipboard.writeText(url);
     setCopiedId("public");
     setTimeout(() => setCopiedId(null), 2000);

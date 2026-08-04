@@ -65,6 +65,7 @@ import {
 import { useProjectData } from "./-project.data";
 import { prewarmVideo } from "./-video.data";
 import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
+import { publicShareUrl } from "@/lib/publicUrl";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
 import { ShareFolderDialog } from "@/components/ShareFolderDialog";
@@ -355,7 +356,6 @@ export default function ProjectPage({
   const [selectedContractIds, setSelectedContractIds] = useState<
     Set<Id<"contracts">>
   >(() => new Set());
-  const [selectedLegacyContract, setSelectedLegacyContract] = useState(false);
   const [lastClickedVideoId, setLastClickedVideoId] = useState<Id<"videos"> | null>(
     null,
   );
@@ -379,7 +379,6 @@ export default function ProjectPage({
     setSelectedVideoIds(new Set());
     setSelectedFolderIds(new Set());
     setSelectedContractIds(new Set());
-    setSelectedLegacyContract(false);
     setLastClickedVideoId(null);
     setSelectionMode(false);
   }, []);
@@ -613,12 +612,11 @@ export default function ProjectPage({
     if (
       ids.length === 0 &&
       folderIds.length === 0 &&
-      contractIds.length === 0 &&
-      !selectedLegacyContract
+      contractIds.length === 0
     )
       return;
     const total =
-      ids.length + folderIds.length + contractIds.length + (selectedLegacyContract ? 1 : 0);
+      ids.length + folderIds.length + contractIds.length;
     if (
       !confirm(
         folderIds.length > 0 || contractIds.length > 0
@@ -634,7 +632,6 @@ export default function ProjectPage({
         videoIds: ids,
         folderIds,
         contractIds,
-        removeLegacyContract: selectedLegacyContract,
       });
       clearSelection();
     } catch (e) {
@@ -649,7 +646,9 @@ export default function ProjectPage({
     if (ids.length === 0) return;
     setBulkBusy("download");
     try {
-      const byId = new Map(
+      // Explicit generics: filteredVideos is declared below this handler,
+      // so inference here is circular and collapses to unknown.
+      const byId = new Map<Id<"videos">, string>(
         (filteredVideos ?? []).map((v) => [v._id, v.title] as const),
       );
       // Sequential so the browser doesn't block a burst of downloads.
@@ -891,7 +890,7 @@ export default function ProjectPage({
         bundleId,
         allowDownload: false,
       });
-      const url = `${window.location.origin}/share/${token}`;
+      const url = publicShareUrl(token);
       try {
         await navigator.clipboard.writeText(url);
         showShareToast("success", "Project share link copied");
@@ -1072,12 +1071,11 @@ export default function ProjectPage({
   const selectedCount =
     selectedVideoIds.size +
     selectedFolderIds.size +
-    selectedContractIds.size +
-    (selectedLegacyContract ? 1 : 0);
+    selectedContractIds.size;
   const hasSelectedFolders = selectedFolderIds.size > 0;
   const hasSelectedDocuments = selectedContractIds.size > 0;
   const hasNonFileSelection =
-    hasSelectedFolders || hasSelectedDocuments || selectedLegacyContract;
+    hasSelectedFolders || hasSelectedDocuments;
 
   const handleFolderSelectionToggle = useCallback(
     (folderId: Id<"folders">) => {
@@ -1117,13 +1115,6 @@ export default function ProjectPage({
           : [],
       ),
     );
-    const legacyMatches =
-      currentFolderId === null &&
-      Boolean(project?.contract) &&
-      (!q ||
-        project?.name.toLowerCase().includes(q) ||
-        project?.contract?.clientName?.toLowerCase().includes(q));
-    setSelectedLegacyContract(legacyMatches);
   }, [contractDocuments, currentFolderId, filteredFolders, filteredVideos, project, search]);
 
   // Finder-style project shortcuts. They work without first clicking Select,
@@ -1526,17 +1517,11 @@ export default function ProjectPage({
               <ContractListSection
                 projectId={project._id}
                 teamSlug={resolvedTeamSlug}
-                projectName={project.name}
                 items={contractDocuments}
-                legacyContract={project.contract ?? null}
                 search={search}
                 selectedIds={selectedContractIds}
-                legacySelected={selectedLegacyContract}
                 selectionMode={selectionMode}
                 onSelectToggle={handleContractSelectionToggle}
-                onLegacySelectToggle={() =>
-                  setSelectedLegacyContract((selected) => !selected)
-                }
               />
             )}
             <div className="px-6 pt-4 pb-6">
@@ -1812,17 +1797,11 @@ export default function ProjectPage({
               <ContractListSection
                 projectId={project._id}
                 teamSlug={resolvedTeamSlug}
-                projectName={project.name}
                 items={contractDocuments}
-                legacyContract={project.contract ?? null}
                 search={search}
                 selectedIds={selectedContractIds}
-                legacySelected={selectedLegacyContract}
                 selectionMode={selectionMode}
                 onSelectToggle={handleContractSelectionToggle}
-                onLegacySelectToggle={() =>
-                  setSelectedLegacyContract((selected) => !selected)
-                }
               />
             )}
             <div className="divide-y-2 divide-[#1a1a1a]">

@@ -248,6 +248,64 @@ export const createPortal = action({
 });
 
 /**
+ * Row shape for the billing history table. Declared explicitly because the
+ * handler calls ctx.runQuery(api.*), and `api` is generated from this
+ * file's own exports — inferring the return type from the body is
+ * self-referential and collapses to `any` under convex typecheck.
+ */
+type InvoiceRow = {
+  id: string;
+  createdAt: number;
+  description: string;
+  status: string;
+  amountPaidCents: number;
+  currency: string;
+  hostedInvoiceUrl: string | null;
+};
+
+/** Recent subscription invoices for the compact billing history table. */
+export const listRecentInvoices = action({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(
+    v.object({
+      id: v.string(),
+      createdAt: v.number(),
+      description: v.string(),
+      status: v.string(),
+      amountPaidCents: v.number(),
+      currency: v.string(),
+      hostedInvoiceUrl: v.union(v.string(), v.null()),
+    }),
+  ),
+  handler: async (ctx, args): Promise<InvoiceRow[]> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated.");
+
+    const current = await ctx.runQuery(api.workspaceBilling.getMySubscription, {});
+    const stripeSecret = process.env.STRIPE_SECRET_KEY?.trim();
+    if (!stripeSecret || !current?.stripeCustomerId) return [];
+
+    const stripe = new Stripe(stripeSecret);
+    const invoices = await stripe.invoices.list({
+      customer: current.stripeCustomerId,
+      limit: Math.max(1, Math.min(args.limit ?? 6, 24)),
+    });
+
+    return invoices.data.map((invoice: Stripe.Invoice): InvoiceRow => ({
+      id: invoice.id,
+      createdAt: invoice.created * 1000,
+      description:
+        invoice.lines.data[0]?.description ??
+        `${current.plan.charAt(0).toUpperCase()}${current.plan.slice(1)} plan`,
+      status: invoice.status ?? "open",
+      amountPaidCents: invoice.amount_paid,
+      currency: invoice.currency,
+      hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+    }));
+  },
+});
+
+/**
  * Add/remove a recurring Stripe SubscriptionItem, then persist the feature
  * state. Stripe is authoritative in production; local toggles are used only
  * when the deployment has no Stripe key (demo/self-host mode).

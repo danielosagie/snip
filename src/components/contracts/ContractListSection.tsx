@@ -9,7 +9,6 @@ import { Check, FileSignature, FileText } from "lucide-react";
 interface ContractListSectionProps {
   projectId: Id<"projects">;
   teamSlug: string;
-  projectName: string;
   items:
     | Array<{
         _id: Id<"contracts">;
@@ -21,17 +20,10 @@ interface ContractListSectionProps {
         signedCount: number;
       }>
     | undefined;
-  legacyContract: {
-    clientName?: string;
-    signedAt?: number;
-    sentForSignatureAt?: number;
-  } | null;
   search?: string;
   selectedIds?: Set<Id<"contracts">>;
-  legacySelected?: boolean;
   selectionMode?: boolean;
   onSelectToggle?: (contractId: Id<"contracts">) => void;
-  onLegacySelectToggle?: () => void;
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -62,21 +54,17 @@ const STATUS_STYLES: Record<string, string> = {
 export function ContractListSection({
   projectId,
   teamSlug,
-  projectName,
   items,
-  legacyContract,
   search = "",
   selectedIds,
-  legacySelected,
   selectionMode,
   onSelectToggle,
-  onLegacySelectToggle,
 }: ContractListSectionProps) {
   if (items === undefined) return null;
   const allContractRows = items.filter((row) => (row.docType ?? "contract") === "contract");
   const allDocumentRows = items.filter((row) => row.docType === "document");
   const totalCount =
-    allContractRows.length + allDocumentRows.length + (legacyContract ? 1 : 0);
+    allContractRows.length + allDocumentRows.length;
   if (totalCount === 0) {
     return null;
   }
@@ -87,15 +75,10 @@ export function ContractListSection({
   const documentRows = q
     ? allDocumentRows.filter((row) => row.title.toLowerCase().includes(q))
     : allDocumentRows;
-  const showLegacy =
-    legacyContract !== null &&
-    (!q ||
-      projectName.toLowerCase().includes(q) ||
-      legacyContract.clientName?.toLowerCase().includes(q));
-  if (q && contractRows.length === 0 && documentRows.length === 0 && !showLegacy) {
+  if (q && contractRows.length === 0 && documentRows.length === 0) {
     return null;
   }
-  const hasContracts = contractRows.length > 0 || showLegacy;
+  const hasContracts = contractRows.length > 0;
   const hasDocuments = documentRows.length > 0;
 
   return (
@@ -117,61 +100,6 @@ export function ContractListSection({
         </div>
         {hasContracts ? (
           <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-            {showLegacy && legacyContract ? (
-              <Link
-                to={`/dashboard/${teamSlug}/${projectId}/contract`}
-                onClick={(event) => {
-                  if (
-                    onLegacySelectToggle &&
-                    (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey)
-                  ) {
-                    event.preventDefault();
-                    onLegacySelectToggle();
-                  }
-                }}
-                className={cn(
-                  "group flex min-h-12 items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-[background-color,box-shadow] w-full min-w-0",
-                  legacySelected && "bg-[#fff1e8] shadow-[inset_0_0_0_2px_#FF6600]",
-                )}
-              >
-                {selectionMode ? <SelectionBox selected={Boolean(legacySelected)} /> : null}
-                <FileSignature
-                  className="h-5 w-5 flex-shrink-0 text-[#888]"
-                  strokeWidth={1.75}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
-                    {projectName || "Contract"}
-                  </div>
-                  <div className="text-[10px] font-mono text-[#888] truncate">
-                    {legacyContract.clientName
-                      ? `Client: ${legacyContract.clientName}`
-                      : "Statement of work"}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
-                    legacyContract.signedAt
-                      ? STATUS_STYLES.completed
-                      : legacyContract.sentForSignatureAt
-                        ? STATUS_STYLES.pending
-                        : STATUS_STYLES.draft,
-                  )}
-                >
-                  {legacyContract.signedAt ? (
-                    <>
-                      <Check className="mr-0.5 h-2.5 w-2.5" strokeWidth={3} />
-                      signed
-                    </>
-                  ) : legacyContract.sentForSignatureAt ? (
-                    "sent"
-                  ) : (
-                    "draft"
-                  )}
-                </span>
-              </Link>
-            ) : null}
             {contractRows.map((c) => (
               <Link
                 key={c._id}

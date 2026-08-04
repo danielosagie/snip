@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { softCard, SoftPill } from "@/components/soft";
 import {
   Trash2,
   Pencil,
@@ -14,6 +15,13 @@ import {
   Check,
   ChevronDown,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,6 +101,10 @@ export default function TeamSettingsPage() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const prewarmTeamIntentHandlers = useRoutePrewarmIntent(() => {
     if (!team?.slug) return;
     return prewarmTeam(convex, { teamSlug: team.slug });
@@ -144,21 +156,22 @@ export default function TeamSettingsPage() {
     }
   };
 
+  // window.confirm() can only return OK/Cancel — it cannot collect the
+  // team name it was asking for, so the old second prompt was satisfied
+  // by a second OK. Deleting every project, video and member needs a
+  // real typed confirmation and a visible failure.
   const handleDeleteTeam = async () => {
-    if (
-      !confirm(
-        "Delete this team? Every project, video, and member is removed permanently.",
-      )
-    ) {
-      return;
-    }
-    if (!confirm(`Type the team name to confirm: ${team.name}`)) return;
-
+    if (deleteConfirmName.trim() !== team.name) return;
+    setDeleteError(null);
+    setDeleting(true);
     try {
       await deleteTeam({ teamId: team._id });
       navigate({ to: dashboardHomePath() });
     } catch (error) {
-      console.error("Failed to delete team:", error);
+      setDeleteError(
+        error instanceof Error ? error.message : "Could not delete this team.",
+      );
+      setDeleting(false);
     }
   };
 
@@ -248,19 +261,17 @@ export default function TeamSettingsPage() {
         ]}
       />
 
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-3xl px-6 lg:px-8 py-8 space-y-10">
+      <div className="surface-soft flex-1 overflow-auto bg-[#FAFAFA] text-[#131315]">
+        <div className="w-full max-w-[1120px] space-y-3.5 px-4 py-8 sm:px-8 lg:px-14 lg:py-10">
           {/* ── Team identity ── */}
-          <section>
-            <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1">
-              Workspace · members
-            </p>
+          <section className={softCard}>
+            <SoftPill>Workspace</SoftPill>
             {isEditingName ? (
               <div className="flex items-center gap-2">
                 <Input
                   value={editedName}
                   onChange={(e) => setEditedName(e.target.value)}
-                  className="text-3xl font-black tracking-tight h-auto py-1 px-2"
+                  className="h-auto px-2 py-1 text-[22px] font-semibold tracking-[-0.02em]"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void handleSaveName();
@@ -280,7 +291,7 @@ export default function TeamSettingsPage() {
               </div>
             ) : (
               <div className="flex items-baseline gap-3 group">
-                <h1 className="text-3xl lg:text-4xl font-black tracking-tight text-[#1a1a1a]">
+                <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">
                   {team.name}
                 </h1>
                 {isAdmin && (
@@ -289,18 +300,18 @@ export default function TeamSettingsPage() {
                       setEditedName(team.name);
                       setIsEditingName(true);
                     }}
-                    className="text-[#888] hover:text-[#1a1a1a] transition-colors opacity-0 group-hover:opacity-100"
+                    className="text-[#A0A0A5] transition-colors hover:text-[#131315] opacity-0 group-hover:opacity-100"
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                 )}
               </div>
             )}
-            <p className="text-sm text-[#666] mt-2 max-w-prose">
+            <p className="mt-1 max-w-prose text-sm leading-5 text-[#6E6E73]">
               Invite collaborators, set roles, and manage who has access to
               this workspace's projects.
             </p>
-            <p className="text-xs font-mono text-[#888] mt-3">
+            <p className="mt-3 font-mono text-xs text-[#A0A0A5]">
               {typeof window !== "undefined"
                 ? `${window.location.origin}${teamHomePath(team.slug)}`
                 : teamHomePath(team.slug)}
@@ -309,10 +320,10 @@ export default function TeamSettingsPage() {
 
           {/* ── Invite member (inline, no dialog) ── */}
           {isAdmin ? (
-            <section className="border-2 border-[#1a1a1a] p-5 bg-[#f0f0e8]">
-              <div className="flex items-center gap-2 mb-3">
-                <UserPlus className="h-4 w-4" />
-                <h2 className="font-black text-sm uppercase tracking-tight">
+            <section className={softCard}>
+              <div className="mb-3 flex items-center gap-2">
+                <UserPlus className="h-4 w-4 text-[#6E6E73]" />
+                <h2 className="text-base font-semibold leading-[22px]">
                   Invite a member
                 </h2>
               </div>
@@ -350,7 +361,7 @@ export default function TeamSettingsPage() {
               {/* Optional storage scope: restrict the invitee to specific
                   projects. Off → full team access (the efficient default). */}
               {projects && projects.length > 0 ? (
-                <div className="mt-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+                <div className="mt-3 rounded-xl border border-[#E8E8EC] bg-[#FAFAFA] p-3">
                   <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider cursor-pointer">
                     <input
                       type="checkbox"
@@ -405,7 +416,7 @@ export default function TeamSettingsPage() {
                 </div>
               ) : null}
               {lastInviteLink ? (
-                <div className="mt-3 border-2 border-[#1a1a1a] bg-[#e8e8e0] p-2 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-2 rounded-xl border border-[#E8E8EC] bg-[#F1F1F3] p-2">
                   <code className="flex-1 text-xs font-mono truncate">
                     {lastInviteLink}
                   </code>
@@ -438,16 +449,16 @@ export default function TeamSettingsPage() {
           {/* ── Pending invites ── */}
           {invites && invites.length > 0 ? (
             <section>
-              <h2 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
+              <h2 className="mb-2 text-base font-semibold leading-[22px]">
                 Pending invites ({invites.length})
               </h2>
-              <div className="border-2 border-[#1a1a1a] divide-y divide-[#ccc] bg-[#f0f0e8]">
+              <div className="divide-y divide-[#F1F1F3] rounded-[14px] border border-[#E8E8EC] bg-white">
                 {invites.map((inv) => (
                   <div
                     key={inv._id}
                     className="flex items-center gap-3 px-4 py-3"
                   >
-                    <Mail className="h-4 w-4 text-[#888] flex-shrink-0" />
+                    <Mail className="h-4 w-4 flex-shrink-0 text-[#A0A0A5]" />
                     <div className="flex-1 min-w-0">
                       <div className="font-bold text-sm text-[#1a1a1a] truncate">
                         {inv.email}
@@ -479,14 +490,14 @@ export default function TeamSettingsPage() {
 
           {/* ── Members list ── */}
           <section>
-            <h2 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
+            <h2 className="mb-2 text-base font-semibold leading-[22px]">
               Members ({members?.length ?? 0})
             </h2>
-            <div className="border-2 border-[#1a1a1a] divide-y divide-[#ccc] bg-[#f0f0e8]">
+            <div className="divide-y divide-[#F1F1F3] rounded-[14px] border border-[#E8E8EC] bg-white">
               {members === undefined ? (
-                <div className="px-4 py-3 text-sm text-[#888]">Loading…</div>
+                <div className="px-4 py-3 text-sm text-[#6E6E73]">Loading…</div>
               ) : members.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-[#888]">
+                <div className="px-4 py-3 text-sm text-[#6E6E73]">
                   No members yet.
                 </div>
               ) : (
@@ -558,23 +569,75 @@ export default function TeamSettingsPage() {
 
           {/* ── Danger zone ── */}
           {isOwner ? (
-            <section className="border-t-2 border-[#dc2626]/30 pt-6 flex items-center justify-between">
+            <section className="flex items-center justify-between border-t border-[#F0D2D4] pt-6">
               <div>
-                <p className="text-sm font-bold text-[#1a1a1a]">Delete team</p>
-                <p className="text-xs text-[#888] mt-0.5">
+                <p className="text-sm font-semibold text-[#131315]">Delete team</p>
+                <p className="mt-0.5 text-sm text-[#6E6E73]">
                   Permanently remove this team, all projects, and videos.
                 </p>
               </div>
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => void handleDeleteTeam()}
+                onClick={() => {
+                  setDeleteConfirmName("");
+                  setDeleteError(null);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
               </Button>
             </section>
           ) : null}
+
+          <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <DialogContent className="surface-soft max-w-md rounded-2xl border border-[#E8E8EC] bg-white p-6 text-[#131315]">
+              <DialogHeader>
+                <DialogTitle className="text-base font-semibold">
+                  Delete {team.name}?
+                </DialogTitle>
+                <DialogDescription className="text-sm text-[#6E6E73]">
+                  This removes every project, video, folder and member in this
+                  team. It cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <label
+                htmlFor="delete-confirm"
+                className="mt-4 block text-sm text-[#6E6E73]"
+              >
+                Type <span className="font-medium text-[#131315]">{team.name}</span> to confirm
+              </label>
+              <Input
+                id="delete-confirm"
+                value={deleteConfirmName}
+                autoComplete="off"
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                className="mt-1.5"
+              />
+              {deleteError ? (
+                <p className="mt-2 text-sm text-[#8A2B34]">{deleteError}</p>
+              ) : null}
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDeleteOpen(false)}
+                  disabled={deleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={deleting || deleteConfirmName.trim() !== team.name}
+                  onClick={() => void handleDeleteTeam()}
+                >
+                  {deleting ? "Deleting…" : "Delete team"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>
@@ -599,7 +662,7 @@ function RolePicker({
           type="button"
           disabled={disabled}
           className={
-            "inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] " +
+            "inline-flex items-center gap-1 rounded-full border border-[#DADADD] bg-white text-xs font-medium hover:bg-[#F7F7F8] " +
             (compact ? "px-2 py-1" : "px-3 py-2")
           }
         >

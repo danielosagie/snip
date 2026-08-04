@@ -251,6 +251,34 @@ export const createCheckoutForGrant = action({
   },
 });
 
+/** Resolve a seller-visible payment row to Stripe's hosted receipt. */
+export const getReceiptUrl = action({
+  args: { paymentId: v.id("payments") },
+  returns: v.object({ url: v.union(v.string(), v.null()) }),
+  // Annotated because ctx.runQuery pulls in `internal`, which is generated
+  // from this file's own exports; inferring the return type from the body
+  // is self-referential and degrades everything here to `any`.
+  handler: async (ctx, args): Promise<{ url: string | null }> => {
+    const lookup: { stripePaymentIntentId: string } | null =
+      await ctx.runQuery(internal.payments.lookupReceiptForPayment, {
+        paymentId: args.paymentId,
+      });
+    const stripe = getStripe();
+    if (!lookup || !stripe) return { url: null };
+
+    const intent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(
+      lookup.stripePaymentIntentId,
+      { expand: ["latest_charge"] },
+    );
+    const expandedCharge = intent.latest_charge;
+    const charge: Stripe.Charge | null =
+      typeof expandedCharge === "string"
+        ? await stripe.charges.retrieve(expandedCharge)
+        : (expandedCharge ?? null);
+    return { url: charge?.receipt_url ?? null };
+  },
+});
+
 /**
  * Canva-style per-video checkout. Doesn't require a share grant — the
  * client just hits "Download — $X" on the video and we send them straight
