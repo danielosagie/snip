@@ -59,10 +59,10 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
   return (
     <div
       className={cn(
-        "relative border-2 border-dashed p-12 text-center transition-all",
+        "relative rounded-[14px] border border-dashed p-12 text-center transition-colors",
         isDragActive
-          ? "border-[#FF6600] bg-[#FF6600]/5"
-          : "border-[#1a1a1a] hover:border-[#888] bg-[#f0f0e8]",
+          ? "border-[#FF6600] bg-[#FFF0E6]"
+          : "border-[#D8D8DE] bg-white hover:border-[#A0A0A5]",
         disabled && "opacity-40 cursor-not-allowed",
         className
       )}
@@ -81,21 +81,21 @@ export function DropZone({ onFilesSelected, disabled, className }: DropZoneProps
       <div className="flex flex-col items-center gap-4">
         <div
           className={cn(
-            "w-14 h-14 flex items-center justify-center transition-colors border-2 border-[#1a1a1a]",
+            "flex h-14 w-14 items-center justify-center rounded-[12px] border transition-colors",
             isDragActive
-              ? "bg-[#FF6600] text-[#f0f0e8]"
-              : "bg-[#e8e8e0] text-[#888]"
+              ? "border-[#FF6600] bg-[#FF6600] text-white"
+              : "border-[#E8E8EC] bg-[#FAFAFA] text-[#6E6E73]"
           )}
         >
           <Upload className="h-6 w-6" />
         </div>
         <div>
-          <p className="font-bold text-[#1a1a1a]">
+          <p className="text-[15px] font-semibold text-[#131315]">
             {isDragActive ? "Drop to add" : "Drop files here or click to add"}
           </p>
-          <p className="text-sm text-[#888] mt-1">
-            Anything goes — video, docs, images, audio, .prproj. Video gets
-            transcoded; everything else is stored as-is.
+          <p className="mt-1 text-[13px] leading-[18px] text-[#6E6E73]">
+            Video, docs, images, audio, project files. Video gets transcoded,
+            everything else is stored as is.
           </p>
         </div>
       </div>

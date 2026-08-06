@@ -210,6 +210,14 @@ export function DashboardSidebar() {
               </SidebarLink>
             ))
           )}
+          <SidebarLink
+            to={TRASH_PATH}
+            icon={<Trash2 className="h-4 w-4" />}
+            active={pathname.startsWith(TRASH_PATH)}
+            muted
+          >
+            Trash
+          </SidebarLink>
         </nav>
 
         {/* Desktop app download — separated section above the New project
@@ -277,14 +285,6 @@ export function DashboardSidebar() {
             muted
           >
             Settings
-          </SidebarLink>
-          <SidebarLink
-            to={TRASH_PATH}
-            icon={<Trash2 className="h-4 w-4" />}
-            active={pathname.startsWith(TRASH_PATH)}
-            muted
-          >
-            Trash
           </SidebarLink>
         </div>
 

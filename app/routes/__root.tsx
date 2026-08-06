@@ -88,14 +88,30 @@ function AppShell({ children }: { children: ReactNode }) {
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
+  // Clerk production keys are pinned to snip.film, so the app is broken on
+  // any other host: clerk.snip.film 400s the request and every signed-in
+  // surface fails (taking hydration down with it). Bounce to the canonical
+  // domain before Clerk loads rather than leaving a half-dead page up.
+  const canonicalHostScript = `
+    (() => {
+      try {
+        const host = window.location.hostname;
+        if (host.endsWith(".vercel.app")) {
+          window.location.replace(
+            "https://www.snip.film" + window.location.pathname +
+            window.location.search + window.location.hash
+          );
+        }
+      } catch {}
+    })();
+  `;
   const themeInitScript = `
     (() => {
       try {
-        const storedStyle = localStorage.getItem("snip-style");
-        if (storedStyle === "classic" || storedStyle === "soft") {
-          document.documentElement.setAttribute("data-style", storedStyle);
-        } else {
-          document.documentElement.setAttribute("data-style", "soft");
+        // "classic" is retired; a stale stored value must not resurrect it.
+        document.documentElement.setAttribute("data-style", "soft");
+        if (localStorage.getItem("snip-style") === "classic") {
+          localStorage.removeItem("snip-style");
         }
         const stored = localStorage.getItem("snip-theme") || localStorage.getItem("lawn-theme");
         if (stored === "light" || stored === "dark") {
@@ -113,6 +129,7 @@ function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: canonicalHostScript }} />
         <HeadContent />
       </head>
       <body className="h-full antialiased" suppressHydrationWarning>

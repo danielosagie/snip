@@ -49,19 +49,10 @@ function getInitialTheme(): Theme {
   return getSystemTheme();
 }
 
+// The brutalist "classic" skin is retired. Anything stored from before the
+// switch is ignored rather than migrated, because honoring it produced soft
+// components on a monospace brutalist base.
 function getInitialStyle(): Style {
-  if (typeof document === "undefined") return "soft";
-
-  const attributeStyle = document.documentElement.getAttribute("data-style");
-  if (attributeStyle === "classic" || attributeStyle === "soft") {
-    return attributeStyle;
-  }
-
-  const storedStyle = localStorage.getItem(STYLE_STORAGE_KEY);
-  if (storedStyle === "classic" || storedStyle === "soft") {
-    return storedStyle;
-  }
-
   return "soft";
 }
 
@@ -140,16 +131,15 @@ const THEME_STYLE_OPTIONS: ReadonlyArray<{
   style: Style;
   label: string;
 }> = [
-  { theme: "light", style: "classic", label: "Light classic" },
-  { theme: "light", style: "soft", label: "Light soft" },
-  { theme: "dark", style: "classic", label: "Dark classic" },
-  { theme: "dark", style: "soft", label: "Dark soft" },
+  { theme: "light", style: "soft", label: "Light" },
+  { theme: "dark", style: "soft", label: "Dark" },
 ];
 
 /**
- * Theme + style switcher. Renders a Moon/Sun trigger (style it via
- * `className`) that opens a popover listing the four theme × style
- * combos: Light/Dark × Classic/Soft. Each option sets both at once.
+ * Theme switcher. The "classic" (brutalist) style is retired: the app's
+ * components are written in the soft language directly, so a stored
+ * classic left users with soft components on a monospace brutalist base.
+ * Every option now pins style to soft; only light/dark varies.
  */
 export function ThemeStyleToggle({ className }: { className?: string }) {
   const { theme, style, setTheme, setStyle, mounted } = useTheme();

@@ -266,7 +266,11 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Geist Mono', ui-monospace, monospace;
+  /* Inter Tight is the app's voice. This used to be Geist Mono, which meant
+     anything without an explicit font class rendered monospace whenever the
+     data-style attribute was missing or stale. Mono is now opt-in, for the
+     column labels and technical values that ask for it. */
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
