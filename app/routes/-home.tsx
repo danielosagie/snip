@@ -28,19 +28,23 @@ import {
  */
 
 const INK = "#131315";
-const GRAY = "#6e6e73";
-const GRAY_LIGHT = "#a0a0a5";
-const LINE = "#e8e8ec";
-const PANEL = "#fafafa";
+const GRAY = "#6E6E73";
+const GRAY_LIGHT = "#A0A0A5";
+const LINE = "#E8E8EC";
+const INNER_LINE = "#F1F1F3";
+const BUTTON_LINE = "#D8D8DE";
+const PANEL = "#FAFAFA";
 const ORANGE = "#FF6600";
+const ORANGE_TINT = "#FFF0E6";
+const ORANGE_DEEP = "#D14E00";
 
 /* ---------------------------------- bits --------------------------------- */
 
-function Eyebrow({ children, light = false }: { children: ReactNode; light?: boolean }) {
+function Eyebrow({ children }: { children: ReactNode; light?: boolean }) {
   return (
     <div
-      className="font-mono text-[11px] uppercase tracking-[0.22em] flex items-center gap-2"
-      style={{ color: light ? "rgba(255,255,255,0.6)" : GRAY }}
+      className="font-mono text-[11px] font-medium uppercase tracking-widest flex items-center gap-2"
+      style={{ color: GRAY_LIGHT }}
     >
       <span aria-hidden style={{ color: ORANGE, fontSize: "9px" }}>
         ▶
@@ -135,11 +139,11 @@ function useScrambleWords(words: string[], holdMs = 2400) {
 
 /* ------------------------------ faux app UI ------------------------------ */
 
-function MockBar({ w, light = false }: { w: string; light?: boolean }) {
+function MockBar({ w }: { w: string }) {
   return (
     <div
       className="h-2 rounded-full"
-      style={{ width: w, backgroundColor: light ? "rgba(255,255,255,0.14)" : "#e5e5ea" }}
+      style={{ width: w, backgroundColor: INNER_LINE }}
     />
   );
 }
@@ -147,15 +151,21 @@ function MockBar({ w, light = false }: { w: string; light?: boolean }) {
 function WindowChrome({ title }: { title: string }) {
   return (
     <div
-      className="flex items-center gap-3 px-4 py-3 border-b"
-      style={{ borderColor: "rgba(255,255,255,0.08)" }}
+      className="flex h-12 items-center justify-between gap-4 border-b bg-white px-4"
+      style={{ borderColor: LINE }}
     >
-      <div className="flex gap-1.5">
-        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#3a3a3e" }} />
-        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#3a3a3e" }} />
-        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#3a3a3e" }} />
+      <div className="flex items-center gap-2">
+        <span
+          className="flex size-6 items-center justify-center rounded-[7px] text-[12px] font-bold text-white"
+          style={{ backgroundColor: ORANGE }}
+        >
+          S
+        </span>
+        <span className="text-[15px] font-bold tracking-[-0.03em]" style={{ color: INK }}>
+          snip.
+        </span>
       </div>
-      <span className="font-mono text-[10px] tracking-[0.18em] uppercase" style={{ color: "#7a7a80" }}>
+      <span className="font-mono text-[11px] font-medium uppercase tracking-widest" style={{ color: GRAY_LIGHT }}>
         {title}
       </span>
     </div>
@@ -164,8 +174,8 @@ function WindowChrome({ title }: { title: string }) {
 
 function MockReview() {
   return (
-    <div className="flex h-full">
-      <div className="flex-1 flex flex-col p-4 gap-3 min-w-0">
+    <div className="flex h-full" style={{ backgroundColor: PANEL }}>
+      <div className="flex-1 flex flex-col p-4 gap-3 min-w-0" style={{ backgroundColor: INK }}>
         <div
           className="relative flex-1 rounded-lg flex items-center justify-center"
           style={{ background: "linear-gradient(135deg, #1d1d22 0%, #131316 60%, #1a1208 100%)" }}
@@ -184,7 +194,7 @@ function MockReview() {
           </span>
           <span
             className="absolute right-3 top-3 font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded-full"
-            style={{ backgroundColor: "rgba(255,102,0,0.18)", color: "#ffb380" }}
+            style={{ backgroundColor: ORANGE_TINT, color: ORANGE_DEEP }}
           >
             v3 · ProRes
           </span>
@@ -203,26 +213,32 @@ function MockReview() {
       </div>
       <div
         className="w-[38%] border-l p-4 flex-col gap-3 hidden sm:flex"
-        style={{ borderColor: "rgba(255,255,255,0.08)" }}
+        style={{ borderColor: LINE, backgroundColor: PANEL }}
       >
         {[
           { name: "Matt", time: "00:42", text: "That's great!", accent: true },
           { name: "Ana", time: "01:18", text: "Trim two frames here", accent: false },
         ].map((c) => (
-          <div key={c.time} className="rounded-lg p-3" style={{ backgroundColor: "rgba(255,255,255,0.05)" }}>
+          <div
+            key={c.time}
+            className="rounded-[11px] border p-3"
+            style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
+          >
             <div className="flex items-center gap-2 mb-2">
               <span
                 className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-semibold text-white"
-                style={{ backgroundColor: c.accent ? ORANGE : "#4a4a52" }}
+                style={{ backgroundColor: c.accent ? ORANGE : GRAY }}
               >
                 {c.name[0]}
               </span>
-              <span className="text-[11px] font-medium text-white">{c.name}</span>
-              <span className="font-mono text-[9px] ml-auto" style={{ color: ORANGE }}>
+              <span className="text-[11px] font-medium" style={{ color: INK }}>
+                {c.name}
+              </span>
+              <span className="font-mono text-[9px] ml-auto" style={{ color: ORANGE_DEEP }}>
                 {c.time}
               </span>
             </div>
-            <p className="text-[11px] leading-snug" style={{ color: "rgba(255,255,255,0.75)" }}>
+            <p className="text-[11px] leading-snug" style={{ color: GRAY }}>
               {c.text}
             </p>
           </div>
@@ -240,29 +256,36 @@ function MockReview() {
 
 function MockContracts() {
   return (
-    <div className="flex h-full">
-      <div className="flex-1 p-5 flex flex-col gap-2.5 min-w-0">
+    <div className="flex h-full" style={{ backgroundColor: PANEL }}>
+      <div
+        className="m-4 flex min-w-0 flex-1 flex-col gap-2.5 rounded-[14px] border p-4"
+        style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
+      >
         <div className="flex items-center gap-2 mb-2">
-          <FileText size={14} color="#9a9aa2" />
-          <span className="text-[12px] font-medium text-white">Wedding film — master agreement</span>
+          <FileText size={14} color={GRAY_LIGHT} />
+          <span className="text-[12px] font-medium" style={{ color: INK }}>
+            Wedding film — master agreement
+          </span>
           <span
             className="font-mono text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full ml-auto"
-            style={{ backgroundColor: "rgba(255,255,255,0.08)", color: "#9a9aa2" }}
+            style={{ backgroundColor: INNER_LINE, color: GRAY_LIGHT }}
           >
             Frozen · SHA-256
           </span>
         </div>
-        <MockBar w="92%" light />
-        <MockBar w="86%" light />
-        <MockBar w="64%" light />
+        <MockBar w="92%" />
+        <MockBar w="86%" />
+        <MockBar w="64%" />
         <div className="h-2" />
-        <MockBar w="89%" light />
-        <MockBar w="40%" light />
+        <MockBar w="89%" />
+        <MockBar w="40%" />
         <div
-          className="mt-auto rounded-lg border border-dashed p-3 flex items-center justify-between"
-          style={{ borderColor: "rgba(255,255,255,0.2)" }}
+          className="mt-auto rounded-[11px] border border-dashed p-3 flex items-center justify-between"
+          style={{ borderColor: BUTTON_LINE, backgroundColor: PANEL }}
         >
-          <span className="font-serif italic text-lg text-white">Maya R.</span>
+          <span className="font-serif italic text-lg" style={{ color: INK }}>
+            Maya R.
+          </span>
           <span
             className="font-mono text-[9px] uppercase tracking-wider px-2 py-1 rounded-full inline-flex items-center gap-1"
             style={{ backgroundColor: "rgba(41,199,64,0.15)", color: "#6fdd8b" }}
@@ -273,9 +296,9 @@ function MockContracts() {
       </div>
       <div
         className="w-[34%] border-l p-4 font-mono text-[9px] leading-relaxed flex-col gap-2 hidden sm:flex"
-        style={{ borderColor: "rgba(255,255,255,0.08)", color: "#7a7a80" }}
+        style={{ borderColor: LINE, color: GRAY, backgroundColor: "#FFFFFF" }}
       >
-        <span className="uppercase tracking-[0.18em]" style={{ color: "#9a9aa2" }}>
+        <span className="uppercase tracking-widest" style={{ color: GRAY_LIGHT }}>
           Audit trail
         </span>
         <span>10:02 — terms frozen</span>
@@ -289,12 +312,14 @@ function MockContracts() {
 
 function MockDelivery() {
   return (
-    <div className="p-5 flex flex-col gap-2.5 h-full">
+    <div className="p-5 flex flex-col gap-2.5 h-full" style={{ backgroundColor: PANEL }}>
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[12px] font-medium text-white">Final delivery</span>
+        <span className="text-[12px] font-medium" style={{ color: INK }}>
+          Final delivery
+        </span>
         <span
           className="font-mono text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full ml-auto inline-flex items-center gap-1"
-          style={{ backgroundColor: "rgba(255,102,0,0.15)", color: "#ffb380" }}
+          style={{ backgroundColor: ORANGE_TINT, color: ORANGE_DEEP }}
         >
           <Lock size={9} /> Paywalled
         </span>
@@ -306,20 +331,22 @@ function MockDelivery() {
       ].map((f) => (
         <div
           key={f.name}
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5"
-          style={{ backgroundColor: "rgba(255,255,255,0.05)" }}
+          className="flex items-center gap-3 rounded-[11px] border px-3 py-2.5"
+          style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
         >
-          <Play size={12} color="#9a9aa2" />
-          <span className="font-mono text-[11px] text-white truncate">{f.name}</span>
-          <span className="font-mono text-[10px] ml-auto shrink-0" style={{ color: "#7a7a80" }}>
+          <Play size={12} color={GRAY_LIGHT} />
+          <span className="font-mono text-[11px] truncate" style={{ color: INK }}>
+            {f.name}
+          </span>
+          <span className="font-mono text-[10px] ml-auto shrink-0" style={{ color: GRAY }}>
             {f.size}
           </span>
-          <Lock size={11} color="#7a7a80" className="shrink-0" />
+          <Lock size={11} color={GRAY_LIGHT} className="shrink-0" />
         </div>
       ))}
       <div
         className="mt-auto self-center rounded-full px-5 py-2 text-[12px] font-medium text-white"
-        style={{ backgroundColor: ORANGE }}
+        style={{ backgroundColor: INK }}
       >
         Pay $450 to unlock downloads
       </div>
@@ -329,10 +356,12 @@ function MockDelivery() {
 
 function MockDrive() {
   return (
-    <div className="p-5 flex flex-col gap-2.5 h-full">
+    <div className="p-5 flex flex-col gap-2.5 h-full" style={{ backgroundColor: PANEL }}>
       <div className="flex items-center gap-2 mb-1">
-        <Folder size={14} color="#9a9aa2" />
-        <span className="font-mono text-[11px] text-white">snip Drive — /clients/2026</span>
+        <Folder size={14} color={GRAY_LIGHT} />
+        <span className="font-mono text-[11px]" style={{ color: INK }}>
+          snip Drive — /clients/2026
+        </span>
       </div>
       {[
         { name: "atlanta_brand_film/", note: "Streamed", green: false },
@@ -342,20 +371,22 @@ function MockDrive() {
       ].map((f) => (
         <div
           key={f.name}
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5"
-          style={{ backgroundColor: "rgba(255,255,255,0.05)" }}
+          className="flex items-center gap-3 rounded-[11px] border px-3 py-2.5"
+          style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
         >
           <Folder size={12} color={ORANGE} />
-          <span className="font-mono text-[11px] text-white truncate">{f.name}</span>
+          <span className="font-mono text-[11px] truncate" style={{ color: INK }}>
+            {f.name}
+          </span>
           <span
             className="font-mono text-[9px] uppercase tracking-wider ml-auto shrink-0"
-            style={{ color: f.green ? "#6fdd8b" : "#7a7a80" }}
+            style={{ color: f.green ? "#1D9E36" : GRAY }}
           >
             {f.note}
           </span>
         </div>
       ))}
-      <p className="font-mono text-[10px] mt-auto" style={{ color: "#7a7a80" }}>
+      <p className="font-mono text-[10px] mt-auto" style={{ color: GRAY }}>
         Mounted as a local disk — bytes stream from the edge.
       </p>
     </div>
@@ -432,7 +463,7 @@ export default function Homepage() {
     const prevScheme = html.style.colorScheme;
     const prevBg = document.body.style.backgroundColor;
     html.style.colorScheme = "light";
-    document.body.style.backgroundColor = "#ffffff";
+    document.body.style.backgroundColor = "#FFFFFF";
     return () => {
       html.style.colorScheme = prevScheme;
       document.body.style.backgroundColor = prevBg;
@@ -466,13 +497,13 @@ export default function Homepage() {
   const ActiveMock = HERO_TABS.find((t) => t.id === tab)!.Comp;
 
   const pill =
-    "inline-flex items-center justify-center gap-2 rounded-full text-sm font-medium transition-colors";
+    "inline-flex min-h-10 items-center justify-center gap-2 rounded-full text-sm font-medium transition-[color,background-color,border-color,transform,opacity] active:scale-[0.96]";
 
   return (
     <div
       className="min-h-screen"
       style={{
-        backgroundColor: "#ffffff",
+        backgroundColor: "#FFFFFF",
         color: INK,
         fontFamily: "'Inter Tight', 'Geist', system-ui, sans-serif",
         colorScheme: "light",
@@ -480,7 +511,7 @@ export default function Homepage() {
     >
       {/* Nav */}
       <nav
-        className="fixed w-full top-0 z-50 transition-all duration-200"
+        className="fixed w-full top-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-200"
         style={{
           backgroundColor: scrolled ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0)",
           backdropFilter: scrolled ? "blur(12px)" : "none",
@@ -489,7 +520,7 @@ export default function Homepage() {
       >
         <div className="max-w-6xl mx-auto px-6 py-3.5 flex items-center gap-8">
           <Link to="/" className="flex items-center gap-2 shrink-0">
-            <span className="rounded-md overflow-hidden inline-flex">
+            <span className="rounded-[7px] overflow-hidden inline-flex">
               <SnipMark size={24} />
             </span>
             <span className="text-lg font-semibold tracking-tight">
@@ -556,7 +587,7 @@ export default function Homepage() {
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors hover:border-[#FF6600]"
-              style={{ borderColor: "#ffd9c2", backgroundColor: "#fff7f2", color: "#c2410c" }}
+              style={{ borderColor: ORANGE, backgroundColor: ORANGE_TINT, color: ORANGE_DEEP }}
             >
               snip is open source<span className="hidden sm:inline"> — star it on GitHub</span>
               <ArrowUpRight size={12} />
@@ -588,7 +619,7 @@ export default function Homepage() {
               <a
                 href="/downloads/snip-desktop.dmg"
                 className={`${pill} border px-6 py-3 hover:bg-[#fafafa]`}
-                style={{ borderColor: LINE, color: INK }}
+                style={{ borderColor: BUTTON_LINE, color: INK, backgroundColor: "#FFFFFF" }}
               >
                 <Apple className="h-4 w-4" />
                 Download for Mac
@@ -614,7 +645,7 @@ export default function Homepage() {
             role="tablist"
             aria-label="Product areas"
             className="grid grid-cols-4 border rounded-t-2xl overflow-hidden divide-x"
-            style={{ borderColor: LINE, backgroundColor: "#fff" }}
+            style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
           >
             {HERO_TABS.map((t) => (
               <button
@@ -625,10 +656,10 @@ export default function Homepage() {
                   userPickedTab.current = true;
                   setTab(t.id);
                 }}
-                className="relative px-2 py-3.5 font-mono text-[11px] sm:text-xs uppercase tracking-[0.16em] transition-colors"
+                className="relative px-2 py-3.5 font-mono text-[11px] font-medium uppercase tracking-widest transition-colors"
                 style={{
                   color: tab === t.id ? INK : GRAY_LIGHT,
-                  backgroundColor: tab === t.id ? PANEL : "#fff",
+                  backgroundColor: tab === t.id ? PANEL : "#FFFFFF",
                   borderColor: LINE,
                 }}
               >
@@ -646,11 +677,10 @@ export default function Homepage() {
             className="border border-t-0 rounded-b-2xl overflow-hidden"
             style={{
               borderColor: LINE,
-              backgroundColor: "#161618",
-              boxShadow: "0 32px 64px -24px rgba(19,19,21,0.25)",
+              backgroundColor: PANEL,
             }}
           >
-            <WindowChrome title={`snip — ${tab}`} />
+            <WindowChrome title={tab} />
             <div className="h-[360px] sm:h-[420px]">
               <ActiveMock />
             </div>
@@ -678,7 +708,7 @@ export default function Homepage() {
                 caption: "Frame-accurate review",
                 body: (
                   <div className="flex flex-col gap-2 w-full px-5">
-                    <div className="relative h-1.5 rounded-full" style={{ backgroundColor: "#e5e5ea" }}>
+                    <div className="relative h-1.5 rounded-full" style={{ backgroundColor: INNER_LINE }}>
                       <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: "55%", backgroundColor: ORANGE }} />
                       {["30%", "55%", "78%"].map((l) => (
                         <span key={l} className="absolute -top-[3px] w-2 h-2 rounded-full border bg-white" style={{ left: l, borderColor: ORANGE }} />
@@ -713,14 +743,14 @@ export default function Homepage() {
                 caption: "Paid delivery",
                 body: (
                   <div className="flex flex-col gap-2 w-full px-5 items-center">
-                    <div className="flex items-center gap-2 w-full rounded-md px-2.5 py-2" style={{ backgroundColor: "#fff" }}>
+                    <div className="flex items-center gap-2 w-full rounded-[11px] border px-2.5 py-2" style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}>
                       <Play size={10} color={GRAY_LIGHT} />
                       <span className="font-mono text-[9px] truncate" style={{ color: GRAY }}>
                         final_master.mov
                       </span>
                       <Lock size={9} color={GRAY_LIGHT} className="ml-auto" />
                     </div>
-                    <span className="rounded-full px-3 py-1 text-[10px] font-medium text-white" style={{ backgroundColor: ORANGE }}>
+                    <span className="rounded-full px-3 py-1 text-[10px] font-medium text-white" style={{ backgroundColor: INK }}>
                       Pay to unlock
                     </span>
                   </div>
@@ -732,7 +762,7 @@ export default function Homepage() {
                 body: (
                   <div className="flex flex-col gap-1.5 w-full px-5">
                     {["clients/2026/", "raw_footage/"].map((n) => (
-                      <div key={n} className="flex items-center gap-2 w-full rounded-md px-2.5 py-2" style={{ backgroundColor: "#fff" }}>
+                      <div key={n} className="flex items-center gap-2 w-full rounded-[11px] border px-2.5 py-2" style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}>
                         <Folder size={10} color={ORANGE} />
                         <span className="font-mono text-[9px]" style={{ color: GRAY }}>
                           {n}
@@ -748,8 +778,8 @@ export default function Homepage() {
             ].map((card, i) => (
               <Reveal key={card.caption} delay={i * 80}>
                 <div
-                  className="rounded-2xl border overflow-hidden transition-shadow hover:shadow-lg"
-                  style={{ borderColor: LINE, backgroundColor: "#fff", boxShadow: "0 1px 2px rgba(19,19,21,0.04)" }}
+                  className="rounded-[14px] border overflow-hidden"
+                  style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
                 >
                   <div
                     className="h-36 flex items-center justify-center"
@@ -786,8 +816,8 @@ export default function Homepage() {
           <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-5">
             <Reveal>
               <div
-                className="rounded-2xl border p-7 h-full flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
-                style={{ borderColor: LINE, backgroundColor: "#fff" }}
+                className="rounded-2xl border p-7 h-full flex flex-col transition-transform duration-300 hover:-translate-y-0.5"
+                style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
               >
                 <h3 className="text-xl font-semibold tracking-tight">Review without the back-and-forth</h3>
                 <p className="mt-2 text-[15px] leading-relaxed" style={{ color: GRAY }}>
@@ -820,15 +850,15 @@ export default function Homepage() {
             </Reveal>
             <Reveal delay={80}>
               <div
-                className="rounded-2xl border p-7 h-full flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
-                style={{ borderColor: LINE, backgroundColor: "#fff" }}
+                className="rounded-2xl border p-7 h-full flex flex-col transition-transform duration-300 hover:-translate-y-0.5"
+                style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
               >
                 <h3 className="text-xl font-semibold tracking-tight">Contracts clients actually sign</h3>
                 <p className="mt-2 text-[15px] leading-relaxed" style={{ color: GRAY }}>
                   Freeze the terms, verify by one-time code, and keep a court-grade audit
                   trail — consent, hashes, and signatures in the same link as the cut.
                 </p>
-                <div className="mt-6 rounded-xl border border-dashed p-4 flex items-center justify-between" style={{ borderColor: "#d9d9de" }}>
+                <div className="mt-6 rounded-[11px] border border-dashed p-4 flex items-center justify-between" style={{ borderColor: BUTTON_LINE, backgroundColor: PANEL }}>
                   <span className="font-serif italic text-xl">Maya R.</span>
                   <span
                     className="font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full inline-flex items-center gap-1"
@@ -841,20 +871,20 @@ export default function Homepage() {
             </Reveal>
             <Reveal>
               <div
-                className="rounded-2xl border p-7 h-full flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
-                style={{ borderColor: LINE, backgroundColor: "#fff" }}
+                className="rounded-2xl border p-7 h-full flex flex-col transition-transform duration-300 hover:-translate-y-0.5"
+                style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
               >
                 <h3 className="text-xl font-semibold tracking-tight">Get paid before the download</h3>
                 <p className="mt-2 text-[15px] leading-relaxed" style={{ color: GRAY }}>
                   Put final delivery behind a paywall. Clients watch a watermarked preview
                   until the invoice clears — then downloads unlock themselves.
                 </p>
-                <div className="mt-6 flex items-center gap-3 rounded-xl px-4 py-3" style={{ backgroundColor: PANEL }}>
+                <div className="mt-6 flex items-center gap-3 rounded-[11px] border px-4 py-3" style={{ borderColor: LINE, backgroundColor: PANEL }}>
                   <Lock size={13} color={GRAY} />
                   <span className="font-mono text-[11px]" style={{ color: GRAY }}>
                     highlights_4k.mp4
                   </span>
-                  <span className="ml-auto rounded-full px-3 py-1 text-[11px] font-medium text-white" style={{ backgroundColor: ORANGE }}>
+                  <span className="ml-auto rounded-full px-3 py-1 text-[11px] font-medium text-white" style={{ backgroundColor: INK }}>
                     $450 to unlock
                   </span>
                 </div>
@@ -862,8 +892,8 @@ export default function Homepage() {
             </Reveal>
             <Reveal delay={80}>
               <div
-                className="rounded-2xl border p-7 h-full flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
-                style={{ borderColor: LINE, backgroundColor: "#fff" }}
+                className="rounded-2xl border p-7 h-full flex flex-col transition-transform duration-300 hover:-translate-y-0.5"
+                style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}
               >
                 <h3 className="text-xl font-semibold tracking-tight">Stream the cloud, locally</h3>
                 <p className="mt-2 text-[15px] leading-relaxed" style={{ color: GRAY }}>
@@ -872,7 +902,7 @@ export default function Homepage() {
                 </p>
                 <div className="mt-6 flex flex-col gap-2">
                   {["clients/2026/rooftop_wedding/", "raw_a7siii_cards/"].map((n) => (
-                    <div key={n} className="flex items-center gap-2.5 rounded-xl px-4 py-2.5" style={{ backgroundColor: PANEL }}>
+                    <div key={n} className="flex items-center gap-2.5 rounded-[11px] border px-4 py-2.5" style={{ borderColor: LINE, backgroundColor: PANEL }}>
                       <Folder size={12} color={ORANGE} />
                       <span className="font-mono text-[11px]" style={{ color: GRAY }}>
                         {n}
@@ -997,7 +1027,7 @@ export default function Homepage() {
           </Reveal>
           <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-5">
             <Reveal>
-              <div className="rounded-2xl border p-8 h-full" style={{ borderColor: LINE, backgroundColor: "#fff" }}>
+              <div className="rounded-[14px] border p-8 h-full" style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}>
                 <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: GRAY_LIGHT }}>
                   The other guys
                 </div>
@@ -1011,7 +1041,7 @@ export default function Homepage() {
                 <ul className="mt-8 space-y-3.5 text-[15px]" style={{ color: GRAY }}>
                   {["Complex interface", "Punishes you for growing", "Bloated ecosystem", "Closed source"].map((x) => (
                     <li key={x} className="flex items-center gap-3">
-                      <span className="font-mono" style={{ color: "#d4d4d8" }}>
+                      <span className="font-mono" style={{ color: GRAY_LIGHT }}>
                         ×
                       </span>
                       {x}
@@ -1021,8 +1051,8 @@ export default function Homepage() {
               </div>
             </Reveal>
             <Reveal delay={80}>
-              <div className="rounded-2xl p-8 h-full text-white" style={{ backgroundColor: "#0a0a0b" }}>
-                <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: "#ffb380" }}>
+              <div className="rounded-[14px] p-8 h-full text-white" style={{ backgroundColor: INK }}>
+                <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: ORANGE }}>
                   The solution
                 </div>
                 <div className="mt-2 text-3xl font-semibold tracking-tight">
@@ -1046,7 +1076,7 @@ export default function Homepage() {
                   <span className="font-mono text-[10px] uppercase tracking-[0.2em] block" style={{ color: "rgba(255,255,255,0.45)" }}>
                     Yearly savings · 5 users
                   </span>
-                  <span className="text-3xl font-semibold tracking-tight" style={{ color: "#ffb380" }}>
+                  <span className="text-3xl font-semibold tracking-tight" style={{ color: ORANGE }}>
                     $840
                   </span>
                 </div>
@@ -1106,7 +1136,7 @@ export default function Homepage() {
           {/* progress rail */}
           <div className="mt-12 relative h-[2px]" style={{ backgroundColor: LINE }}>
             <div
-              className="absolute inset-y-0 left-0 transition-all duration-700"
+              className="absolute inset-y-0 left-0 transition-[width] duration-700"
               style={{ width: `${stage < 0 ? 100 : ((stage + 1) / 3) * 100}%`, backgroundColor: INK }}
             />
             {[0, 1, 2].map((i) => (
@@ -1142,19 +1172,18 @@ export default function Homepage() {
                   {[
                     { Icon: Hash, tint: "#eef4ff", title: "SHA-256 frozen terms", desc: "Contract terms are hashed and locked the moment you send them." },
                     { Icon: KeyRound, tint: "#f3fbf4", title: "OTP-verified signing", desc: "Signers confirm identity with a one-time code — no accounts." },
-                    { Icon: ScrollText, tint: "#fff7f2", title: "Full audit trail", desc: "Every open, consent, and signature is timestamped and kept." },
+                    { Icon: ScrollText, tint: ORANGE_TINT, title: "Full audit trail", desc: "Every open, consent, and signature is timestamped and kept." },
                     { Icon: EyeOff, tint: "#f7f5ff", title: "Watermarked previews", desc: "Paywalled shares never serve the raw original file." },
                     { Icon: CreditCard, tint: "#f3fbf4", title: "Payments by Stripe", desc: "Checkout and payouts run on Stripe end to end." },
-                    { Icon: Zap, tint: "#fff7f2", title: "Streams from the edge", desc: "Bytes come straight from edge storage — no proxy in the way." },
+                    { Icon: Zap, tint: ORANGE_TINT, title: "Streams from the edge", desc: "Bytes come straight from edge storage — no proxy in the way." },
                     { Icon: Github, tint: "#f5f5f6", title: "Open source", desc: "The whole codebase is on GitHub. Read it, fork it, trust it." },
                   ].map((t, i) => (
                     <div
                       key={t.title}
-                      className="w-[270px] shrink-0 rounded-xl border bg-white p-5"
+                      className="w-[270px] shrink-0 rounded-[14px] border bg-white p-5"
                       style={{
                         borderColor: LINE,
                         transform: `rotate(${i % 2 === 0 ? "-1.2deg" : "1.2deg"})`,
-                        boxShadow: "0 1px 2px rgba(19,19,21,0.05)",
                       }}
                     >
                       <div
@@ -1185,7 +1214,7 @@ export default function Homepage() {
       </section>
 
       {/* Quote */}
-      <section className="px-6 py-24" style={{ backgroundColor: "#ffffff" }}>
+      <section className="px-6 py-24" style={{ backgroundColor: "#FFFFFF" }}>
         <div className="max-w-3xl mx-auto text-center">
           <Reveal>
             <blockquote
@@ -1218,7 +1247,7 @@ export default function Homepage() {
           </Reveal>
           <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-5 max-w-3xl">
             <Reveal>
-              <div className="rounded-2xl border p-8 h-full flex flex-col" style={{ borderColor: LINE, backgroundColor: "#fff" }}>
+              <div className="rounded-[14px] border p-8 h-full flex flex-col" style={{ borderColor: LINE, backgroundColor: "#FFFFFF" }}>
                 <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: GRAY_LIGHT }}>
                   Basic
                 </div>
@@ -1249,9 +1278,9 @@ export default function Homepage() {
               </div>
             </Reveal>
             <Reveal delay={80}>
-              <div className="rounded-2xl p-8 h-full flex flex-col text-white" style={{ backgroundColor: "#0a0a0b" }}>
+              <div className="rounded-[14px] p-8 h-full flex flex-col text-white" style={{ backgroundColor: INK }}>
                 <div className="flex items-center justify-between">
-                  <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: "#ffb380" }}>
+                  <div className="font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: ORANGE }}>
                     Pro
                   </div>
                   <span className="rounded-full px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider" style={{ backgroundColor: ORANGE }}>
@@ -1293,7 +1322,7 @@ export default function Homepage() {
         <Reveal className="max-w-6xl mx-auto">
           <div
             className="relative rounded-3xl overflow-hidden text-center text-white px-6 pt-20 pb-44 sm:pb-52"
-            style={{ backgroundColor: "#0a0a0b" }}
+            style={{ backgroundColor: INK }}
           >
             <Eyebrow light>Start today</Eyebrow>
             <h2
@@ -1427,7 +1456,7 @@ export default function Homepage() {
           </div>
           <div className="border-t pt-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-5" style={{ borderColor: LINE }}>
             <div className="flex items-center gap-2.5">
-              <span className="rounded-md overflow-hidden inline-flex">
+            <span className="rounded-[7px] overflow-hidden inline-flex">
                 <SnipMark size={28} />
               </span>
               <span className="text-2xl font-semibold tracking-tight">

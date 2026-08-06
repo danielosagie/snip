@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   CreditCard,
   ExternalLink,
@@ -19,7 +18,17 @@ import {
   DownloadCloud,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { softCard, softButton, softButtonPrimary, softTabClass } from "@/components/soft";
+import {
+  softButton,
+  softButtonPrimary,
+  softCard,
+  SoftField,
+  softHelperText,
+  softInput,
+  SoftPill,
+  softRow,
+  softTabClass,
+} from "@/components/soft";
 import { seoHead } from "@/lib/seo";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 
@@ -65,11 +74,6 @@ function SettingsRoute() {
           <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">
             Settings
           </h1>
-          <p className="mt-1 max-w-prose text-sm leading-5 text-[#6E6E73]">
-            Manage your account, notification preferences, and connected
-            integrations. Team-scoped settings live in the team settings page.
-          </p>
-
           {/* Soft pill tabs — matches the team settings page. */}
           <nav className="mt-5">
             <div className="flex flex-wrap gap-1.5">
@@ -109,38 +113,18 @@ function SettingsRoute() {
 
 function Section({
   title,
-  description,
   children,
+  contentClassName,
 }: {
   title: string;
-  description?: string;
   children: React.ReactNode;
+  contentClassName?: string;
 }) {
   return (
     <section className={cn(softCard, "mb-3.5")}>
       <h2 className="text-base font-semibold leading-[22px]">{title}</h2>
-      {description ? (
-        <p className="text-xs text-[#666] mt-0.5">{description}</p>
-      ) : null}
-      <div className="mt-4 space-y-3">{children}</div>
+      <div className={cn("mt-4 space-y-3", contentClassName)}>{children}</div>
     </section>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <div className="text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
-        {label}
-      </div>
-      {children}
-    </label>
   );
 }
 
@@ -149,22 +133,19 @@ function ProfileTab({ name, email }: { name: string; email: string }) {
     <>
       <Section
         title="Profile"
-        description="Identity comes from Clerk. To change your name or email, use the avatar menu in the bottom of the sidebar."
       >
-        <Field label="Name">
-          <Input value={name} readOnly />
-        </Field>
-        <Field label="Email">
-          <Input value={email} readOnly type="email" />
-        </Field>
+        <SoftField label="Name">
+          <Input value={name} readOnly className={softInput} />
+        </SoftField>
+        <SoftField label="Email">
+          <Input value={email} readOnly type="email" className={softInput} />
+        </SoftField>
+        <p className={softHelperText}>
+          Change your identity from the avatar menu.
+        </p>
       </Section>
-      <Section
-        title="Appearance"
-        description="Theme follows the toggle in the sidebar footer. Other appearance settings will land here later."
-      >
-        <div className="text-sm text-[#666]">
-          Nothing else to tune yet.
-        </div>
+      <Section title="Appearance">
+        <p className={softHelperText}>Use the theme toggle in the sidebar.</p>
       </Section>
     </>
   );
@@ -175,10 +156,7 @@ function NotificationsTab() {
   const update = useMutation(api.notifications.updateMyPrefs);
   const loading = prefs === undefined;
   return (
-    <Section
-      title="Notifications"
-      description="Email cadence for comments, contract status, and uploads."
-    >
+    <Section title="Notifications" contentClassName="space-y-0">
       <NotifyToggle
         label="Comment replies"
         help="Email me when someone replies to a thread I'm in."
@@ -200,9 +178,8 @@ function NotificationsTab() {
         disabled={loading}
         onChange={(v) => void update({ uploadFinished: v })}
       />
-      <p className="pt-2 text-xs text-[#888] font-mono">
-        Emails send via Resend when configured; until then preferences
-        still save and in-app activity is unaffected.
+      <p className={cn(softHelperText, "pt-2")}>
+        Preferences save even when email delivery is unavailable.
       </p>
     </Section>
   );
@@ -222,7 +199,7 @@ function NotifyToggle({
   onChange: (next: boolean) => void;
 }) {
   return (
-    <label className="flex items-start gap-3 cursor-pointer">
+    <label className={cn(softRow, "cursor-pointer flex-nowrap items-start")}>
       <input
         type="checkbox"
         checked={checked}
@@ -230,10 +207,10 @@ function NotifyToggle({
         onChange={(e) => onChange(e.target.checked)}
         className="mt-0.5 h-4 w-4 accent-[#FF6600] disabled:opacity-50"
       />
-      <div className="flex-1">
-        <div className="font-bold text-sm text-[#1a1a1a]">{label}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium leading-5 text-[#131315]">{label}</div>
         {help ? (
-          <div className="text-xs text-[#666] mt-0.5">{help}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-[#A0A0A5]">{help}</div>
         ) : null}
       </div>
     </label>
@@ -311,7 +288,7 @@ function DesktopUpdatesSection() {
       case "available":
         return snapshot?.requiresManualInstall
           ? `Update available${snapshot.version ? ` (v${snapshot.version})` : ""}.`
-          : `Update available${snapshot?.version ? ` (v${snapshot.version})` : ""} — downloading in the background…`;
+          : `Update available${snapshot?.version ? ` (v${snapshot.version})` : ""}. Downloading in the background…`;
       case "downloading":
         return `Downloading update… ${snapshot?.percent ?? 0}%`;
       case "downloaded":
@@ -330,19 +307,16 @@ function DesktopUpdatesSection() {
   })();
 
   return (
-    <Section
-      title="snip Desktop"
-      description="App version and automatic updates for this Mac."
-    >
-      <Field label="Installed version">
-        <div className="font-mono text-sm text-[#1a1a1a]">
-          {version ? `v${version}` : "—"}
+    <Section title="snip Desktop">
+      <SoftField label="Installed version">
+        <div className="text-sm text-[#131315]">
+          {version ? `v${version}` : "Not available"}
         </div>
-      </Field>
+      </SoftField>
       <p
         className={cn(
-          "text-xs font-mono",
-          status === "error" ? "text-[#b91c1c]" : "text-[#666]",
+          "text-[13px] leading-[18px]",
+          status === "error" ? "text-[#D8434F]" : "text-[#A0A0A5]",
         )}
       >
         {statusLine}
@@ -380,10 +354,7 @@ function IntegrationsTab() {
   return (
     <>
       <DesktopUpdatesSection />
-      <Section
-        title="Connected services"
-        description="Service status across this deployment. Per-team integrations like Stripe Connect link out to the team they belong to."
-      >
+      <Section title="Connected services">
         <IntegrationRow
           icon={<CreditCard className="h-4 w-4" />}
           label="Stripe Connect"
@@ -393,14 +364,14 @@ function IntegrationsTab() {
               ? "configured"
               : "not-configured"
           }
-          configuredHint="Stripe API keys detected — set up payouts in Billing to enable receiving money."
+          configuredHint="Stripe API keys detected. Set up payouts in Billing."
           notConfiguredHint="Set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET in your Convex env to enable."
           action={
             <Link
               to="/dashboard/billing"
-              className="inline-flex items-center gap-1 text-xs font-bold text-[#FF6600] hover:text-[#FF7A1F] underline underline-offset-2"
+              className="inline-flex items-center gap-1 text-[13px] font-medium text-[#D14E00] underline underline-offset-2"
             >
-              Set up payouts in Billing
+              Open Billing
               <ExternalLink className="h-3 w-3" />
             </Link>
           }
@@ -415,7 +386,7 @@ function IntegrationsTab() {
           }
           configuredHint={
             featureStatus?.muxSignedPlayback
-              ? "Signed playback enabled — paywalled deliveries can stream."
+              ? "Signed playback enabled. Paywalled deliveries can stream."
               : "Public playback only. Add a Mux signing key for paywalled streams."
           }
           notConfiguredHint="Set MUX_TOKEN_ID + MUX_TOKEN_SECRET in your Convex env."
@@ -437,16 +408,13 @@ function IntegrationsTab() {
         />
       </Section>
 
-      <Section
-        title="Personal integrations"
-        description="Account-scoped automations. Each one lights up when its env or OAuth credentials are present."
-      >
+      <Section title="Personal integrations">
         <IntegrationRow
           icon={<Hash className="h-4 w-4" />}
           label="Slack"
           description="DM mentions when someone @-tags you on a comment, plus a daily digest of project activity."
           status="coming-soon"
-          notConfiguredHint="Connector ships once we wire Slack OAuth — tracked separately."
+          notConfiguredHint="Connector ships after Slack OAuth is connected."
         />
         <IntegrationRow
           icon={<Calendar className="h-4 w-4" />}
@@ -482,8 +450,8 @@ function IntegrationRow({
   const hint =
     status === "configured" ? configuredHint : notConfiguredHint;
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-[#E8E8EC] bg-white p-4 sm:flex-row">
-      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[#E8E8EC] bg-[#F1F1F3]">
+    <div className="flex flex-col gap-3 rounded-[11px] border border-[#E8E8EC] bg-white p-4 sm:flex-row">
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[9px] border border-[#E8E8EC] bg-[#FAFAFA] text-[#6E6E73]">
         {icon}
       </div>
       <div className="flex-1 min-w-0">
@@ -491,12 +459,12 @@ function IntegrationRow({
           <h3 className="text-sm font-semibold">{label}</h3>
           <StatusBadge status={status} />
         </div>
-        <p className="text-xs text-[#666] mt-1">{description}</p>
+        <p className="mt-1 text-sm leading-5 text-[#6E6E73]">{description}</p>
         {hint ? (
           <p
             className={cn(
-              "text-[11px] font-mono mt-2 flex items-start gap-1.5",
-              status === "configured" ? "text-[#FF6600]" : "text-[#888]",
+              "mt-2 flex items-start gap-1.5 text-[13px] leading-[18px]",
+              status === "configured" ? "text-[#D14E00]" : "text-[#A0A0A5]",
             )}
           >
             {status === "configured" ? (
@@ -514,8 +482,8 @@ function IntegrationRow({
 }
 
 function StatusBadge({ status }: { status: IntegrationStatus }) {
-  if (status === "configured") return <Badge variant="success">Connected</Badge>;
+  if (status === "configured") return <SoftPill tone="accent">Connected</SoftPill>;
   if (status === "coming-soon")
-    return <Badge variant="secondary">Coming soon</Badge>;
-  return <Badge variant="warning">Not configured</Badge>;
+    return <SoftPill>Coming soon</SoftPill>;
+  return <SoftPill>Not configured</SoftPill>;
 }

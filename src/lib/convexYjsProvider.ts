@@ -28,6 +28,18 @@ import type { Id } from "@convex/_generated/dataModel";
 
 const ORIGIN_REMOTE = Symbol("convexRemote");
 
+/**
+ * Initial HTML is inserted locally so Tiptap can translate it into Yjs. The
+ * provider must not enqueue that update through the normal append path because
+ * the seed uses a compare-and-set mutation to prevent two new tabs from
+ * planting duplicate copies of the same document.
+ */
+export const ORIGIN_INITIAL_SEED = Symbol("convexInitialSeed");
+
+export function contractYjsField(contractId: Id<"contracts">): string {
+  return `contract:${contractId}`;
+}
+
 type Unsubscribe = () => void;
 
 interface Options {
@@ -35,6 +47,10 @@ interface Options {
   editorName?: string;
   /** Debounce in ms between local updates. Smooths out keystroke-rate calls. */
   flushIntervalMs?: number;
+  /** Scopes an editor to one row inside the project's shared Y.Doc. */
+  contractId?: Id<"contracts">;
+  /** Fires only after the first server snapshot (including null) is known. */
+  onSynced?: () => void;
 }
 
 export class ConvexYjsProvider {
@@ -44,6 +60,8 @@ export class ConvexYjsProvider {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private lastAppliedRemoteState: string | null = null;
+  private syncReported = false;
+  private retryAttempt = 0;
 
   constructor(
     public readonly doc: Y.Doc,
@@ -52,7 +70,7 @@ export class ConvexYjsProvider {
     private readonly opts: Options = {},
   ) {
     this.localUpdateHandler = (update, origin) => {
-      if (origin === ORIGIN_REMOTE) return;
+      if (origin === ORIGIN_REMOTE || origin === ORIGIN_INITIAL_SEED) return;
       this.queueUpdate(update);
     };
     this.doc.on("update", this.localUpdateHandler);
@@ -67,14 +85,21 @@ export class ConvexYjsProvider {
     const apply = () => {
       if (this.destroyed) return;
       const state = watch.localQueryResult();
-      if (state === undefined || state === null) return;
-      const typed = state as { yjsState: string };
-      if (this.lastAppliedRemoteState === typed.yjsState) return;
-      this.lastAppliedRemoteState = typed.yjsState;
-      try {
-        Y.applyUpdate(this.doc, base64ToBytes(typed.yjsState), ORIGIN_REMOTE);
-      } catch (e) {
-        console.error("Failed to apply remote Yjs state", e);
+      if (state === undefined) return;
+      if (state !== null) {
+        const typed = state as { yjsState: string };
+        if (this.lastAppliedRemoteState !== typed.yjsState) {
+          this.lastAppliedRemoteState = typed.yjsState;
+          try {
+            Y.applyUpdate(this.doc, base64ToBytes(typed.yjsState), ORIGIN_REMOTE);
+          } catch (e) {
+            console.error("Failed to apply remote Yjs state", e);
+          }
+        }
+      }
+      if (!this.syncReported) {
+        this.syncReported = true;
+        this.opts.onSynced?.();
       }
     };
     apply();
@@ -82,13 +107,14 @@ export class ConvexYjsProvider {
   }
 
   private queueUpdate(update: Uint8Array) {
+    if (this.destroyed) return;
     this.pendingUpdates.push(update);
     if (this.flushTimer) return;
     const delay = this.opts.flushIntervalMs ?? 250;
     this.flushTimer = setTimeout(() => this.flush(), delay);
   }
 
-  private async flush() {
+  async flush() {
     this.flushTimer = null;
     if (this.pendingUpdates.length === 0) return;
     // Coalesce: merge all queued updates into one Y.update before sending.
@@ -99,34 +125,39 @@ export class ConvexYjsProvider {
         projectId: this.projectId,
         update: bytesToBase64(merged),
         editorName: this.opts.editorName,
+        contractId: this.opts.contractId,
       });
+      this.retryAttempt = 0;
     } catch (e) {
       console.error("Convex Yjs mutation failed; re-queueing.", e);
-      // Push back to the front so the next flush re-tries. Not great if
-      // the failure is permanent (e.g. unauth) — the user will see the
-      // editor get progressively out of sync. We accept that for v1.
       this.pendingUpdates.unshift(merged);
+      if (!this.destroyed && !this.flushTimer) {
+        const retryDelay = Math.min(1000 * 2 ** this.retryAttempt, 10_000);
+        this.retryAttempt += 1;
+        this.flushTimer = setTimeout(() => void this.flush(), retryDelay);
+      }
     }
   }
 
-  /** Push the doc's current full state as a single initial seed. Used when
-   * the doc is empty server-side and we want to populate from existing
-   * HTML / template content. Safe to call multiple times — Yjs dedupes. */
-  async seed(updateBytes: Uint8Array) {
-    if (this.destroyed) return;
-    try {
-      await this.convex.mutation(api.contractDocs.appendUpdate, {
-        projectId: this.projectId,
-        update: bytesToBase64(updateBytes),
-        editorName: this.opts.editorName,
-      });
-    } catch (e) {
-      console.error("Convex Yjs seed failed", e);
-    }
+  /** Push the doc's current full state as a one-time initial seed. The server
+   * applies it only while this contract's named fragment is still empty.
+   * Returns false ONLY for a compare-and-set rejection (another tab seeded
+   * first). Transport and server errors are rethrown — the caller must not
+   * confuse them with a lost race, or a broken deployment turns into an
+   * infinite reseed loop. */
+  async seed(updateBytes: Uint8Array): Promise<boolean> {
+    if (this.destroyed) return false;
+    const result = await this.convex.mutation(api.contractDocs.appendUpdate, {
+      projectId: this.projectId,
+      update: bytesToBase64(updateBytes),
+      editorName: this.opts.editorName,
+      contractId: this.opts.contractId,
+      seedIfEmpty: Boolean(this.opts.contractId),
+    });
+    return result.applied;
   }
 
   destroy() {
-    this.destroyed = true;
     this.doc.off("update", this.localUpdateHandler);
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -136,11 +167,24 @@ export class ConvexYjsProvider {
       this.remoteUnsubscribe();
       this.remoteUnsubscribe = null;
     }
-    // One last best-effort flush so a quick edit-then-navigate-away
-    // doesn't drop the buffered keystrokes.
+    // One last best-effort write so a quick edit-then-navigate-away doesn't
+    // drop the buffered keystrokes. It deliberately skips retry bookkeeping
+    // because this provider no longer owns a live document after destroy.
     if (this.pendingUpdates.length > 0) {
-      void this.flush();
+      const merged = Y.mergeUpdates(this.pendingUpdates);
+      this.pendingUpdates = [];
+      void this.convex
+        .mutation(api.contractDocs.appendUpdate, {
+          projectId: this.projectId,
+          update: bytesToBase64(merged),
+          editorName: this.opts.editorName,
+          contractId: this.opts.contractId,
+        })
+        .catch((error) => {
+          console.error("Convex Yjs final flush failed", error);
+        });
     }
+    this.destroyed = true;
   }
 }
 

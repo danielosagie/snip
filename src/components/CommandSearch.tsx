@@ -5,7 +5,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import {
   Search,
-  Folder,
   Users,
   Settings,
   CreditCard,
@@ -402,18 +401,23 @@ export function CommandSearch({
  *  opens the modal. */
 export function CommandSearchTrigger({
   onOpen,
+  className,
 }: {
   onOpen: () => void;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="w-full flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1.5 text-sm font-mono text-[#888] hover:bg-[#e8e8e0] transition-colors text-left"
+      className={cn(
+        "flex w-full items-center gap-2 text-left transition-colors",
+        className,
+      )}
     >
       <Search className="h-3.5 w-3.5 flex-shrink-0" />
       <span className="flex-1 truncate">Search…</span>
-      <kbd className="text-[10px] font-bold px-1 py-0.5 border border-[#1a1a1a] bg-[#e8e8e0]">
+      <kbd className="text-[11px] font-medium text-[#A0A0A5]">
         ⌘K
       </kbd>
     </button>

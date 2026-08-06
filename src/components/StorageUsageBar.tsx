@@ -37,27 +37,36 @@ export function StorageUsageBar({
       ? "bg-[#b45309]"
       : "bg-[#C2410C]";
 
+  const compactFillColor = overCap
+    ? "bg-[#D8434F]"
+    : nearCap
+      ? "bg-[#D39329]"
+      : "bg-[#FF6600]";
+
   if (variant === "compact") {
     return (
-      <div className="px-2 pb-2 pt-1">
-        <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[#666]">
+      <div className="px-2.5 pb-2 pt-1">
+        <div className="flex items-center justify-between gap-2 text-[13px] leading-[18px] text-[#6E6E73]">
           <span>Storage</span>
-          <span className="text-[#1a1a1a]">
+          <span className="truncate text-[#131315]">
             {formatBytes(usage.usedBytes)} / {formatBytes(usage.limitBytes)}
           </span>
         </div>
-        <div className="mt-1 h-1.5 border border-[#1a1a1a] bg-[#f0f0e8] relative">
+        <div className="relative mt-1.5 h-1.5 overflow-hidden rounded-full bg-[#F1F1F3]">
           <div
-            className={cn("absolute inset-y-0 left-0", fillColor)}
+            className={cn(
+              "absolute inset-y-0 left-0 rounded-full",
+              compactFillColor,
+            )}
             style={{ width: `${Math.min(100, usage.percent)}%` }}
           />
         </div>
         {(isFree && nearCap) || overCap ? (
           <Link
             to="/dashboard/billing"
-            className="mt-1 block text-[10px] font-mono font-bold uppercase tracking-wider text-[#C2410C] hover:underline"
+            className="mt-1 block text-xs font-medium text-[#D14E00] hover:underline"
           >
-            {overCap ? "Storage full · upgrade" : "Nearly full · upgrade"}
+            {overCap ? "Storage full, upgrade" : "Nearly full, upgrade"}
           </Link>
         ) : null}
       </div>

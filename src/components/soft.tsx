@@ -20,10 +20,25 @@ export const softCard =
   "rounded-[14px] border border-[#E8E8EC] bg-white px-5 py-5 sm:px-6 sm:py-[22px]";
 
 export const softButton =
-  "shrink-0 rounded-full border border-[#DADADD] bg-white px-4 py-2 text-[13px] font-medium transition-colors hover:bg-[#F7F7F8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315] disabled:cursor-not-allowed disabled:opacity-50";
+  "shrink-0 rounded-full border border-[#D8D8DE] bg-white px-4 py-2 text-[13px] font-medium leading-[18px] text-[#131315] transition-colors hover:bg-[#F1F1F3] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315] disabled:cursor-not-allowed disabled:opacity-50";
 
 export const softButtonPrimary =
-  "shrink-0 rounded-full border border-[#131315] bg-[#131315] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-[#2A2A2E] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315] disabled:cursor-not-allowed disabled:opacity-50";
+  "shrink-0 rounded-full border border-[#131315] bg-[#131315] px-4 py-2 text-[13px] font-medium leading-[18px] text-white transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315] disabled:cursor-not-allowed disabled:opacity-50";
+
+export const softButtonDanger =
+  "shrink-0 rounded-full border border-[#F0D2D4] bg-white px-4 py-2 text-[13px] font-medium leading-[18px] text-[#D8434F] transition-colors hover:bg-[#FFF5F5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#D8434F] disabled:cursor-not-allowed disabled:opacity-50";
+
+export const softFieldLabel =
+  "mb-1 block text-[13px] font-medium leading-[18px] text-[#6E6E73]";
+
+export const softHelperText =
+  "text-[13px] font-normal leading-[18px] text-[#A0A0A5]";
+
+export const softRow =
+  "flex flex-wrap items-center gap-3 border-t border-[#F1F1F3] py-3.5 first:border-t-0";
+
+export const softInput =
+  "rounded-[10px] border border-[#E8E8EC] bg-white font-sans text-sm text-[#131315] shadow-none placeholder:text-[#A0A0A5] focus-visible:border-[#FF6600] focus-visible:shadow-none";
 
 /** Page shell: scoped soft tokens, page background, and the content column. */
 export function SoftPage({
@@ -92,25 +107,60 @@ export function SoftCardHeading({
 export function SoftRow({
   className,
   children,
+  ...rest
 }: {
   className?: string;
   children: ReactNode;
-}) {
+} & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-3 border-t border-[#F1F1F3] py-3.5 first:border-t-0",
+        softRow,
         className,
       )}
+      {...rest}
     >
       {children}
     </div>
   );
 }
 
-export function SoftPill({ children }: { children: ReactNode }) {
+export function SoftField({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <span className="inline-flex rounded-full bg-[#F1F1F3] px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-[#6E6E73]">
+    <label className={cn("block", className)}>
+      <span className={softFieldLabel}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+export function SoftPill({
+  children,
+  tone = "neutral",
+  className,
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "accent";
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full px-2.5 py-1 text-xs font-medium leading-[18px]",
+        tone === "accent"
+          ? "bg-[#FFF0E6] text-[#D14E00]"
+          : "bg-[#F1F1F3] text-[#6E6E73]",
+        className,
+      )}
+    >
       {children}
     </span>
   );

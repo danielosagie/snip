@@ -201,7 +201,11 @@ export const listVersions = query({
 });
 
 export const snapshotVersion = mutation({
-  args: { contractId: v.id("contracts"), label: v.optional(v.string()) },
+  args: {
+    contractId: v.id("contracts"),
+    label: v.optional(v.string()),
+    contentHtml: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
     const user = await requireUser(ctx);
@@ -219,7 +223,7 @@ export const snapshotVersion = mutation({
       label: args.label?.trim() || undefined,
       createdByClerkId: user.subject,
       createdByName: identityName(user),
-      contentHtml: contract.contentHtml,
+      contentHtml: args.contentHtml ?? contract.contentHtml,
       wizardAnswers: contract.wizardAnswers,
     });
   },
@@ -227,6 +231,7 @@ export const snapshotVersion = mutation({
 
 export const restoreVersion = mutation({
   args: { contractId: v.id("contracts"), versionId: v.id("itemVersions") },
+  returns: v.string(),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
     if (contract.status !== "draft") {
@@ -251,11 +256,13 @@ export const restoreVersion = mutation({
         await ctx.db.patch(sibling._id, { isCurrent });
       }
     }
+    const restoredHtml = version.contentHtml ?? contract.contentHtml ?? "";
     await ctx.db.patch(args.contractId, {
-      contentHtml: version.contentHtml ?? contract.contentHtml,
+      contentHtml: restoredHtml,
       wizardAnswers: version.wizardAnswers ?? contract.wizardAnswers,
       lastSavedAt: Date.now(),
     });
+    return restoredHtml;
   },
 });
 
@@ -445,6 +452,7 @@ export const applyWizard = mutation({
       ),
     }),
   },
+  returns: v.string(),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
     requireSigningCapability(contract);
@@ -492,6 +500,7 @@ export const applyWizard = mutation({
         typeof answers.deadline === "string" ? answers.deadline : undefined,
       lastSavedAt: Date.now(),
     });
+    return contentHtml;
   },
 });
 
@@ -814,7 +823,10 @@ export const removeField = mutation({
 // ─── State machine: send for signature ───────────────────────────────
 
 export const sendForSignature = mutation({
-  args: { contractId: v.id("contracts") },
+  args: {
+    contractId: v.id("contracts"),
+    contentHtml: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
     requireSigningCapability(contract);
@@ -832,6 +844,7 @@ export const sendForSignature = mutation({
     }
 
     const now = Date.now();
+    const contentHtml = args.contentHtml ?? contract.contentHtml ?? "";
     // Preserve the exact editable state as a named history entry before it is
     // frozen. Documents and contracts share this same lifecycle.
     const existingVersions = await ctx.db
@@ -847,15 +860,16 @@ export const sendForSignature = mutation({
       label: "Sent for signature",
       createdByClerkId: user.subject,
       createdByName: identityName(user),
-      contentHtml: contract.contentHtml,
+      contentHtml,
       wizardAnswers: contract.wizardAnswers,
     });
     // Freeze the exact body the recipients will sign + hash it. This is the
     // record they're bound to; the hash makes any later edit detectable.
-    const frozenContentHtml = contract.contentHtml;
+    const frozenContentHtml = contentHtml;
     const contentHash = await sha256Hex(frozenContentHtml);
     await ctx.db.patch(args.contractId, {
       status: "pending",
+      contentHtml,
       sentForSignatureAt: now,
       frozenContentHtml,
       contentHash,

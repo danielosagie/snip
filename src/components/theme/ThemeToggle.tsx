@@ -50,7 +50,7 @@ function getInitialTheme(): Theme {
 }
 
 function getInitialStyle(): Style {
-  if (typeof document === "undefined") return "classic";
+  if (typeof document === "undefined") return "soft";
 
   const attributeStyle = document.documentElement.getAttribute("data-style");
   if (attributeStyle === "classic" || attributeStyle === "soft") {
@@ -62,7 +62,7 @@ function getInitialStyle(): Style {
     return storedStyle;
   }
 
-  return "classic";
+  return "soft";
 }
 
 interface ThemeContextValue {
@@ -140,10 +140,10 @@ const THEME_STYLE_OPTIONS: ReadonlyArray<{
   style: Style;
   label: string;
 }> = [
-  { theme: "light", style: "classic", label: "Light · Classic" },
-  { theme: "light", style: "soft", label: "Light · Soft" },
-  { theme: "dark", style: "classic", label: "Dark · Classic" },
-  { theme: "dark", style: "soft", label: "Dark · Soft" },
+  { theme: "light", style: "classic", label: "Light classic" },
+  { theme: "light", style: "soft", label: "Light soft" },
+  { theme: "dark", style: "classic", label: "Dark classic" },
+  { theme: "dark", style: "soft", label: "Dark soft" },
 ];
 
 /**
@@ -169,7 +169,7 @@ export function ThemeStyleToggle({ className }: { className?: string }) {
         <button
           type="button"
           className={className}
-          title="Theme & style (⌘⇧L toggles light/dark)"
+          title="Theme and style"
           aria-label="Theme and style options"
         >
           {theme === "dark" ? (
@@ -179,7 +179,11 @@ export function ThemeStyleToggle({ className }: { className?: string }) {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-56 p-1">
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        className="surface-soft w-56 rounded-[14px] border border-[#E8E8EC] bg-white p-1.5 shadow-none"
+      >
         <div role="radiogroup" aria-label="Theme and style">
           {THEME_STYLE_OPTIONS.map((option) => {
             const active = option.theme === theme && option.style === style;
@@ -194,7 +198,7 @@ export function ThemeStyleToggle({ className }: { className?: string }) {
                   setStyle(option.style);
                   setOpen(false);
                 }}
-                className="w-full flex items-center justify-between gap-2 px-2 py-1.5 font-mono text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors"
+                className="flex w-full items-center justify-between gap-2 rounded-[10px] px-2.5 py-2 text-[13px] font-medium leading-[18px] text-[#131315] transition-colors hover:bg-[#F1F1F3]"
               >
                 <span>{option.label}</span>
                 {active ? (

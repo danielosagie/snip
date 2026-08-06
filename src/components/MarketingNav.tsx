@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
+import { SnipMark } from "@/components/SnipMark";
 
 export function MarketingNav() {
   const [scrolled, setScrolled] = useState(false);
@@ -14,14 +15,17 @@ export function MarketingNav() {
 
   return (
     <nav
-      className={`fixed w-full top-0 z-50 px-6 py-4 flex justify-between items-center transition-all duration-200 ${scrolled ? "bg-[#f0f0e8] text-[#1a1a1a] border-b-2 border-[#1a1a1a]" : "bg-[#f0f0e8] text-[#1a1a1a] border-b-2 border-[#1a1a1a]"}`}
+      className={`fixed top-0 z-50 flex w-full items-center justify-between border-b border-[#E8E8EC] px-6 py-3 text-[#131315] transition-[background-color,backdrop-filter] duration-200 ${scrolled ? "bg-white/95 backdrop-blur-md" : "bg-white"}`}
     >
-      <div className="flex items-center gap-4">
-        <Link to="/" className="text-xl font-black tracking-tighter">
-          snip.
+      <div className="flex items-center">
+        <Link to="/" className="flex items-center gap-2 text-xl font-bold tracking-[-0.03em]">
+          <span className="inline-flex overflow-hidden rounded-[7px]">
+            <SnipMark size={24} />
+          </span>
+          <span>snip.</span>
         </Link>
       </div>
-      <div className="flex gap-6 items-center text-sm font-bold uppercase tracking-wide">
+      <div className="flex items-center gap-6 text-sm font-medium">
         <Link
           to="/pricing"
           className="hover:underline underline-offset-4 hidden sm:block"
@@ -39,7 +43,7 @@ export function MarketingNav() {
         </Link>
         <Link
           to="/sign-up"
-          className="px-4 py-2 border-2 border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+          className="min-h-10 rounded-full bg-[#131315] px-4 py-2 text-white transition-[opacity,transform] hover:opacity-90 active:scale-[0.96]"
         >
           Start
         </Link>

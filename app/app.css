@@ -563,6 +563,47 @@ body {
   font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
 }
 
+/* Explicit soft primitives stay soft even when the user selects the classic
+   app style. This keeps scoped account surfaces independent from data-style. */
+.surface-soft .ui-btn,
+.surface-soft.ui-btn {
+  border-width: 1px !important;
+  border-radius: 9999px;
+  box-shadow: none !important;
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  transform: none !important;
+  translate: none !important;
+}
+
+.surface-soft .ui-btn:hover,
+.surface-soft .ui-btn:active,
+.surface-soft.ui-btn:hover,
+.surface-soft.ui-btn:active {
+  box-shadow: none !important;
+  transform: none !important;
+  translate: none !important;
+}
+
+.surface-soft input:not([type="checkbox"]):not([type="radio"]),
+.surface-soft textarea {
+  border-color: #e8e8ec !important;
+  border-width: 1px;
+  border-radius: 10px;
+  background-color: #ffffff !important;
+  box-shadow: none !important;
+  color: #131315 !important;
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+}
+
+.surface-soft input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.surface-soft textarea:focus-visible {
+  border-color: #ff6600 !important;
+  box-shadow: none !important;
+}
+
 /* Primitive geometry inside client surfaces */
 .surface-client .ui-card {
   border-radius: 16px;

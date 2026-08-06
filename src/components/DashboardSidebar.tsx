@@ -26,6 +26,7 @@ import { CreateProjectDialog } from "@/components/projects/CreateProjectDialog";
 import { CreateTeamDialog } from "@/components/teams/CreateTeamDialog";
 import { SnipMark } from "@/components/SnipMark";
 import { StorageUsageBar } from "@/components/StorageUsageBar";
+import { softButton, softButtonPrimary } from "@/components/soft";
 import { useSidebarState } from "@/lib/sidebarContext";
 import {
   projectPath,
@@ -92,19 +93,21 @@ export function DashboardSidebar() {
   if (collapsed) {
     return (
       <>
-        <aside className="hidden md:flex flex-col w-12 flex-shrink-0 border-r-2 border-[#1a1a1a] bg-[#f0f0e8] items-center py-3 gap-2">
-          <Link
-            to="/dashboard"
-            className="font-black text-lg tracking-tighter text-[#1a1a1a] hover:text-[#FF6600]"
-            title="Home"
-          >
-            l<span className="text-[#FF6600]">.</span>
+        <aside className="hidden w-12 flex-shrink-0 flex-col items-center border-r border-[#E8E8EC] bg-white py-6 md:flex">
+          <Link to="/dashboard" title="Home">
+            <SnipMark size={32} className="rounded-[9px]" />
           </Link>
-          <CollapsedRail
-            pathname={pathname}
-            activeTeamSlug={defaultTeam?.slug}
-            onOpenSearch={() => setSearchOpen(true)}
-          />
+          <div className="flex min-h-0 flex-1 flex-col justify-between pt-4">
+            <CollapsedRail
+              pathname={pathname}
+              activeTeamSlug={defaultTeam?.slug}
+              onOpenSearch={() => setSearchOpen(true)}
+            />
+            <div className="flex flex-col items-center gap-2 border-t border-[#E8E8EC] pt-3">
+              <ThemeStyleToggle className="flex h-8 w-8 items-center justify-center rounded-[10px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315]" />
+              <SidebarUserButton />
+            </div>
+          </div>
         </aside>
         <CommandSearch open={searchOpen} onOpenChange={setSearchOpen} />
       </>
@@ -113,29 +116,29 @@ export function DashboardSidebar() {
 
   return (
     <>
-      <aside className="hidden md:flex flex-col w-60 flex-shrink-0 border-r-2 border-[#1a1a1a] bg-[#f0f0e8] min-h-0">
+      <aside className="hidden min-h-0 w-58 flex-shrink-0 flex-col border-r border-[#E8E8EC] bg-white px-4 py-6 md:flex">
         {/* Header row: snip. brand on the left, workspace switcher
             chip on the right. The switcher trigger is just a chevron
             chip (no inline name, since the projects list below
             already gives plenty of workspace context). */}
-        <div className="px-3 pt-4 pb-3 flex items-center gap-2">
+        <div className="flex items-center gap-2 pb-4">
           <Link to="/dashboard" className="flex-1 min-w-0 flex items-center gap-2">
-            <SnipMark size={22} />
-            <span className="font-black text-xl tracking-tighter text-[#1a1a1a]">
-              snip<span className="text-[#FF6600]">.</span>
+            <SnipMark size={32} className="rounded-[9px]" />
+            <span className="text-[22px] font-bold leading-[26px] tracking-[-0.03em] text-[#131315]">
+              snip.
             </span>
           </Link>
           <div className="relative">
             <button
               type="button"
               onClick={() => setWorkspaceMenuOpen((o) => !o)}
-              className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-xs font-bold hover:bg-[#e8e8e0] transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-2.5 py-1.5 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
               title="Switch workspace"
             >
-              <span className="w-4 h-4 flex-shrink-0 bg-[#FF6600] text-[#f0f0e8] flex items-center justify-center font-black text-[9px]">
+              <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#FF6600] text-[10px] font-semibold text-white">
                 {(defaultTeam?.name ?? "?").slice(0, 1).toUpperCase()}
               </span>
-              <ChevronsUpDown className="h-3 w-3 text-[#888]" />
+              <ChevronsUpDown className="h-3 w-3 text-[#6E6E73]" />
             </button>
             {workspaceMenuOpen ? (
               <>
@@ -143,8 +146,8 @@ export function DashboardSidebar() {
                   className="fixed inset-0 z-30"
                   onClick={() => setWorkspaceMenuOpen(false)}
                 />
-                <div className="absolute right-0 top-full mt-1 z-40 min-w-[220px] border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_var(--shadow-color)]">
-                  <div className="px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] border-b border-[#ccc]">
+                <div className="absolute right-0 top-full z-40 mt-1 min-w-[220px] rounded-[11px] border border-[#E8E8EC] bg-white p-1.5">
+                  <div className="border-b border-[#F1F1F3] px-2.5 py-2 text-[13px] leading-[18px] text-[#A0A0A5]">
                     Workspaces
                   </div>
                   {(teams ?? []).map((t) => (
@@ -153,13 +156,13 @@ export function DashboardSidebar() {
                       to={teamHomePath(t.slug)}
                       onClick={() => setWorkspaceMenuOpen(false)}
                       className={cn(
-                        "flex items-center gap-2 px-2 py-1.5 text-sm font-bold",
+                        "flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-sm font-medium transition-colors",
                         t.slug === activeTeamSlug
-                          ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                          : "text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                          ? "bg-[#FFF0E6] font-semibold text-[#D14E00]"
+                          : "text-[#131315] hover:bg-[#F1F1F3]",
                       )}
                     >
-                      <span className="w-5 h-5 flex-shrink-0 bg-[#FF6600] text-[#f0f0e8] flex items-center justify-center font-black text-[10px]">
+                      <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#FF6600] text-[10px] font-semibold text-white">
                         {t.name.slice(0, 1).toUpperCase()}
                       </span>
                       <span className="flex-1 truncate">{t.name}</span>
@@ -171,7 +174,7 @@ export function DashboardSidebar() {
                       setWorkspaceMenuOpen(false);
                       setCreateTeamOpen(true);
                     }}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm font-bold text-[#FF6600] hover:bg-[#e8e8e0] border-t border-[#ccc]"
+                    className="mt-1 flex w-full items-center gap-2 rounded-[10px] border-t border-[#F1F1F3] px-2.5 py-2 text-sm font-medium text-[#D14E00] transition-colors hover:bg-[#FFF0E6]"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     Create workspace
@@ -182,14 +185,17 @@ export function DashboardSidebar() {
           </div>
         </div>
 
-        <div className="px-3 pb-3">
-          <CommandSearchTrigger onOpen={() => setSearchOpen(true)} />
+        <div className="pb-4">
+          <CommandSearchTrigger
+            onOpen={() => setSearchOpen(true)}
+            className="rounded-full border border-[#D8D8DE] bg-white px-3 py-2 text-[13px] leading-[18px] text-[#6E6E73] hover:bg-[#F1F1F3]"
+          />
         </div>
 
-        <nav className="px-2 flex-1 overflow-y-auto min-h-0">
+        <nav className="min-h-0 flex-1 overflow-y-auto">
           <SidebarLabel>Projects</SidebarLabel>
           {projects.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-[#888]">
+            <div className="px-2.5 py-2 text-[13px] leading-[18px] text-[#A0A0A5]">
               No projects yet
             </div>
           ) : (
@@ -204,16 +210,6 @@ export function DashboardSidebar() {
               </SidebarLink>
             ))
           )}
-          {/* "Recently deleted" lives at the bottom of the Projects
-              list, not in the Account section — it's a project-scoped
-              affordance, not an account-level one. */}
-          <SidebarLink
-            to={TRASH_PATH}
-            icon={<Trash2 className="h-4 w-4" />}
-            active={pathname.startsWith(TRASH_PATH)}
-          >
-            Recently deleted
-          </SidebarLink>
         </nav>
 
         {/* Desktop app download — separated section above the New project
@@ -223,7 +219,7 @@ export function DashboardSidebar() {
             vercel.json) to the latest GitHub Release asset. The .pkg is the
             recommended installer — a guided wizard that also sets up macFUSE
             so the cloud drive works out of the box. */}
-        <div className="px-3 pt-3 pb-1 border-t-2 border-[#1a1a1a]">
+        <div className="border-t border-[#E8E8EC] pb-1 pt-3">
           <DesktopAppOrDrive />
         </div>
 
@@ -231,7 +227,7 @@ export function DashboardSidebar() {
             below the project list but visually separated. This makes
             the primary creation action easy to spot without burying
             it next to the avatar. */}
-        <div className="px-3 pt-2 pb-3">
+        <div className="pb-3 pt-2">
           <button
             type="button"
             onClick={() => setCreateProjectOpen(true)}
@@ -239,7 +235,7 @@ export function DashboardSidebar() {
             title={
               defaultTeam ? "Create a project" : "Create a workspace first"
             }
-            className="w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-dashed border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className={cn(softButtonPrimary, "flex w-full items-center justify-center gap-2")}
           >
             <Plus className="h-3.5 w-3.5" />
             New project
@@ -250,16 +246,17 @@ export function DashboardSidebar() {
             pinned above the footer. The storage bar sits directly above
             the Billing link so the usage state is visible without a
             click. */}
-        <div className="pt-2 border-t-2 border-[#1a1a1a]">
+        <div className="border-t border-[#E8E8EC] pt-2">
           <StorageUsageBar variant="compact" />
         </div>
-        <div className="px-2 pb-2">
+        <div className="flex flex-col gap-1 pb-2">
           <SidebarLink
             to={BILLING_PATH}
             icon={<CreditCard className="h-4 w-4" />}
             active={pathname.startsWith(BILLING_PATH)}
+            muted
           >
-            Billing &amp; usage
+            Billing &amp; Invoices
           </SidebarLink>
           {defaultTeam ? (
             <SidebarLink
@@ -268,6 +265,7 @@ export function DashboardSidebar() {
               active={pathname.startsWith(
                 `/dashboard/${defaultTeam.slug}/settings`,
               )}
+              muted
             >
               Team members
             </SidebarLink>
@@ -276,8 +274,17 @@ export function DashboardSidebar() {
             to={SETTINGS_PATH}
             icon={<Settings className="h-4 w-4" />}
             active={pathname.startsWith(SETTINGS_PATH)}
+            muted
           >
             Settings
+          </SidebarLink>
+          <SidebarLink
+            to={TRASH_PATH}
+            icon={<Trash2 className="h-4 w-4" />}
+            active={pathname.startsWith(TRASH_PATH)}
+            muted
+          >
+            Trash
           </SidebarLink>
         </div>
 
@@ -313,23 +320,23 @@ function CollapsedRail({
   onOpenSearch: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-1 mt-2">
+    <div className="flex flex-col items-center gap-1">
       <button
         type="button"
         onClick={onOpenSearch}
-        className="p-1.5 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]"
+        className="flex h-8 w-8 items-center justify-center rounded-[10px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315]"
         title="Search (⌘K)"
       >
         <Briefcase className="h-4 w-4" />
       </button>
       <Link
         to={BILLING_PATH}
-        title="Billing & usage"
+        title="Billing & Invoices"
         className={cn(
-          "p-1.5",
+          "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors",
           pathname.startsWith(BILLING_PATH)
-            ? "bg-[#1a1a1a] text-[#f0f0e8]"
-            : "text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]",
+            ? "bg-[#FFF0E6] text-[#D14E00]"
+            : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
         )}
       >
         <CreditCard className="h-4 w-4" />
@@ -339,10 +346,10 @@ function CollapsedRail({
           to={teamSettingsPath(activeTeamSlug)}
           title="Team members"
           className={cn(
-            "p-1.5",
-            pathname.includes("/settings")
-              ? "bg-[#1a1a1a] text-[#f0f0e8]"
-              : "text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]",
+            "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors",
+            pathname.startsWith(`/dashboard/${activeTeamSlug}/settings`)
+              ? "bg-[#FFF0E6] text-[#D14E00]"
+              : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
           )}
         >
           <Users className="h-4 w-4" />
@@ -352,13 +359,25 @@ function CollapsedRail({
         to={SETTINGS_PATH}
         title="Settings"
         className={cn(
-          "p-1.5",
+          "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors",
           pathname.startsWith(SETTINGS_PATH)
-            ? "bg-[#1a1a1a] text-[#f0f0e8]"
-            : "text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]",
+            ? "bg-[#FFF0E6] text-[#D14E00]"
+            : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
         )}
       >
         <Settings className="h-4 w-4" />
+      </Link>
+      <Link
+        to={TRASH_PATH}
+        title="Trash"
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors",
+          pathname.startsWith(TRASH_PATH)
+            ? "bg-[#FFF0E6] text-[#D14E00]"
+            : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
+        )}
+      >
+        <Trash2 className="h-4 w-4" />
       </Link>
     </div>
   );
@@ -366,7 +385,7 @@ function CollapsedRail({
 
 function SidebarLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+    <div className="px-2.5 pb-2.5 pt-1.5 text-[13px] leading-[18px] text-[#A0A0A5]">
       {children}
     </div>
   );
@@ -376,11 +395,13 @@ function SidebarLink({
   to,
   icon,
   active,
+  muted,
   children,
 }: {
   to: string;
   icon?: ReactNode;
   active?: boolean;
+  muted?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -388,10 +409,12 @@ function SidebarLink({
       to={to}
       preload="intent"
       className={cn(
-        "flex items-center gap-2 px-2 py-1.5 text-sm font-bold border-2 transition-colors",
+        "flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-[15px] font-medium leading-[22px] transition-colors",
         active
-          ? "bg-[#1a1a1a] text-[#f0f0e8] border-[#1a1a1a]"
-          : "text-[#1a1a1a] border-transparent hover:bg-[#e8e8e0]",
+          ? "bg-[#FFF0E6] font-semibold text-[#D14E00]"
+          : muted
+            ? "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
+            : "text-[#131315] hover:bg-[#F1F1F3]",
       )}
     >
       <span className="flex-shrink-0">{icon}</span>
@@ -402,37 +425,42 @@ function SidebarLink({
 
 function SidebarFooter({ name }: { name: string }) {
   return (
-    <div className="border-t-2 border-[#1a1a1a] px-3 py-2 flex items-center gap-2">
-      <UserButton
-        appearance={{
-          variables: {
-            // Use theme tokens so the popover follows light/dark.
-            colorText: "var(--foreground)",
-            colorTextSecondary: "var(--foreground-muted)",
-            colorBackground: "var(--background)",
-            colorNeutral: "var(--border)",
-          },
-          elements: {
-            avatarBox: "w-7 h-7 rounded-none border-2 border-[var(--border)]",
-            userButtonPopoverCard:
-              "bg-[var(--background)] border-2 border-[var(--border)] rounded-none shadow-[8px_8px_0px_0px_var(--shadow-color)]",
-            userButtonPopoverActionButton:
-              "!text-[var(--foreground)] hover:!bg-[var(--surface-alt)] rounded-none",
-            userButtonPopoverActionButtonText:
-              "!text-[var(--foreground)] hover:!text-[var(--foreground)] font-mono font-bold",
-            userButtonPopoverActionButtonIcon:
-              "!text-[var(--foreground)] hover:!text-[var(--foreground)]",
-            userButtonPopoverFooter: "hidden",
-          },
-        }}
-      />
+    <div className="flex items-center gap-2 border-t border-[#E8E8EC] pt-3">
+      <SidebarUserButton />
       <div className="flex-1 min-w-0">
-        <div className="font-bold text-xs text-[var(--foreground)] truncate">
+        <div className="truncate text-[13px] font-medium leading-[18px] text-[#131315]">
           {name || "Account"}
         </div>
       </div>
-      <ThemeStyleToggle className="p-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors" />
+      <ThemeStyleToggle className="flex h-8 w-8 items-center justify-center rounded-[10px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315]" />
     </div>
+  );
+}
+
+function SidebarUserButton() {
+  return (
+    <UserButton
+      appearance={{
+        variables: {
+          colorText: "#131315",
+          colorTextSecondary: "#6E6E73",
+          colorBackground: "#FFFFFF",
+          colorNeutral: "#E8E8EC",
+        },
+        elements: {
+          avatarBox: "w-7 h-7 rounded-full border border-[#E8E8EC]",
+          userButtonPopoverCard:
+            "bg-white border border-[#E8E8EC] rounded-[14px] shadow-none",
+          userButtonPopoverActionButton:
+            "!text-[#131315] hover:!bg-[#F1F1F3] rounded-[10px]",
+          userButtonPopoverActionButtonText:
+            "!text-[#131315] hover:!text-[#131315] font-sans font-medium",
+          userButtonPopoverActionButtonIcon:
+            "!text-[#6E6E73] hover:!text-[#131315]",
+          userButtonPopoverFooter: "hidden",
+        },
+      }}
+    />
   );
 }
 
@@ -443,7 +471,7 @@ function SidebarFooter({ name }: { name: string }) {
  * with an Open-in-Finder action.
  */
 const DESKTOP_BTN =
-  "w-full flex items-center justify-center gap-2 px-2 py-2 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+  `${softButton} flex w-full items-center justify-center gap-2`;
 
 /**
  * Translates server-thrown errors into a one-line UI string. Typed
@@ -475,7 +503,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
     p,
     new Promise<T>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`${label} timed out — check your connection and retry.`)),
+        () => reject(new Error(`${label} timed out. Check your connection and retry.`)),
         ms,
       ),
     ),
@@ -574,7 +602,7 @@ function DesktopAppOrDrive() {
 
   const enable = useCallback(async () => {
     if (!window.api) {
-      setError("Desktop bridge unavailable — restart the app.");
+      setError("Desktop bridge unavailable. Restart the app.");
       return;
     }
     setBusy(true);
@@ -597,7 +625,7 @@ function DesktopAppOrDrive() {
       // WebDAV drive resolves every path through Convex and is dead without it.
       const authed = await pushConvexAuth();
       if (!authed) {
-        setError("Couldn't get a Convex session — make sure you're signed in, then retry.");
+        setError("Couldn't get a Convex session. Make sure you're signed in, then retry.");
         return;
       }
       // mount.start returns quickly (status flips to "mounting"); the main
@@ -632,10 +660,10 @@ function DesktopAppOrDrive() {
       <a
         href="/downloads/snip-desktop.pkg"
         className={DESKTOP_BTN}
-        title="Download snip Desktop for macOS — guided installer that sets up the cloud drive"
+        title="Download snip Desktop for macOS"
       >
         <HardDrive className="h-3.5 w-3.5" />
-        Desktop app · Installer
+        Desktop installer
       </a>
     );
   }
@@ -653,11 +681,11 @@ function DesktopAppOrDrive() {
   return (
     <div className="flex flex-col gap-1.5">
       {status === "mounted" ? (
-        <div className="flex w-full border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+        <div className="flex w-full overflow-hidden rounded-full border border-[#D8D8DE] bg-white">
           <button
             type="button"
             onClick={() => void window.api?.shell.openFolder(mount?.mountPath ?? "")}
-            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FF6600] hover:text-[#f0f0e8] transition-colors"
+            className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-[13px] font-medium leading-[18px] text-[#131315] transition-colors hover:bg-[#F1F1F3]"
             title="Open the cloud drive in Finder"
           >
             <HardDrive className="h-3.5 w-3.5" />
@@ -667,7 +695,7 @@ function DesktopAppOrDrive() {
             type="button"
             onClick={() => void disconnect()}
             disabled={busy}
-            className="flex h-auto w-9 flex-shrink-0 items-center justify-center border-l-2 border-[#1a1a1a] text-[#888] hover:bg-[#b91c1c] hover:text-[#f0f0e8] active:translate-y-px disabled:opacity-50"
+            className="flex h-auto w-9 flex-shrink-0 items-center justify-center border-l border-[#E8E8EC] text-[#6E6E73] transition-colors hover:bg-[#FFF0E6] hover:text-[#D14E00] disabled:opacity-50"
             title="Unmount the cloud drive"
             aria-label="Disconnect drive"
           >
@@ -696,12 +724,12 @@ function DesktopAppOrDrive() {
         </button>
       )}
       {lastStep ? (
-        <p className="text-[10px] leading-snug text-[#888] font-mono truncate" title={lastStep}>
+        <p className="truncate text-[13px] leading-[18px] text-[#A0A0A5]" title={lastStep}>
           {lastStep}
         </p>
       ) : null}
       {shownError ? (
-        <p className="text-[10px] leading-snug text-[#b91c1c]">{shownError}</p>
+        <p className="text-[13px] leading-[18px] text-[#D8434F]">{shownError}</p>
       ) : null}
     </div>
   );

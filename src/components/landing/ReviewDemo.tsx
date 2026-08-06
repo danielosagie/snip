@@ -13,15 +13,21 @@ import {
  * frames, the approval lands at the end. Rendered with @remotion/player
  * (muted, looped, no controls), so it reads as a living screenshot.
  *
- * Visually matches the static MockReview fallback in -home.tsx — same
- * dark window (#161618), orange timeline, comment rail — so the swap
- * from fallback to player is seamless.
+ * Visually matches the static MockReview fallback in -home.tsx: a dark
+ * video region inside the light app shell, with the same timeline and
+ * comment rail so the swap from fallback to player is seamless.
  */
 
 const FPS = 30;
 const DURATION = 260; // ~8.7s loop
 
+const INK = "#131315";
+const GRAY = "#6E6E73";
+const LINE = "#E8E8EC";
+const PANEL = "#FAFAFA";
 const ORANGE = "#FF6600";
+const ORANGE_TINT = "#FFF0E6";
+const ORANGE_DEEP = "#D14E00";
 
 function Marker({ at, left }: { at: number; left: string }) {
   const frame = useCurrentFrame();
@@ -64,9 +70,10 @@ function CommentCard({
   return (
     <div
       style={{
-        borderRadius: 10,
+        borderRadius: 11,
+        border: `1px solid ${LINE}`,
         padding: 12,
-        backgroundColor: "rgba(255,255,255,0.05)",
+        backgroundColor: "#FFFFFF",
         opacity: shown ? enter : 0,
         transform: `translateY(${shown ? (1 - enter) * 18 : 18}px)`,
       }}
@@ -83,24 +90,24 @@ function CommentCard({
             fontSize: 9,
             fontWeight: 600,
             color: "#fff",
-            backgroundColor: accent ? ORANGE : "#4a4a52",
+            backgroundColor: accent ? ORANGE : GRAY,
           }}
         >
           {name[0]}
         </span>
-        <span style={{ fontSize: 12, fontWeight: 500, color: "#fff" }}>{name}</span>
+        <span style={{ fontSize: 12, fontWeight: 500, color: INK }}>{name}</span>
         <span
           style={{
             fontSize: 10,
             marginLeft: "auto",
-            color: ORANGE,
+            color: ORANGE_DEEP,
             fontFamily: "'Geist Mono', ui-monospace, monospace",
           }}
         >
           {time}
         </span>
       </div>
-      <p style={{ margin: 0, fontSize: 12, lineHeight: 1.4, color: "rgba(255,255,255,0.75)" }}>
+      <p style={{ margin: 0, fontSize: 12, lineHeight: 1.4, color: GRAY }}>
         {text}
       </p>
     </div>
@@ -140,14 +147,24 @@ function ReviewDemoComposition() {
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: "#161618",
+        backgroundColor: PANEL,
         fontFamily: "'Inter Tight', 'Geist', system-ui, sans-serif",
         flexDirection: "row",
         opacity: loopFade,
       }}
     >
       {/* Video pane */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 16, gap: 12, minWidth: 0 }}>
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          padding: 16,
+          gap: 12,
+          minWidth: 0,
+          backgroundColor: INK,
+        }}
+      >
         <div
           style={{
             position: "relative",
@@ -209,8 +226,8 @@ function ReviewDemoComposition() {
               letterSpacing: "0.08em",
               padding: "4px 8px",
               borderRadius: 999,
-              backgroundColor: "rgba(255,102,0,0.18)",
-              color: "#ffb380",
+              backgroundColor: ORANGE_TINT,
+              color: ORANGE_DEEP,
               fontFamily: "'Geist Mono', ui-monospace, monospace",
             }}
           >
@@ -240,11 +257,12 @@ function ReviewDemoComposition() {
       <div
         style={{
           width: "37%",
-          borderLeft: "1px solid rgba(255,255,255,0.08)",
+          borderLeft: `1px solid ${LINE}`,
           padding: 16,
           display: "flex",
           flexDirection: "column",
           gap: 12,
+          backgroundColor: PANEL,
         }}
       >
         <CommentCard at={55} name="Matt" time="00:42" text="That's great!" accent />

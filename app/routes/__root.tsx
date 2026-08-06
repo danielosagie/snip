@@ -94,6 +94,8 @@ function RootDocument({ children }: { children: ReactNode }) {
         const storedStyle = localStorage.getItem("snip-style");
         if (storedStyle === "classic" || storedStyle === "soft") {
           document.documentElement.setAttribute("data-style", storedStyle);
+        } else {
+          document.documentElement.setAttribute("data-style", "soft");
         }
         const stored = localStorage.getItem("snip-theme") || localStorage.getItem("lawn-theme");
         if (stored === "light" || stored === "dark") {

@@ -5,12 +5,18 @@ lawn; the upstream repo at `pingdotgg/lawn` is still the origin remote.
 
 ## Design Language
 
-> **Exception — marketing landing page.** `app/routes/-home.tsx` intentionally
-> uses a different, shade.inc-inspired art direction (white background, Inter
-> Tight sentence-case display type with a gray second line, mono `▶ EYEBROW`
-> labels, pill buttons, rounded bento cards, dark rounded CTA panel). Do not
-> "fix" it back to the brutalist language below — that language applies to the
-> app UI and the other marketing pages.
+> **The soft language is now the default** (2026-08-06). The app shell
+> (sidebar, header), billing, team members, settings, trash, the document
+> and contract editor, and the landing page all use the soft system defined
+> in `docs/design/soft-tokens.md` (Paper reference:
+> `docs/design/soft-reference-billing.tsx`): #FAFAFA canvas, white cards
+> with 1px #E8E8EC hairlines, 14px radius, Inter Tight, #FF6600 brand
+> block, #FFF0E6/#D14E00 active-nav tint, pill buttons, Geist Mono 11px
+> column labels. `data-style` defaults to "soft"; "classic" (the brutalist
+> language below) remains selectable from the theme toggle and still owns
+> surfaces that have not been migrated (project file grid, video review
+> page, wizard internals). When touching a migrated surface, follow
+> soft-tokens.md, not the brutalist rules below.
 
 ### Philosophy
 Brutalist, typographic, minimal. The design should feel bold and direct—like a

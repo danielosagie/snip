@@ -8,7 +8,8 @@ import { requireProjectAccess } from "./auth";
  *
  * Architecture:
  *   - Each project has at most one `contractDocs` row holding the full
- *     Yjs document state as a base64-encoded blob.
+ *     Yjs document state as a base64-encoded blob. Multi-document projects
+ *     use one named XML fragment per contracts-table row.
  *   - Clients run Tiptap with the Collaboration extension. Local edits
  *     produce Yjs "updates" (small binary deltas); we ship those to
  *     `appendUpdate`, server merges into the canonical state via
@@ -42,6 +43,10 @@ function base64ToBytes(b64: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+function contractField(contractId: string): string {
+  return `contract:${contractId}`;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────
@@ -88,10 +93,26 @@ export const appendUpdate = mutation({
     projectId: v.id("projects"),
     update: v.string(), // base64-encoded Yjs update
     editorName: v.optional(v.string()),
+    contractId: v.optional(v.id("contracts")),
+    seedIfEmpty: v.optional(v.boolean()),
   },
-  returns: v.object({ ok: v.literal(true), bytes: v.number() }),
+  returns: v.object({
+    ok: v.literal(true),
+    bytes: v.number(),
+    applied: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const { user } = await requireProjectAccess(ctx, args.projectId, "member");
+
+    if (args.contractId) {
+      const contract = await ctx.db.get(args.contractId);
+      if (!contract || contract.projectId !== args.projectId || contract.deletedAt) {
+        throw new Error("Document not found in this project.");
+      }
+      if (contract.status !== "draft") {
+        throw new Error("Only drafts can be edited.");
+      }
+    }
 
     const existing = await ctx.db
       .query("contractDocs")
@@ -103,7 +124,21 @@ export const appendUpdate = mutation({
       try {
         Y.applyUpdate(yDoc, base64ToBytes(existing.yjsState));
       } catch (e) {
-        console.error("Could not load existing Yjs state, starting fresh", e);
+        console.error("Could not load existing Yjs state", e);
+        throw new Error("The collaborative document could not be loaded.");
+      }
+    }
+
+    if (args.seedIfEmpty) {
+      if (!args.contractId) {
+        throw new Error("A document is required for an initial seed.");
+      }
+      if (yDoc.getXmlFragment(contractField(args.contractId)).length > 0) {
+        return {
+          ok: true as const,
+          bytes: existing?.yjsState.length ?? 0,
+          applied: false,
+        };
       }
     }
     Y.applyUpdate(yDoc, base64ToBytes(args.update));
@@ -131,7 +166,43 @@ export const appendUpdate = mutation({
       });
     }
 
-    return { ok: true as const, bytes: merged.length };
+    return { ok: true as const, bytes: merged.length, applied: true };
+  },
+});
+
+/** Clear one contracts-table row's fragment without disturbing the other
+ * documents stored in the same project Y.Doc. Used before a version restore. */
+export const resetItemDoc = mutation({
+  args: {
+    projectId: v.id("projects"),
+    contractId: v.id("contracts"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireProjectAccess(ctx, args.projectId, "member");
+    const contract = await ctx.db.get(args.contractId);
+    if (!contract || contract.projectId !== args.projectId || contract.deletedAt) {
+      throw new Error("Document not found in this project.");
+    }
+    if (contract.status !== "draft") {
+      throw new Error("Only drafts can be restored.");
+    }
+    const existing = await ctx.db
+      .query("contractDocs")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    if (!existing) return null;
+
+    const yDoc = new Y.Doc();
+    Y.applyUpdate(yDoc, base64ToBytes(existing.yjsState));
+    const fragment = yDoc.getXmlFragment(contractField(args.contractId));
+    if (fragment.length === 0) return null;
+    fragment.delete(0, fragment.length);
+    await ctx.db.patch(existing._id, {
+      yjsState: bytesToBase64(Y.encodeStateAsUpdate(yDoc)),
+      lastEditedAt: Date.now(),
+    });
+    return null;
   },
 });
 
@@ -147,6 +218,15 @@ export const resetDoc = mutation({
       .query("contractDocs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
-    if (existing) await ctx.db.delete(existing._id);
+    if (!existing) return;
+    const yDoc = new Y.Doc();
+    Y.applyUpdate(yDoc, base64ToBytes(existing.yjsState));
+    const fragment = yDoc.getXmlFragment("default");
+    if (fragment.length === 0) return;
+    fragment.delete(0, fragment.length);
+    await ctx.db.patch(existing._id, {
+      yjsState: bytesToBase64(Y.encodeStateAsUpdate(yDoc)),
+      lastEditedAt: Date.now(),
+    });
   },
 });
