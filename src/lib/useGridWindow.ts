@@ -176,6 +176,13 @@ export function useGridWindow({
 
     scroller.addEventListener("scroll", schedule, { passive: true });
     window.addEventListener("resize", schedule);
+    // Browsers freeze rAF in a hidden tab, so a scroll that happens while
+    // hidden (restoration, an anchor jump) would leave the window stale until
+    // the next user scroll. Recompute directly the moment we're visible again.
+    const onVisible = () => {
+      if (!document.hidden) update();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     const observer =
       typeof ResizeObserver !== "undefined"
@@ -190,13 +197,14 @@ export function useGridWindow({
     return () => {
       scroller.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
+      document.removeEventListener("visibilitychange", onVisible);
       observer?.disconnect();
       if (frameRef.current !== null) {
         window.cancelAnimationFrame(frameRef.current);
         frameRef.current = null;
       }
     };
-  }, [active, gridRef, measure, schedule, scrollRef]);
+  }, [active, gridRef, measure, schedule, scrollRef, update]);
 
   if (!active) {
     return {

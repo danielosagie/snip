@@ -2,7 +2,7 @@
 import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { DropZone } from "@/components/upload/DropZone";
 import { triggerDownload } from "@/lib/download";
 import { useDriveAutoRefresh } from "@/lib/useDriveAutoRefresh";
@@ -66,10 +66,6 @@ type ShareToastState = {
   message: string;
 };
 
-const SOFT_MENU_CONTENT =
-  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
-const SOFT_MENU_ITEM =
-  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
 const SELECTION_BAR_BUTTON =
   "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] disabled:pointer-events-none disabled:opacity-40";
 

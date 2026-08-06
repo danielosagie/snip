@@ -53,6 +53,12 @@ export default defineSchema({
     // This is the cost floor: encoded copies only materialize on watch
     // (re-encode) or for paywalled external delivery. Absent = "cloud".
     driveFirstStorage: v.optional(v.boolean()),
+    onboarding: v.optional(
+      v.object({
+        makes: v.string(),
+        size: v.string(),
+      })
+    ),
   })
     .index("by_slug", ["slug"])
     .index("by_owner", ["ownerClerkId"])

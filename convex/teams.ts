@@ -211,12 +211,22 @@ export const update = mutation({
   args: {
     teamId: v.id("teams"),
     name: v.optional(v.string()),
+    onboarding: v.optional(
+      v.object({
+        makes: v.string(),
+        size: v.string(),
+      })
+    ),
   },
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "admin");
 
-    const updates: Partial<{ name: string }> = {};
+    const updates: Partial<{
+      name: string;
+      onboarding: { makes: string; size: string };
+    }> = {};
     if (args.name) updates.name = args.name;
+    if (args.onboarding) updates.onboarding = args.onboarding;
 
     await ctx.db.patch(args.teamId, updates);
   },

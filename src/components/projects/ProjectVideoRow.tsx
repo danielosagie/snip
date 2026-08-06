@@ -57,7 +57,10 @@ function ProjectVideoRowImpl({
   const [combineActive, setCombineActive] = useState(false);
   const { rootRef, armed, arm, armFromFocus } =
     useDeferredMenus<HTMLDivElement>();
+  // A click on a not-yet-armed placeholder must both mount the Radix root
+  // and open it, or the first click would silently do nothing.
   const [statusOpen, setStatusOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
     actions.prewarm(videoId, video.muxPlaybackId),
@@ -259,7 +262,7 @@ function ProjectVideoRowImpl({
         {/* Actions */}
         <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
           {armed ? (
-            <DropdownMenu>
+            <DropdownMenu defaultOpen={actionsOpen}>
               <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
@@ -318,6 +321,7 @@ function ProjectVideoRowImpl({
               aria-label="Video actions"
               onClick={(e) => {
                 e.stopPropagation();
+                setActionsOpen(true);
                 arm();
               }}
             >

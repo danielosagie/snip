@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import { SignedIn, SignedOut, UserButton, useUser } from "@clerk/tanstack-react-start";
 import { SnipMark } from "@/components/SnipMark";
 import {
   Apple,
@@ -42,12 +43,22 @@ export default function Homepage() {
               Storage built for people who actually work
             </p>
             <div className="flex flex-wrap items-center gap-3">
-              <Link
-                to="/sign-up"
-                className="rounded-full bg-[#FF6600] px-[22px] py-3.5 text-[15px] font-semibold leading-5 text-white transition-opacity hover:opacity-90"
-              >
-                Start free
-              </Link>
+              <SignedOut>
+                <Link
+                  to="/sign-up"
+                  className="rounded-full bg-[#FF6600] px-[22px] py-3.5 text-[15px] font-semibold leading-5 text-white transition-opacity hover:opacity-90"
+                >
+                  Start free
+                </Link>
+              </SignedOut>
+              <SignedIn>
+                <Link
+                  to="/dashboard"
+                  className="rounded-full bg-[#FF6600] px-[22px] py-3.5 text-[15px] font-semibold leading-5 text-white transition-opacity hover:opacity-90"
+                >
+                  Open snip
+                </Link>
+              </SignedIn>
               <a
                 href="/downloads/snip-desktop.dmg"
                 className="flex items-center gap-1.5 rounded-full border border-[#D7D7D2] bg-white px-[21px] py-[13px] text-[15px] font-semibold leading-5 text-black transition-colors hover:bg-[#FAFAFA]"
@@ -349,18 +360,70 @@ function TopNav() {
             Download
           </a>
         </nav>
-        <div className="ml-auto flex items-center gap-5">
-          <Link to="/sign-in" className="text-[14px] leading-5 text-[#6E6E73] transition-colors hover:text-[#131315]">
-            Log in
-          </Link>
-          <Link
-            to="/sign-up"
-            className="flex items-center justify-center rounded-full bg-[#131315] px-4 py-2 text-[14px] font-medium leading-5 text-white transition-opacity hover:opacity-90"
-          >
-            Start for free
-          </Link>
-        </div>
+        <NavAuth />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Nav right side. Signed out it sells; signed in it greets you by name and
+ * hands over the Clerk account menu, so coming back to the marketing page
+ * never asks you to sign up for something you already have.
+ */
+function NavAuth() {
+  const { user } = useUser();
+  const firstName = user?.firstName || user?.username || "Account";
+
+  return (
+    <div className="ml-auto flex items-center gap-4">
+      <SignedOut>
+        <Link
+          to="/sign-in"
+          className="text-[14px] leading-5 text-[#6E6E73] transition-colors hover:text-[#131315]"
+        >
+          Log in
+        </Link>
+        <Link
+          to="/sign-up"
+          className="flex items-center justify-center rounded-full bg-[#131315] px-4 py-2 text-[14px] font-medium leading-5 text-white transition-opacity hover:opacity-90"
+        >
+          Start for free
+        </Link>
+      </SignedOut>
+      <SignedIn>
+        <Link
+          to="/dashboard"
+          className="hidden text-[14px] leading-5 text-[#6E6E73] transition-colors hover:text-[#131315] sm:block"
+        >
+          Dashboard
+        </Link>
+        <span className="hidden text-[14px] font-medium leading-5 text-[#131315] sm:block">
+          {firstName}
+        </span>
+        <UserButton
+          appearance={{
+            variables: {
+              colorText: "#131315",
+              colorTextSecondary: "#6E6E73",
+              colorBackground: "#FFFFFF",
+              colorNeutral: "#E8E8EC",
+            },
+            elements: {
+              avatarBox: "w-8 h-8 rounded-full border border-[#E8E8EC]",
+              userButtonPopoverCard:
+                "bg-white border border-[#E8E8EC] rounded-[14px] shadow-[0_8px_24px_rgba(19,19,21,0.10)]",
+              userButtonPopoverActionButton:
+                "!text-[#131315] hover:!bg-[#F1F1F3] rounded-[10px]",
+              userButtonPopoverActionButtonText:
+                "!text-[#131315] hover:!text-[#131315] font-sans font-medium",
+              userButtonPopoverActionButtonIcon:
+                "!text-[#6E6E73] hover:!text-[#131315]",
+              userButtonPopoverFooter: "hidden",
+            },
+          }}
+        />
+      </SignedIn>
     </div>
   );
 }

@@ -319,6 +319,12 @@ export default function TeamSettingsPage() {
                 )}
               </div>
             )}
+            {team.onboarding ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <SoftPill>{team.onboarding.makes}</SoftPill>
+                <SoftPill>{team.onboarding.size}</SoftPill>
+              </div>
+            ) : null}
             <p className={cn(softHelperText, "mt-3 break-all")}>
               {typeof window !== "undefined"
                 ? `${window.location.origin}${teamHomePath(team.slug)}`

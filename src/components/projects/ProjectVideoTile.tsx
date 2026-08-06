@@ -69,7 +69,10 @@ function ProjectVideoTileImpl({
   const [combineActive, setCombineActive] = useState(false);
   const { rootRef, armed, arm, armFromFocus } =
     useDeferredMenus<HTMLDivElement>();
+  // A click on a not-yet-armed placeholder must both mount the Radix root
+  // and open it, or the first click would silently do nothing.
   const [statusOpen, setStatusOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   const prewarmIntentHandlers = useRoutePrewarmIntent(() =>
     actions.prewarm(videoId, video.muxPlaybackId),
@@ -223,7 +226,7 @@ function ProjectVideoTileImpl({
           {/* Hover menu — the Radix root only exists once the tile is armed. */}
           <div className="absolute top-2 right-2 z-40 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
             {armed ? (
-              <DropdownMenu>
+              <DropdownMenu defaultOpen={actionsOpen}>
                 <DropdownMenuTrigger
                   asChild
                   onClick={(e) => e.stopPropagation()}
@@ -285,6 +288,7 @@ function ProjectVideoTileImpl({
                 aria-label="Video actions"
                 onClick={(e) => {
                   e.stopPropagation();
+                  setActionsOpen(true);
                   arm();
                 }}
               >
