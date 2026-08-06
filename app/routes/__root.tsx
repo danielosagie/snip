@@ -88,23 +88,6 @@ function AppShell({ children }: { children: ReactNode }) {
 }
 
 function RootDocument({ children }: { children: ReactNode }) {
-  // Clerk production keys are pinned to snip.film, so the app is broken on
-  // any other host: clerk.snip.film 400s the request and every signed-in
-  // surface fails (taking hydration down with it). Bounce to the canonical
-  // domain before Clerk loads rather than leaving a half-dead page up.
-  const canonicalHostScript = `
-    (() => {
-      try {
-        const host = window.location.hostname;
-        if (host.endsWith(".vercel.app")) {
-          window.location.replace(
-            "https://www.snip.film" + window.location.pathname +
-            window.location.search + window.location.hash
-          );
-        }
-      } catch {}
-    })();
-  `;
   const themeInitScript = `
     (() => {
       try {
@@ -129,7 +112,11 @@ function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: canonicalHostScript }} />
+        {/* Canonical-host enforcement is a server-side redirect in
+            vercel.json (snipfilm.vercel.app -> www.snip.film). It must NOT
+            be a client script: the desktop shell's will-navigate guard
+            cancels JS navigation to a foreign origin, which blanked the
+            whole app window. HTTP redirects during load bypass that guard. */}
         <HeadContent />
       </head>
       <body className="h-full antialiased" suppressHydrationWarning>

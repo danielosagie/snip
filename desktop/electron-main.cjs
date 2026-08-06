@@ -14,7 +14,7 @@ const zlib = require("node:zlib");
 // exactly like the browser) and exposes native capabilities (mount, file
 // open/reveal, auto-update) to it via the preload bridge. No separate desktop
 // UI to maintain. Override with SNIP_WEB_URL for staging / local web dev.
-const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://snipfilm.vercel.app").replace(/\/$/, "");
+const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://www.snip.film").replace(/\/$/, "");
 
 const SETTINGS_DIR = path.join(app.getPath("userData"));
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
@@ -3144,9 +3144,18 @@ function createWindow() {
   // Keep the window on our web app. External links (Stripe, docs, OAuth popups
   // we don't host) open in the user's real browser instead of navigating the
   // app shell away — which would also strip the native bridge.
+  // Both the canonical domain and the legacy vercel.app host count as
+  // "ours": older installs still load the legacy URL, and the server now
+  // 307s it to www.snip.film. Treating either as foreign would cancel the
+  // hop and strand the window on a blank page.
+  const OUR_ORIGINS = new Set([
+    new URL(WEB_APP_URL).origin,
+    "https://www.snip.film",
+    "https://snipfilm.vercel.app",
+  ]);
   const isOurApp = (url) => {
     try {
-      return new URL(url).origin === new URL(WEB_APP_URL).origin;
+      return OUR_ORIGINS.has(new URL(url).origin);
     } catch {
       return false;
     }
