@@ -82,6 +82,7 @@ export class BrowserPlaybackController implements PlaybackController {
   private modeValue: PlaybackMode = "webcodecs";
   private metadata: PlaybackMetadata | null = null;
   private fallbackCleanup: (() => void) | null = null;
+  private fallbackRecovery: Promise<void> | null = null;
 
   constructor(private readonly outputs: PlaybackOutputs) {
     outputs.fallbackVideo.preload = "metadata";
@@ -350,7 +351,7 @@ export class BrowserPlaybackController implements PlaybackController {
         .then(() => {
           if (generation === this.generation) this.pumpDecoder();
         })
-        .catch((error) => void this.recoverWithFallback(error))
+        .catch((error) => this.recoverWithFallback(error))
         .finally(() => {
           this.pendingGop = null;
         });
@@ -451,7 +452,11 @@ export class BrowserPlaybackController implements PlaybackController {
     if (!config) throw new Error("The WebCodecs decoder is not configured.");
     this.decoder = new VideoDecoder({
       output: (frame) => this.handleDecodedFrame(frame),
-      error: (error) => void this.recoverWithFallback(error),
+      error: (error) => {
+        void this.recoverWithFallback(error).catch((fallbackError) => {
+          this.emit("error", { error: asError(fallbackError) });
+        });
+      },
     });
     this.decoder.configure(config);
   }
@@ -609,14 +614,25 @@ export class BrowserPlaybackController implements PlaybackController {
   }
 
   private async recoverWithFallback(error: unknown): Promise<void> {
+    if (this.fallbackRecovery) return await this.fallbackRecovery;
     if (this.modeValue === "video" || !this.source || this.destroyed) return;
-    const wasPlaying = this.playing;
-    const time = this.currentTimeValue;
-    const source = this.source;
-    this.emit("error", { error: asError(error) });
-    await this.activateFallback(source, asError(error).message);
-    await this.seekFallback(time);
-    if (wasPlaying) await this.outputs.fallbackVideo.play();
+
+    const recovery = (async () => {
+      const wasPlaying = this.playing;
+      const time = this.currentTimeValue;
+      const source = this.source;
+      if (!source) return;
+      this.emit("error", { error: asError(error) });
+      await this.activateFallback(source, asError(error).message);
+      await this.seekFallback(time);
+      if (wasPlaying) await this.outputs.fallbackVideo.play();
+    })();
+    this.fallbackRecovery = recovery;
+    try {
+      await recovery;
+    } finally {
+      if (this.fallbackRecovery === recovery) this.fallbackRecovery = null;
+    }
   }
 
   private setMode(mode: PlaybackMode, reason?: string): void {
@@ -683,6 +699,7 @@ export class BrowserPlaybackController implements PlaybackController {
     this.currentTimeValue = 0;
     this.durationValue = 0;
     this.waiting = false;
+    this.fallbackRecovery = null;
     this.fallbackCleanup?.();
     this.fallbackCleanup = null;
     this.outputs.fallbackVideo.pause();
