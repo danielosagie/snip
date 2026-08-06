@@ -1590,17 +1590,15 @@ export default function ProjectPage({
                 them as the project's organizational/metadata strip.
                 Hidden when empty AND the viewer can't create one. */}
             {currentFolderId === null && (
-              <div className="[&_section>div>div:first-child>div]:!text-[11px] [&_section>div>div:first-child>div]:!font-medium [&_section>div>div:first-child>div]:!tracking-widest [&_section>div>div:first-child>div]:!text-[#A0A0A5]">
-                <ContractListSection
-                  projectId={project._id}
-                  teamSlug={resolvedTeamSlug}
-                  items={contractDocuments}
-                  search={search}
-                  selectedIds={selectedContractIds}
-                  selectionMode={selectionMode}
-                  onSelectToggle={handleContractSelectionToggle}
-                />
-              </div>
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                items={contractDocuments}
+                search={search}
+                selectedIds={selectedContractIds}
+                selectionMode={selectionMode}
+                onSelectToggle={handleContractSelectionToggle}
+              />
             )}
             <div className="px-6 pt-4 pb-6">
               {(filteredFolders?.length ?? 0) > 0 ? (
@@ -1897,17 +1895,15 @@ export default function ProjectPage({
               onRenameConsumed={() => setRenameFolderId(null)}
             />
             {currentFolderId === null && (
-              <div className="[&_section>div>div:first-child>div]:!text-[11px] [&_section>div>div:first-child>div]:!font-medium [&_section>div>div:first-child>div]:!tracking-widest [&_section>div>div:first-child>div]:!text-[#A0A0A5]">
-                <ContractListSection
-                  projectId={project._id}
-                  teamSlug={resolvedTeamSlug}
-                  items={contractDocuments}
-                  search={search}
-                  selectedIds={selectedContractIds}
-                  selectionMode={selectionMode}
-                  onSelectToggle={handleContractSelectionToggle}
-                />
-              </div>
+              <ContractListSection
+                projectId={project._id}
+                teamSlug={resolvedTeamSlug}
+                items={contractDocuments}
+                search={search}
+                selectedIds={selectedContractIds}
+                selectionMode={selectionMode}
+                onSelectToggle={handleContractSelectionToggle}
+              />
             )}
             <div className="bg-white">
             {filteredVideos?.map((video) => {

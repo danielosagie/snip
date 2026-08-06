@@ -35,12 +35,12 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  draft: "border-[#888] text-[#888]",
-  pending: "border-[#C2410C] text-[#C2410C] bg-[#FFEDD5]",
-  completed: "border-[#16a34a] text-[#16a34a]",
-  declined: "border-[#dc2626] text-[#dc2626]",
-  voided: "border-[#888] text-[#888] line-through",
-  expired: "border-[#888] text-[#888]",
+  draft: "bg-[#F1F1F3] text-[#6E6E73]",
+  pending: "bg-[#FFF0E6] text-[#D14E00]",
+  completed: "bg-[#F2FBF5] text-[#225B36]",
+  declined: "bg-[#FFF5F5] text-[#8A2B34]",
+  voided: "bg-[#F1F1F3] text-[#6E6E73] line-through",
+  expired: "bg-[#F1F1F3] text-[#6E6E73]",
 };
 
 /**
@@ -94,7 +94,7 @@ export function ContractListSection({
       {/* ── Contracts — signing lifecycle lives here ─────────────── */}
       <div className="order-2">
         <div className="flex items-center justify-between mb-2">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <div className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             Contracts
           </div>
         </div>
@@ -114,20 +114,20 @@ export function ContractListSection({
                   }
                 }}
                 className={cn(
-                  "group flex min-h-12 items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-[background-color,box-shadow] w-full min-w-0",
-                  selectedIds?.has(c._id) && "bg-[#fff1e8] shadow-[inset_0_0_0_2px_#FF6600]",
+                  "group flex min-h-12 w-full min-w-0 cursor-pointer items-center gap-2 rounded-[12px] border border-[#E8E8EC] bg-white px-3 py-2 transition-[background-color,border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm",
+                  selectedIds?.has(c._id) && "shadow-[inset_0_0_0_1.5px_#FF6600]",
                 )}
               >
                 {selectionMode ? <SelectionBox selected={Boolean(selectedIds?.has(c._id))} /> : null}
                 <FileSignature
-                  className="h-5 w-5 flex-shrink-0 text-[#888]"
+                  className="h-5 w-5 flex-shrink-0 text-[#6E6E73]"
                   strokeWidth={1.75}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
+                  <div className="truncate text-sm font-medium text-[#131315]">
                     {c.title}
                   </div>
-                  <div className="text-[10px] font-mono text-[#888] truncate">
+                  <div className="truncate font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
                     {c.recipientCount > 0
                       ? `${c.signedCount}/${c.recipientCount} signed`
                       : KIND_LABELS[c.kind] ?? c.kind}
@@ -135,7 +135,7 @@ export function ContractListSection({
                 </div>
                 <span
                   className={cn(
-                    "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
+                    "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
                     STATUS_STYLES[c.status] ?? STATUS_STYLES.draft,
                   )}
                 >
@@ -152,7 +152,7 @@ export function ContractListSection({
             ))}
           </div>
         ) : (
-          <div className="text-[11px] font-mono text-[#888] italic">
+          <div className="text-[13px] text-[#A0A0A5]">
             No contracts yet.
           </div>
         )}
@@ -161,7 +161,7 @@ export function ContractListSection({
       {/* Documents are the default project writing surface. */}
       <div className="order-1">
         <div className="flex items-center justify-between mb-2">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <div className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             Documents
           </div>
         </div>
@@ -181,20 +181,20 @@ export function ContractListSection({
                   }
                 }}
                 className={cn(
-                  "group flex min-h-12 items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-[background-color,box-shadow] w-full min-w-0",
-                  selectedIds?.has(d._id) && "bg-[#fff1e8] shadow-[inset_0_0_0_2px_#FF6600]",
+                  "group flex min-h-12 w-full min-w-0 cursor-pointer items-center gap-2 rounded-[12px] border border-[#E8E8EC] bg-white px-3 py-2 transition-[background-color,border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm",
+                  selectedIds?.has(d._id) && "shadow-[inset_0_0_0_1.5px_#FF6600]",
                 )}
               >
                 {selectionMode ? <SelectionBox selected={Boolean(selectedIds?.has(d._id))} /> : null}
                 <FileText
-                  className="h-5 w-5 flex-shrink-0 text-[#888]"
+                  className="h-5 w-5 flex-shrink-0 text-[#6E6E73]"
                   strokeWidth={1.75}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
+                  <div className="truncate text-sm font-medium text-[#131315]">
                     {d.title}
                   </div>
-                  <div className="text-[10px] font-mono text-[#888] truncate">
+                  <div className="truncate font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
                     Document
                   </div>
                 </div>
@@ -202,7 +202,7 @@ export function ContractListSection({
             ))}
           </div>
         ) : (
-          <div className="text-[11px] font-mono text-[#888] italic">
+          <div className="text-[13px] text-[#A0A0A5]">
             No documents yet.
           </div>
         )}
@@ -216,8 +216,8 @@ function SelectionBox({ selected }: { selected: boolean }) {
     <span
       aria-hidden="true"
       className={cn(
-        "flex h-5 w-5 shrink-0 items-center justify-center border-2 border-[#1a1a1a]",
-        selected ? "bg-[#FF6600] text-[#f0f0e8]" : "bg-[#f0f0e8]",
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+        selected ? "bg-[#FF6600] text-white" : "border border-[#D8D8DE] bg-white text-transparent",
       )}
     >
       {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
