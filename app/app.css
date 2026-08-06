@@ -714,3 +714,28 @@ body {
   border-radius: 10px;
   border-width: 1px;
 }
+
+/* Escape hatch for an input that sits INSIDE an already-styled field
+   wrapper (search box, chip input). Without this the rules above draw a
+   second border inside the wrapper's, and the UA focus ring lands on the
+   input instead of the wrapper. The wrapper owns the border and the
+   focus-within affordance; the input owns nothing. */
+input.field-bare,
+.surface-soft input.field-bare,
+[data-style="soft"] input.field-bare {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* The wrapper that owns the border and the focus affordance for a
+   `field-bare` input. Written here rather than as Tailwind
+   focus-within: utilities because those live in @layer utilities and
+   lose to this file's unlayered rules — and any `shadow-[...]` class
+   gets overwritten by the soft drop-shadow remap above. */
+.field-shell:focus-within {
+  border-color: #ff6600 !important;
+  box-shadow: 0 0 0 3px rgba(255, 102, 0, 0.12) !important;
+}

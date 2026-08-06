@@ -290,7 +290,7 @@ export function CommandSearch({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search files, documents, comments, projects…"
-            className="flex-1 bg-transparent outline-none text-base placeholder:text-[#888]"
+            className="field-bare flex-1 text-base placeholder:text-[#888]"
           />
           <kbd className="text-[10px] font-mono font-bold px-1.5 py-0.5 border border-[#1a1a1a] bg-[#e8e8e0]">
             esc

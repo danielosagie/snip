@@ -190,13 +190,13 @@ export function ProjectToolbar({
         )}
       >
         <div className="flex items-center gap-1.5 flex-1 min-w-0 sm:gap-2">
-          <label className="flex min-h-11 max-w-md flex-1 items-center gap-2 rounded-[10px] border border-[#E8E8EC] bg-white px-3 sm:min-h-9">
+          <label className="field-shell flex min-h-11 max-w-md flex-1 items-center gap-2 rounded-[10px] border border-[#E8E8EC] bg-white px-3 transition-[border-color,box-shadow] sm:min-h-9">
             <Search className="h-4 w-4 text-[#A0A0A5]" />
             <input
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search this folder"
-              className="min-w-0 flex-1 bg-transparent text-[13px] text-[#131315] outline-none placeholder:text-[#A0A0A5]"
+              className="field-bare min-w-0 flex-1 text-[13px] text-[#131315] placeholder:text-[#A0A0A5]"
               aria-label="Search files and folders"
             />
             {search ? (
