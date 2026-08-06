@@ -16,6 +16,7 @@ import {
   issueShareAccessGrant,
   type ShareRole,
 } from "./shareAccess";
+import { resolveBundleVideos } from "./shareBundles";
 
 const shareLinkStatusValidator = v.union(
   v.literal("missing"),
@@ -34,6 +35,181 @@ const shareRoleValidator = v.union(
   v.literal("commenter"),
   v.literal("editor"),
 );
+
+type ShareCoverKind = "video" | "image" | "document";
+
+function shareCoverKind(video: Doc<"videos">): ShareCoverKind {
+  const contentType = video.contentType?.toLowerCase() ?? "";
+  if (contentType.startsWith("video/") || video.muxPlaybackId) return "video";
+  if (contentType.startsWith("image/")) return "image";
+  return "document";
+}
+
+function hasUsableShareCover(video: Doc<"videos">): boolean {
+  if (video.status !== "ready") return false;
+  const kind = shareCoverKind(video);
+  if (kind === "video") {
+    return Boolean(
+      video.muxPreviewPlaybackId || video.muxPlaybackId || video.thumbnailUrl,
+    );
+  }
+  if (kind === "image") {
+    return Boolean(
+      video.imagePreviewS3Key || video.s3Key || video.thumbnailUrl,
+    );
+  }
+  return Boolean(video.thumbnailUrl);
+}
+
+const SHARE_COVER_KIND_PRIORITY: Record<ShareCoverKind, number> = {
+  video: 0,
+  image: 1,
+  document: 2,
+};
+
+function compareShareCoverItems(
+  left: Doc<"videos">,
+  right: Doc<"videos">,
+): number {
+  const kindDifference =
+    SHARE_COVER_KIND_PRIORITY[shareCoverKind(left)] -
+    SHARE_COVER_KIND_PRIORITY[shareCoverKind(right)];
+  if (kindDifference !== 0) return kindDifference;
+  if (left._creationTime !== right._creationTime) {
+    return left._creationTime - right._creationTime;
+  }
+  return left._id.localeCompare(right._id);
+}
+
+/**
+ * Single source of truth for cover selection. An explicit cover wins while it
+ * remains in the share. Automatic covers prefer video, then image, then
+ * document, with immutable Convex creation time and id as stable tie-breakers.
+ */
+function resolveShareCover(
+  videos: Doc<"videos">[],
+  coverVideoId?: Id<"videos">,
+): Doc<"videos"> | null {
+  if (coverVideoId) {
+    const explicit = videos.find((video) => video._id === coverVideoId);
+    if (explicit) return explicit;
+  }
+  return videos
+    .filter(hasUsableShareCover)
+    .sort(compareShareCoverItems)[0] ?? null;
+}
+
+const COVER_STRIP_LIMIT = 24;
+
+/**
+ * Deterministic strip order, chosen cover first, capped at
+ * COVER_STRIP_LIMIT so a huge folder cannot flood the picker or the
+ * unfurl payload (the cover always survives the cap because it sorts
+ * first). Every caller inherits the bound by construction.
+ */
+function orderShareCoverItems(
+  videos: Doc<"videos">[],
+  coverVideoId?: Id<"videos">,
+): Doc<"videos">[] {
+  const cover = resolveShareCover(videos, coverVideoId);
+  const ordered = [...videos].sort(compareShareCoverItems);
+  const withCoverFirst = cover
+    ? [cover, ...ordered.filter((video) => video._id !== cover._id)]
+    : ordered;
+  return withCoverFirst.slice(0, COVER_STRIP_LIMIT);
+}
+
+function serializeShareCoverItem(video: Doc<"videos">) {
+  return {
+    _id: video._id,
+    title: video.title,
+    kind: shareCoverKind(video),
+    contentType: video.contentType ?? null,
+    thumbnailUrl: video.thumbnailUrl ?? null,
+    s3Key: video.s3Key ?? null,
+    muxPlaybackId: video.muxPlaybackId ?? null,
+    muxPreviewAssetId: video.muxPreviewAssetId ?? null,
+    muxPreviewPlaybackId: video.muxPreviewPlaybackId ?? null,
+    muxPreviewReady: video.muxPreviewAssetStatus === "ready",
+    imagePreviewS3Key: video.imagePreviewS3Key ?? null,
+    imagePreviewReady: video.imagePreviewStatus === "ready",
+  };
+}
+
+async function resolveFolderCoverVideos(
+  ctx: QueryCtx | MutationCtx,
+  folderId: Id<"folders">,
+): Promise<Doc<"videos">[]> {
+  const folder = await ctx.db.get(folderId);
+  if (!folder) throw new Error("Folder not found");
+  await requireProjectAccess(ctx, folder.projectId);
+
+  const visited = new Set<string>([folderId]);
+  const queue: Id<"folders">[] = [folderId];
+  const videos: Doc<"videos">[] = [];
+  // Tripwire, not a target: covers only need the first deterministic
+  // handful of items. A drive-synced .app bundle can hold hundreds of
+  // nested folders; walking all of them costs real queries and once froze
+  // the share dialog rendering the result.
+  const MAX_COVER_VIDEOS = 60;
+  const MAX_COVER_FOLDERS = 120;
+  let visitedFolders = 0;
+  while (queue.length > 0) {
+    if (videos.length >= MAX_COVER_VIDEOS || visitedFolders >= MAX_COVER_FOLDERS) break;
+    visitedFolders += 1;
+    const currentFolderId = queue.shift()!;
+    const [children, folderVideos] = await Promise.all([
+      ctx.db
+        .query("folders")
+        .withIndex("by_project_and_parent", (q) =>
+          q
+            .eq("projectId", folder.projectId)
+            .eq("parentFolderId", currentFolderId),
+        )
+        .collect(),
+      ctx.db
+        .query("videos")
+        .withIndex("by_folder", (q) => q.eq("folderId", currentFolderId))
+        .collect(),
+    ]);
+    videos.push(
+      ...folderVideos.filter(
+        (video) => !video.deletedAt && video.isCurrentVersion !== false,
+      ),
+    );
+    for (const child of children) {
+      if (visited.has(child._id)) continue;
+      visited.add(child._id);
+      queue.push(child._id);
+    }
+  }
+  return videos;
+}
+
+async function validateCoverForTarget(
+  ctx: QueryCtx | MutationCtx,
+  target: {
+    videoId?: Id<"videos">;
+    bundleId?: Id<"shareBundles">;
+  },
+  coverVideoId: Id<"videos">,
+) {
+  if (target.videoId) {
+    if (target.videoId !== coverVideoId) {
+      throw new Error("Cover must be the shared item.");
+    }
+    const video = await ctx.db.get(coverVideoId);
+    if (!video || video.deletedAt) throw new Error("Cover item not found.");
+    return;
+  }
+  if (!target.bundleId) throw new Error("Share link has no target");
+  const bundle = await ctx.db.get(target.bundleId);
+  if (!bundle) throw new Error("Bundle not found");
+  const videos = await resolveBundleVideos(ctx, bundle);
+  if (!videos.some((video) => video._id === coverVideoId)) {
+    throw new Error("Cover must belong to the shared bundle.");
+  }
+}
 
 /**
  * Resolves whether the current viewer may open a link and at what role.
@@ -247,6 +423,7 @@ export const create = mutation({
     // let us express XOR at the schema layer.
     videoId: v.optional(v.id("videos")),
     bundleId: v.optional(v.id("shareBundles")),
+    coverVideoId: v.optional(v.id("videos")),
     expiresInDays: v.optional(v.number()),
     allowDownload: v.optional(v.boolean()),
     password: v.optional(v.string()),
@@ -272,16 +449,31 @@ export const create = mutation({
 
       let creatorSubject: string;
       let creatorName: string;
+      let shareItems: Doc<"videos">[];
       if (args.videoId) {
-        const { user } = await requireVideoAccess(ctx, args.videoId, "member");
+        const { user, video } = await requireVideoAccess(
+          ctx,
+          args.videoId,
+          "member",
+        );
         creatorSubject = user.subject;
         creatorName = identityName(user);
+        shareItems = [video];
       } else {
         const bundle = await ctx.db.get(args.bundleId!);
         if (!bundle) throw new Error("Bundle not found");
         const { user } = await requireProjectAccess(ctx, bundle.projectId, "member");
         creatorSubject = user.subject;
         creatorName = identityName(user);
+        shareItems = await resolveBundleVideos(ctx, bundle);
+      }
+
+      if (args.coverVideoId) {
+        await validateCoverForTarget(
+          ctx,
+          { videoId: args.videoId, bundleId: args.bundleId },
+          args.coverVideoId,
+        );
       }
 
       const token = await generateShareToken(ctx);
@@ -302,6 +494,7 @@ export const create = mutation({
       const shareLinkId = await ctx.db.insert("shareLinks", {
         videoId: args.videoId,
         bundleId: args.bundleId,
+        coverVideoId: args.coverVideoId,
         token,
         createdByClerkId: creatorSubject,
         createdByName: creatorName,
@@ -321,35 +514,40 @@ export const create = mutation({
         showAllVersions: args.showAllVersions ?? false,
       });
 
-      // Paywalled links need their watermarked preview pre-baked so the first
-      // client view is instant instead of waiting on generation. Videos get a
-      // Mux 360p preview asset; still images get a sharp-rendered webp; GIFs
-      // are served live (original + CSS overlay) so we skip generation for
-      // them entirely. Bundle links defer to first-view (arbitrary contents).
-      if (paywall && args.videoId) {
-        const item = await ctx.db.get(args.videoId);
+      // The first six deterministic collage items include the cover and are
+      // enough for either supported grid. Video preview generation is generic
+      // and idempotent, so warming it here also makes ordinary video shares
+      // eligible for private-safe rich unfurls. Paid single-image shares and
+      // every bundle image need a per-link rendered preview for the crawler.
+      const previewItems = orderShareCoverItems(
+        shareItems,
+        args.coverVideoId,
+      ).slice(0, 6);
+      for (const item of previewItems) {
         const ct = (item?.contentType ?? "").toLowerCase();
-        if (ct.startsWith("image/")) {
-          if (ct !== "image/gif") {
-            await ctx.scheduler.runAfter(
-              0,
-              internal.imagePreview.generateForVideoItem,
-              {
-                videoId: args.videoId,
-                shareLinkId,
-                primaryLabel:
-                  args.clientEmail ??
-                  args.clientLabel ??
-                  `share/${shareLinkId.toString().slice(-8)}`,
-                secondaryLabel: "PREVIEW — DO NOT REDISTRIBUTE",
-              },
-            );
-          }
-        } else {
+        if (ct.startsWith("video/")) {
           await ctx.scheduler.runAfter(
             0,
             internal.videoActions.ensurePreviewAssetForVideo,
-            { videoId: args.videoId },
+            { videoId: item._id },
+          );
+        } else if (
+          (paywall || args.bundleId) &&
+          ct.startsWith("image/") &&
+          ct !== "image/gif"
+        ) {
+          await ctx.scheduler.runAfter(
+            0,
+            internal.imagePreview.generateForVideoItem,
+            {
+              videoId: item._id,
+              shareLinkId,
+              primaryLabel:
+                args.clientEmail ??
+                args.clientLabel ??
+                `share/${shareLinkId.toString().slice(-8)}`,
+              secondaryLabel: "Preview. Do not redistribute.",
+            },
           );
         }
       }
@@ -362,6 +560,7 @@ export const create = mutation({
       console.error("shareLinks.create failed", {
         videoId: args.videoId,
         bundleId: args.bundleId,
+        coverVideoId: args.coverVideoId,
         hasPassword: Boolean(args.password),
         hasPaywall: Boolean(args.paywall),
         hasClientEmail: Boolean(args.clientEmail),
@@ -388,6 +587,7 @@ export const list = query({
       _id: link._id,
       _creationTime: link._creationTime,
       videoId: link.videoId,
+      coverVideoId: link.coverVideoId ?? null,
       token: link.token,
       createdByClerkId: link.createdByClerkId,
       createdByName: link.createdByName,
@@ -444,6 +644,7 @@ export const listForFolder = query({
         _id: link._id,
         _creationTime: link._creationTime,
         bundleId: link.bundleId ?? null,
+        coverVideoId: link.coverVideoId ?? null,
         token: link.token,
         createdByName: link.createdByName,
         expiresAt: link.expiresAt,
@@ -499,6 +700,7 @@ export const getInternal = internalQuery({
       _id: link._id,
       videoId: link.videoId ?? null,
       bundleId: link.bundleId ?? null,
+      coverVideoId: link.coverVideoId ?? null,
       token: link.token,
       paywall: link.paywall ?? null,
       clientEmail: link.clientEmail ?? null,
@@ -513,6 +715,7 @@ export const update = mutation({
     expiresInDays: v.optional(v.union(v.number(), v.null())),
     allowDownload: v.optional(v.boolean()),
     password: v.optional(v.union(v.string(), v.null())),
+    coverVideoId: v.optional(v.union(v.id("videos"), v.null())),
   },
   handler: async (ctx, args) => {
     const link = await ctx.db.get(args.linkId);
@@ -538,6 +741,17 @@ export const update = mutation({
 
     if (args.allowDownload !== undefined) {
       updates.allowDownload = args.allowDownload;
+    }
+
+    if (args.coverVideoId !== undefined) {
+      if (args.coverVideoId) {
+        await validateCoverForTarget(
+          ctx,
+          { videoId: link.videoId, bundleId: link.bundleId },
+          args.coverVideoId,
+        );
+      }
+      updates.coverVideoId = args.coverVideoId ?? undefined;
     }
 
     if (args.password !== undefined) {
@@ -661,49 +875,121 @@ export const getUnfurlByToken = query({
 });
 
 /**
- * Media fields for a link-unfurl preview image. Same privacy gate as
- * getUnfurlByToken (anyone-access, no password, not expired) so a leaked URL
- * can't expose a frame of a private video in a chat preview. Internal-only —
- * the playback ids are surfaced just so a signing action can mint a thumbnail
- * token; `previewPlaybackId` is a SIGNED id (useless without the token), and
- * the caller never returns a clean frame for a paywalled share.
+ * Authenticated media source for the three share composers. The browser never
+ * reimplements cover resolution: it receives the deterministic server choice
+ * plus the same ordered item records used by getUnfurlMedia.
+ */
+export const getCoverPickerMedia = internalQuery({
+  args: {
+    videoId: v.optional(v.id("videos")),
+    bundleId: v.optional(v.id("shareBundles")),
+    folderId: v.optional(v.id("folders")),
+    videoIds: v.optional(v.array(v.id("videos"))),
+    coverVideoId: v.optional(v.id("videos")),
+  },
+  handler: async (ctx, args) => {
+    const sourceCount = [
+      args.videoId,
+      args.bundleId,
+      args.folderId,
+      args.videoIds,
+    ].filter((value) => value !== undefined).length;
+    if (sourceCount !== 1) {
+      throw new Error("Cover picker requires exactly one share source.");
+    }
+
+    let videos: Doc<"videos">[];
+    if (args.videoId) {
+      const { video } = await requireVideoAccess(ctx, args.videoId, "member");
+      videos = video.deletedAt ? [] : [video];
+    } else if (args.bundleId) {
+      const bundle = await ctx.db.get(args.bundleId);
+      if (!bundle) throw new Error("Bundle not found");
+      await requireProjectAccess(ctx, bundle.projectId, "member");
+      videos = await resolveBundleVideos(ctx, bundle);
+    } else if (args.folderId) {
+      videos = await resolveFolderCoverVideos(ctx, args.folderId);
+    } else {
+      const videoIds = args.videoIds ?? [];
+      if (videoIds.length === 0 || videoIds.length > 200) {
+        throw new Error("Cover picker requires 1 to 200 items.");
+      }
+      const resolved = await Promise.all(
+        videoIds.map(async (videoId) => {
+          const { video } = await requireVideoAccess(ctx, videoId, "member");
+          return video;
+        }),
+      );
+      const projectIds = new Set(resolved.map((video) => video.projectId));
+      if (projectIds.size !== 1) {
+        throw new Error("All cover items must belong to the same project.");
+      }
+      videos = resolved.filter((video) => !video.deletedAt);
+    }
+
+    const resolvedCover = resolveShareCover(videos, args.coverVideoId);
+    return {
+      resolvedCoverVideoId: resolvedCover?._id ?? null,
+      items: orderShareCoverItems(videos, args.coverVideoId).map(
+        serializeShareCoverItem,
+      ),
+    };
+  },
+});
+
+/**
+ * Privacy-gated media source for all share unfurls and the collage HTTP action.
+ * Password and invite links return before title or media resolution. The
+ * internal item fields are used only to mint safe signed URLs or inline image
+ * bytes; they are never returned directly to a crawler.
  */
 export const getUnfurlMedia = internalQuery({
   args: { token: v.string() },
-  returns: v.union(
-    v.object({
-      title: v.string(),
-      description: v.union(v.string(), v.null()),
-      // Watermarked preview asset (signed). Present once the per-team
-      // watermark overlay has finished ingesting.
-      previewPlaybackId: v.union(v.string(), v.null()),
-      previewReady: v.boolean(),
-      // Clean public playback id — only ever used for NON-paywalled shares,
-      // where there's no watermarked source and the real frame is fine to show.
-      publicPlaybackId: v.union(v.string(), v.null()),
-      isPaywalled: v.boolean(),
-    }),
-    v.null(),
-  ),
   handler: async (ctx, args) => {
     const link = await findShareLinkByToken(ctx, args.token);
     if (!link) return null;
     if (link.expiresAt && link.expiresAt < Date.now()) return null;
     if ((link.generalAccess ?? "anyone") !== "anyone") return null;
     if (hasPasswordProtection(link)) return null;
-    // Single-video shares only — bundle covers are a separate follow-up; a
-    // bundle link still gets its title via getUnfurlByToken.
-    if (!link.videoId) return null;
-    const video = await ctx.db.get(link.videoId);
-    if (!video || video.deletedAt) return null;
-    return {
-      title: video.title,
-      description: video.description ?? null,
-      previewPlaybackId: video.muxPreviewPlaybackId ?? null,
-      previewReady: video.muxPreviewAssetStatus === "ready",
-      publicPlaybackId: video.muxPlaybackId ?? null,
-      isPaywalled: Boolean(link.paywall),
-    };
+
+    if (link.videoId) {
+      const video = await ctx.db.get(link.videoId);
+      if (!video || video.deletedAt) return null;
+      const resolvedCover = resolveShareCover([video], link.coverVideoId);
+      return {
+        kind: "single" as const,
+        shareLinkId: link._id,
+        title: video.title,
+        description: video.description ?? null,
+        isPaywalled: Boolean(link.paywall),
+        storedCoverVideoId: link.coverVideoId ?? null,
+        resolvedCoverVideoId: resolvedCover?._id ?? null,
+        items: orderShareCoverItems([video], link.coverVideoId).map(
+          serializeShareCoverItem,
+        ),
+      };
+    }
+
+    if (link.bundleId) {
+      const bundle = await ctx.db.get(link.bundleId);
+      if (!bundle) return null;
+      const videos = await resolveBundleVideos(ctx, bundle);
+      const resolvedCover = resolveShareCover(videos, link.coverVideoId);
+      return {
+        kind: "bundle" as const,
+        shareLinkId: link._id,
+        title: bundle.headerTitle ?? bundle.name,
+        description: bundle.headerDescription ?? null,
+        isPaywalled: Boolean(link.paywall),
+        storedCoverVideoId: link.coverVideoId ?? null,
+        resolvedCoverVideoId: resolvedCover?._id ?? null,
+        items: orderShareCoverItems(videos, link.coverVideoId).map(
+          serializeShareCoverItem,
+        ),
+      };
+    }
+
+    return null;
   },
 });
 

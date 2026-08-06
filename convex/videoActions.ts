@@ -13,7 +13,11 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v } from "convex/values";
-import { action, ActionCtx, internalAction } from "./_generated/server";
+import {
+  action,
+  ActionCtx,
+  internalAction,
+} from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import {
@@ -2796,38 +2800,489 @@ export const requestEncoding = action({
   },
 });
 
-/**
- * Link-unfurl preview for a /share/:token link. Returns the title +
- * description and a WATERMARKED preview-frame image URL for og:image, so
- * pasting a share link into iMessage / Slack / Discord shows the video
- * (watermarked), not a generic card.
- *
- * Security: prefers the signed watermarked preview asset — exactly what we
- * want a public crawler to fetch (low-res, watermarked, never the clean
- * original). A paywalled share whose preview isn't ready yet returns no image
- * (falls back to the default OG card) rather than ever leaking a clean frame.
- * Non-paywalled shares, which have no watermarked source, may use the real
- * public poster. Gating (anyone-access / no password / not expired) is
- * enforced by getUnfurlMedia, mirroring the title unfurl.
- */
+/** Link-unfurl and cover-picker media. */
+type ShareUnfurlItem = {
+  _id: Id<"videos">;
+  title: string;
+  kind: "video" | "image" | "document";
+  contentType: string | null;
+  thumbnailUrl: string | null;
+  s3Key: string | null;
+  muxPlaybackId: string | null;
+  muxPreviewAssetId: string | null;
+  muxPreviewPlaybackId: string | null;
+  muxPreviewReady: boolean;
+  imagePreviewS3Key: string | null;
+  imagePreviewReady: boolean;
+};
+
+type ShareUnfurlMedia = {
+  kind: "single" | "bundle";
+  shareLinkId: Id<"shareLinks">;
+  title: string;
+  description: string | null;
+  isPaywalled: boolean;
+  storedCoverVideoId: Id<"videos"> | null;
+  resolvedCoverVideoId: Id<"videos"> | null;
+  items: ShareUnfurlItem[];
+};
+
+type OgVideo = {
+  url: string;
+  width: number;
+  height: number;
+  type: "video/mp4";
+};
+
+const ogVideoValidator = v.object({
+  url: v.string(),
+  width: v.number(),
+  height: v.number(),
+  type: v.literal("video/mp4"),
+});
+
 function buildUnfurlThumb(playbackId: string, token?: string): string {
-  const u = new URL(`https://image.mux.com/${playbackId}/thumbnail.jpg`);
-  u.searchParams.set("width", "1200");
-  u.searchParams.set("height", "630");
-  u.searchParams.set("fit_mode", "smartcrop");
-  u.searchParams.set("time", "0");
-  if (token) u.searchParams.set("token", token);
-  return u.toString();
+  const url = new URL(`https://image.mux.com/${playbackId}/thumbnail.jpg`);
+  url.searchParams.set("width", "1200");
+  url.searchParams.set("height", "630");
+  url.searchParams.set("fit_mode", "smartcrop");
+  url.searchParams.set("time", "0");
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
 }
 
+function isAllowedStoredThumbnail(url: string | null): url is string {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    return (
+      parsed.hostname === "image.mux.com" ||
+      parsed.hostname === "videodelivery.net" ||
+      parsed.hostname.endsWith(".videodelivery.net") ||
+      parsed.hostname.endsWith(".cloudflarestream.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function imagePreviewKeyForShare(
+  videoId: Id<"videos">,
+  shareLinkId: Id<"shareLinks">,
+): string {
+  return `previews/images/${videoId}/${shareLinkId}.webp`;
+}
+
+async function getWatermarkedVideoThumb(
+  item: ShareUnfurlItem,
+): Promise<string | null> {
+  if (!item.muxPreviewReady || !item.muxPreviewPlaybackId) return null;
+  try {
+    const thumbnailToken = await signThumbnailToken(
+      item.muxPreviewPlaybackId,
+      "30d",
+    );
+    return buildUnfurlThumb(item.muxPreviewPlaybackId, thumbnailToken);
+  } catch {
+    return null;
+  }
+}
+
+async function getUnfurlImageSource(
+  item: ShareUnfurlItem,
+  isPaywalled: boolean,
+  shareLinkId: Id<"shareLinks">,
+  forceWatermarkedImage = false,
+): Promise<{ url: string; watermarked: boolean } | null> {
+  if (item.kind === "video") {
+    const url = await getWatermarkedVideoThumb(item);
+    return url ? { url, watermarked: true } : null;
+  }
+
+  if (item.kind === "image") {
+    if (isPaywalled || forceWatermarkedImage) {
+      try {
+        return {
+          url: await buildSignedBucketObjectUrl(
+            imagePreviewKeyForShare(item._id, shareLinkId),
+            { expiresIn: 10 * 60 },
+          ),
+          watermarked: true,
+        };
+      } catch {
+        return null;
+      }
+    }
+
+    if (item.s3Key) {
+      try {
+        return {
+          url: await buildSignedBucketObjectUrl(item.s3Key, {
+            expiresIn: 10 * 60,
+          }),
+          watermarked: false,
+        };
+      } catch {
+        return null;
+      }
+    }
+    return isAllowedStoredThumbnail(item.thumbnailUrl)
+      ? { url: item.thumbnailUrl, watermarked: false }
+      : null;
+  }
+
+  if (
+    isPaywalled ||
+    forceWatermarkedImage ||
+    !isAllowedStoredThumbnail(item.thumbnailUrl)
+  ) {
+    return null;
+  }
+  return { url: item.thumbnailUrl, watermarked: false };
+}
+
+async function getAuthenticatedPickerImage(
+  item: ShareUnfurlItem,
+): Promise<string | null> {
+  if (item.kind === "image" && item.s3Key) {
+    try {
+      return await buildSignedBucketObjectUrl(item.s3Key, {
+        expiresIn: 60 * 60,
+      });
+    } catch {
+      return null;
+    }
+  }
+  if (isAllowedStoredThumbnail(item.thumbnailUrl)) return item.thumbnailUrl;
+  if (item.muxPlaybackId) return buildUnfurlThumb(item.muxPlaybackId);
+  return null;
+}
+
+function parseAspectRatio(aspectRatio: string | undefined): number {
+  if (!aspectRatio) return 16 / 9;
+  const [width, height] = aspectRatio.split(":").map(Number);
+  return width > 0 && height > 0 ? width / height : 16 / 9;
+}
+
+async function getMuxMp4(
+  assetId: string | null,
+  playbackId: string | null,
+  signed: boolean,
+): Promise<OgVideo | null> {
+  if (!assetId || !playbackId) return null;
+  try {
+    const asset = await getMuxAsset(assetId);
+    const readyMp4s = (asset.static_renditions?.files ?? [])
+      .filter(
+        (file) =>
+          file.status === "ready" && file.ext === "mp4" && Boolean(file.name),
+      )
+      .sort(
+        (left, right) =>
+          Math.abs((left.height ?? 360) - 360) -
+          Math.abs((right.height ?? 360) - 360),
+      );
+    const staticMp4 = readyMp4s[0];
+    const playbackToken = signed
+      ? await signPlaybackToken(playbackId, "30d")
+      : undefined;
+    if (staticMp4?.name) {
+      return {
+        url: buildMuxRenditionDownloadUrl(
+          playbackId,
+          staticMp4.name,
+          playbackToken,
+        ),
+        width: staticMp4.width ?? 640,
+        height: staticMp4.height ?? 360,
+        type: "video/mp4",
+      };
+    }
+
+    // Legacy MP4 support exposes low/medium/high files but may not list them
+    // in static_renditions.files. medium.mp4 is the crawler-friendly balance.
+    if (
+      asset.mp4_support &&
+      asset.mp4_support !== "none" &&
+      !asset.mp4_support.startsWith("audio-only")
+    ) {
+      const height = 540;
+      return {
+        url: buildMuxRenditionDownloadUrl(
+          playbackId,
+          "medium.mp4",
+          playbackToken,
+        ),
+        width: Math.round(height * parseAspectRatio(asset.aspect_ratio)),
+        height,
+        type: "video/mp4",
+      };
+    }
+  } catch {
+    // A Mux lookup or signing failure must degrade to image-only unfurls.
+  }
+  return null;
+}
+
+async function getMuxMp4WithTimeout(
+  assetId: string | null,
+  playbackId: string | null,
+  signed: boolean,
+): Promise<OgVideo | null> {
+  return await Promise.race([
+    getMuxMp4(assetId, playbackId, signed),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+  ]);
+}
+
+function fnv1a(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function shareUnfurlFingerprint(meta: ShareUnfurlMedia): string {
+  return fnv1a(
+    JSON.stringify({
+      kind: meta.kind,
+      shareLinkId: meta.shareLinkId,
+      title: meta.title,
+      isPaywalled: meta.isPaywalled,
+      storedCoverVideoId: meta.storedCoverVideoId,
+      resolvedCoverVideoId: meta.resolvedCoverVideoId,
+      items: meta.items.map((item) => [
+        item._id,
+        item.kind,
+        item.thumbnailUrl,
+        item.s3Key,
+        item.muxPreviewAssetId,
+        item.muxPreviewPlaybackId,
+        item.muxPreviewReady,
+        item.imagePreviewS3Key,
+        item.imagePreviewReady,
+      ]),
+    }),
+  );
+}
+
+function convexSiteUrl(): string | null {
+  const explicit = process.env.CONVEX_SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, "");
+  const cloud = process.env.CONVEX_CLOUD_URL?.trim();
+  return cloud ? cloud.replace(".convex.cloud", ".convex.site").replace(/\/$/, "") : null;
+}
+
+function shareUnfurlImageUrl(
+  token: string,
+  meta: ShareUnfurlMedia,
+): string | null {
+  const siteUrl = convexSiteUrl();
+  if (!siteUrl) return null;
+  return `${siteUrl}/share-unfurl/${encodeURIComponent(token)}/${shareUnfurlFingerprint(meta)}.svg`;
+}
+
+const coverPickerItemValidator = v.object({
+  _id: v.id("videos"),
+  title: v.string(),
+  kind: v.union(
+    v.literal("video"),
+    v.literal("image"),
+    v.literal("document"),
+  ),
+  pickerImage: v.union(v.string(), v.null()),
+  publicImage: v.union(v.string(), v.null()),
+  paywalledImage: v.union(v.string(), v.null()),
+});
+
+type CoverPickerResult = {
+  resolvedCoverVideoId: Id<"videos"> | null;
+  items: Array<{
+    _id: Id<"videos">;
+    title: string;
+    kind: "video" | "image" | "document";
+    pickerImage: string | null;
+    publicImage: string | null;
+    paywalledImage: string | null;
+  }>;
+};
+
+/**
+ * Authenticated action used by the modal. It signs private image originals for
+ * the picker, while the preview URLs follow the same privacy branches as the
+ * crawler action. No source key or playback id reaches the browser.
+ */
+export const getShareCoverPicker = action({
+  args: {
+    videoId: v.optional(v.id("videos")),
+    bundleId: v.optional(v.id("shareBundles")),
+    folderId: v.optional(v.id("folders")),
+    videoIds: v.optional(v.array(v.id("videos"))),
+    coverVideoId: v.optional(v.id("videos")),
+  },
+  returns: v.object({
+    resolvedCoverVideoId: v.union(v.id("videos"), v.null()),
+    items: v.array(coverPickerItemValidator),
+  }),
+  handler: async (ctx, args): Promise<CoverPickerResult> => {
+    const media = (await ctx.runQuery(
+      internal.shareLinks.getCoverPickerMedia,
+      args,
+    )) as {
+      resolvedCoverVideoId: Id<"videos"> | null;
+      items: ShareUnfurlItem[];
+    };
+    const items = await Promise.all(
+      media.items.map(async (item) => {
+        const [pickerImage, publicSource, videoPreview] = await Promise.all([
+          getAuthenticatedPickerImage(item),
+          item.kind === "image" || item.kind === "document"
+            ? getUnfurlImageSource(
+                item,
+                false,
+                "picker" as Id<"shareLinks">,
+              )
+            : Promise.resolve(null),
+          item.kind === "video"
+            ? getWatermarkedVideoThumb(item)
+            : Promise.resolve(null),
+        ]);
+        return {
+          _id: item._id,
+          title: item.title,
+          kind: item.kind,
+          pickerImage,
+          publicImage: videoPreview ?? publicSource?.url ?? null,
+          // Video previews use a generic baked watermark. Still-image
+          // previews are per-link, so no honest paid preview exists until the
+          // share row has been created and its render job finishes.
+          paywalledImage: videoPreview,
+        };
+      }),
+    );
+    return { resolvedCoverVideoId: media.resolvedCoverVideoId, items };
+  },
+});
+
+const shareUnfurlResultValidator = v.union(
+  v.object({
+    kind: v.literal("video"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.literal(true),
+    video: v.union(ogVideoValidator, v.null()),
+  }),
+  v.object({
+    kind: v.literal("image"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.boolean(),
+    video: v.null(),
+  }),
+  v.object({
+    kind: v.literal("document"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.boolean(),
+    video: v.null(),
+  }),
+  v.object({
+    kind: v.literal("bundle"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.boolean(),
+    video: v.null(),
+  }),
+);
+
+/**
+ * Rich, privacy-gated result for /share/:token. Video output never falls back
+ * to the clean playback id: only the baked preview asset can supply its frame
+ * or optional MP4. Password and invite links are rejected by getUnfurlMedia
+ * before this action receives even their title.
+ */
 export const getShareUnfurl = action({
   args: { token: v.string() },
+  returns: v.union(shareUnfurlResultValidator, v.null()),
+  handler: async (ctx, args) => {
+    const media = (await ctx.runQuery(internal.shareLinks.getUnfurlMedia, {
+      token: args.token,
+    })) as ShareUnfurlMedia | null;
+    if (!media) return null;
+
+    if (media.kind === "bundle") {
+      return {
+        kind: "bundle" as const,
+        title: media.title,
+        description: media.description,
+        image: media.items.length > 0
+          ? shareUnfurlImageUrl(args.token, media)
+          : null,
+        watermarked: true,
+        video: null,
+      };
+    }
+
+    const cover = media.items[0];
+    if (!cover) {
+      return {
+        kind: "document" as const,
+        title: media.title,
+        description: media.description,
+        image: null,
+        watermarked: false,
+        video: null,
+      };
+    }
+
+    if (cover.kind === "video") {
+      const [image, video] = await Promise.all([
+        getWatermarkedVideoThumb(cover),
+        cover.muxPreviewReady
+          ? getMuxMp4WithTimeout(
+              cover.muxPreviewAssetId,
+              cover.muxPreviewPlaybackId,
+              true,
+            )
+          : Promise.resolve(null),
+      ]);
+      return {
+        kind: "video" as const,
+        title: media.title,
+        description: media.description,
+        image,
+        watermarked: true as const,
+        video,
+      };
+    }
+
+    return {
+      kind: cover.kind,
+      title: media.title,
+      description: media.description,
+      image: shareUnfurlImageUrl(args.token, media),
+      watermarked: media.isPaywalled,
+      video: null,
+    };
+  },
+});
+
+/** Public watch-page metadata, kept separate from share-link privacy policy. */
+export const getWatchUnfurl = action({
+  args: { publicId: v.string() },
   returns: v.union(
     v.object({
       title: v.string(),
       description: v.union(v.string(), v.null()),
       image: v.union(v.string(), v.null()),
-      watermarked: v.boolean(),
+      video: v.union(ogVideoValidator, v.null()),
     }),
     v.null(),
   ),
@@ -2838,46 +3293,101 @@ export const getShareUnfurl = action({
     title: string;
     description: string | null;
     image: string | null;
-    watermarked: boolean;
+    video: OgVideo | null;
   } | null> => {
-    const meta = await ctx.runQuery(internal.shareLinks.getUnfurlMedia, {
-      token: args.token,
-    });
-    if (!meta) return null;
-
-    // Watermarked preview asset (signed) — the preferred unfurl frame.
-    if (meta.previewReady && meta.previewPlaybackId) {
-      let image: string | null = null;
-      try {
-        const token = await signThumbnailToken(meta.previewPlaybackId, "30d");
-        image = buildUnfurlThumb(meta.previewPlaybackId, token);
-      } catch {
-        image = null;
-      }
-      return {
-        title: meta.title,
-        description: meta.description,
-        image,
-        watermarked: true,
+    const result = (await ctx.runQuery(api.videos.getByPublicId, {
+      publicId: args.publicId,
+    })) as {
+      video: {
+        title: string;
+        description?: string;
+        thumbnailUrl?: string;
+        muxAssetId?: string;
+        muxPlaybackId?: string;
       };
-    }
-
-    // No watermarked source. Non-paywalled links can show the real frame;
-    // paywalled-but-not-ready shows nothing (never the clean original).
-    if (!meta.isPaywalled && meta.publicPlaybackId) {
-      return {
-        title: meta.title,
-        description: meta.description,
-        image: buildUnfurlThumb(meta.publicPlaybackId),
-        watermarked: false,
-      };
-    }
-
+    } | null;
+    if (!result?.video) return null;
+    const video = result.video;
+    const image = video.muxPlaybackId
+      ? buildUnfurlThumb(video.muxPlaybackId)
+      : isAllowedStoredThumbnail(video.thumbnailUrl ?? null)
+        ? video.thumbnailUrl ?? null
+        : null;
+    const ogVideo = await getMuxMp4WithTimeout(
+      video.muxAssetId ?? null,
+      video.muxPlaybackId ?? null,
+      false,
+    );
     return {
-      title: meta.title,
-      description: meta.description,
-      image: null,
-      watermarked: false,
+      title: video.title,
+      description: video.description ?? null,
+      image,
+      video: ogVideo,
+    };
+  },
+});
+
+/**
+ * Node-side preparation for the standard-runtime HTTP action. This keeps Mux
+ * JWT and S3 signing behind the same privacy query, then returns only six
+ * short-lived, approved image URLs for the HTTP action to fetch and inline.
+ */
+export const prepareShareUnfurlImage = internalAction({
+  args: {
+    token: v.string(),
+    requestedFingerprint: v.string(),
+  },
+  returns: v.union(
+    v.object({ status: v.literal("notFound") }),
+    v.object({
+      status: v.literal("ok"),
+      fingerprint: v.string(),
+      kind: v.union(v.literal("single"), v.literal("bundle")),
+      title: v.string(),
+      items: v.array(
+        v.object({
+          title: v.string(),
+          kind: v.union(
+            v.literal("video"),
+            v.literal("image"),
+            v.literal("document"),
+          ),
+          imageUrl: v.union(v.string(), v.null()),
+        }),
+      ),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const media = (await ctx.runQuery(internal.shareLinks.getUnfurlMedia, {
+      token: args.token,
+    })) as ShareUnfurlMedia | null;
+    if (!media) return { status: "notFound" as const };
+    const fingerprint = shareUnfurlFingerprint(media);
+    if (args.requestedFingerprint !== fingerprint) {
+      return { status: "notFound" as const };
+    }
+
+    const items = media.items.slice(0, media.items.length > 4 ? 6 : 4);
+    const sources = await Promise.all(
+      items.map((item) =>
+        getUnfurlImageSource(
+          item,
+          media.isPaywalled,
+          media.shareLinkId,
+          media.kind === "bundle",
+        ),
+      ),
+    );
+    return {
+      status: "ok" as const,
+      fingerprint,
+      kind: media.kind,
+      title: media.title,
+      items: items.map((item, index) => ({
+        title: item.title,
+        kind: item.kind,
+        imageUrl: sources[index]?.url ?? null,
+      })),
     };
   },
 });

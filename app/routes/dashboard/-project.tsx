@@ -1069,7 +1069,7 @@ export default function ProjectPage({
   const canUpload = project?.role !== "viewer";
 
   return (
-    <div className="flex h-full flex-col bg-[#FAFAFA] font-['Inter_Tight',system-ui,sans-serif] text-[#131315]">
+    <div className="flex h-full flex-col bg-[#FFF]] font-['Inter_Tight',system-ui,sans-serif] text-[#131315]">
       {/* Floating selection toolbar — surfaces only when the user has
           multi-selected items. Drives the ad-hoc bundle share flow. */}
       {selectionMode || selectedCount > 0 ? (

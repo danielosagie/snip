@@ -2,6 +2,13 @@ export const SITE_URL = "https://snip.film";
 const SITE_NAME = "snip";
 const DEFAULT_OG_IMAGE = "/og/default.png";
 
+export type OgVideo = {
+  url: string;
+  width: number;
+  height: number;
+  type: "video/mp4";
+};
+
 type SeoOptions = {
   title: string;
   description: string;
@@ -9,6 +16,7 @@ type SeoOptions = {
   ogImage?: string;
   /** Alt text for the OG image — describes the preview frame for a11y. */
   ogImageAlt?: string;
+  ogVideo?: OgVideo;
   type?: string;
   noIndex?: boolean;
 };
@@ -19,6 +27,7 @@ export function seoHead({
   path,
   ogImage = DEFAULT_OG_IMAGE,
   ogImageAlt,
+  ogVideo,
   type = "website",
   noIndex = false,
 }: SeoOptions) {
@@ -46,11 +55,26 @@ export function seoHead({
     { property: "og:type", content: type },
     { property: "og:site_name", content: SITE_NAME },
     // Twitter
-    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:card", content: ogVideo ? "player" : "summary_large_image" },
     { name: "twitter:title", content: fullTitle },
     { name: "twitter:description", content: description },
     { name: "twitter:image", content: imageUrl },
   ];
+
+  if (ogVideo) {
+    meta.push(
+      { property: "og:video", content: ogVideo.url },
+      { property: "og:video:secure_url", content: ogVideo.url },
+      { property: "og:video:type", content: ogVideo.type },
+      { property: "og:video:width", content: String(ogVideo.width) },
+      { property: "og:video:height", content: String(ogVideo.height) },
+      { name: "twitter:player", content: ogVideo.url },
+      { name: "twitter:player:width", content: String(ogVideo.width) },
+      { name: "twitter:player:height", content: String(ogVideo.height) },
+      { name: "twitter:player:stream", content: ogVideo.url },
+      { name: "twitter:player:stream:content_type", content: ogVideo.type },
+    );
+  }
 
   if (ogImageAlt) {
     meta.push({ property: "og:image:alt", content: ogImageAlt });

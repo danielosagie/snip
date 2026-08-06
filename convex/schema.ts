@@ -545,6 +545,7 @@ export default defineSchema({
   shareLinks: defineTable({
     videoId: v.optional(v.id("videos")),
     bundleId: v.optional(v.id("shareBundles")),
+    coverVideoId: v.optional(v.id("videos")),
     token: v.string(),
     createdByClerkId: v.string(),
     createdByName: v.string(),
