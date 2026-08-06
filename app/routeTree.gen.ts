@@ -40,6 +40,7 @@ import { Route as DashboardTeamSlugSettingsIndexRouteImport } from './routes/das
 import { Route as DashboardTeamSlugProjectIdIndexRouteImport } from './routes/dashboard/$teamSlug.$projectId.index'
 import { Route as DashboardTeamSlugSettingsPayoutsRouteImport } from './routes/dashboard/$teamSlug.settings.payouts'
 import { Route as DashboardTeamSlugSettingsFoldersRouteImport } from './routes/dashboard/$teamSlug.settings.folders'
+import { Route as DashboardTeamSlugProjectIdPlaybackLabRouteImport } from './routes/dashboard/$teamSlug.$projectId.playback-lab'
 import { Route as DashboardTeamSlugProjectIdContractRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract'
 import { Route as DashboardTeamSlugProjectIdVideoIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.$videoId'
 import { Route as DashboardTeamSlugProjectIdDocContractIdRouteImport } from './routes/dashboard/$teamSlug.$projectId.doc.$contractId'
@@ -206,6 +207,12 @@ const DashboardTeamSlugSettingsFoldersRoute =
     path: '/folders',
     getParentRoute: () => DashboardTeamSlugSettingsRoute,
   } as any)
+const DashboardTeamSlugProjectIdPlaybackLabRoute =
+  DashboardTeamSlugProjectIdPlaybackLabRouteImport.update({
+    id: '/playback-lab',
+    path: '/playback-lab',
+    getParentRoute: () => DashboardTeamSlugProjectIdRoute,
+  } as any)
 const DashboardTeamSlugProjectIdContractRoute =
   DashboardTeamSlugProjectIdContractRouteImport.update({
     id: '/contract',
@@ -261,6 +268,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
   '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/$projectId/playback-lab': typeof DashboardTeamSlugProjectIdPlaybackLabRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
@@ -294,6 +302,7 @@ export interface FileRoutesByTo {
   '/dashboard/$teamSlug': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
   '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/$projectId/playback-lab': typeof DashboardTeamSlugProjectIdPlaybackLabRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdIndexRoute
@@ -332,6 +341,7 @@ export interface FileRoutesById {
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
   '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
+  '/dashboard/$teamSlug/$projectId/playback-lab': typeof DashboardTeamSlugProjectIdPlaybackLabRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
@@ -371,6 +381,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/'
     | '/dashboard/$teamSlug/$projectId/$videoId'
     | '/dashboard/$teamSlug/$projectId/contract'
+    | '/dashboard/$teamSlug/$projectId/playback-lab'
     | '/dashboard/$teamSlug/settings/folders'
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
@@ -404,6 +415,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug'
     | '/dashboard/$teamSlug/$projectId/$videoId'
     | '/dashboard/$teamSlug/$projectId/contract'
+    | '/dashboard/$teamSlug/$projectId/playback-lab'
     | '/dashboard/$teamSlug/settings/folders'
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId'
@@ -441,6 +453,7 @@ export interface FileRouteTypes {
     | '/dashboard/$teamSlug/'
     | '/dashboard/$teamSlug/$projectId/$videoId'
     | '/dashboard/$teamSlug/$projectId/contract'
+    | '/dashboard/$teamSlug/$projectId/playback-lab'
     | '/dashboard/$teamSlug/settings/folders'
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
@@ -688,6 +701,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardTeamSlugSettingsFoldersRouteImport
       parentRoute: typeof DashboardTeamSlugSettingsRoute
     }
+    '/dashboard/$teamSlug/$projectId/playback-lab': {
+      id: '/dashboard/$teamSlug/$projectId/playback-lab'
+      path: '/playback-lab'
+      fullPath: '/dashboard/$teamSlug/$projectId/playback-lab'
+      preLoaderRoute: typeof DashboardTeamSlugProjectIdPlaybackLabRouteImport
+      parentRoute: typeof DashboardTeamSlugProjectIdRoute
+    }
     '/dashboard/$teamSlug/$projectId/contract': {
       id: '/dashboard/$teamSlug/$projectId/contract'
       path: '/contract'
@@ -722,6 +742,7 @@ declare module '@tanstack/react-router' {
 interface DashboardTeamSlugProjectIdRouteChildren {
   DashboardTeamSlugProjectIdVideoIdRoute: typeof DashboardTeamSlugProjectIdVideoIdRoute
   DashboardTeamSlugProjectIdContractRoute: typeof DashboardTeamSlugProjectIdContractRoute
+  DashboardTeamSlugProjectIdPlaybackLabRoute: typeof DashboardTeamSlugProjectIdPlaybackLabRoute
   DashboardTeamSlugProjectIdIndexRoute: typeof DashboardTeamSlugProjectIdIndexRoute
   DashboardTeamSlugProjectIdContractContractIdRoute: typeof DashboardTeamSlugProjectIdContractContractIdRoute
   DashboardTeamSlugProjectIdDocContractIdRoute: typeof DashboardTeamSlugProjectIdDocContractIdRoute
@@ -733,6 +754,8 @@ const DashboardTeamSlugProjectIdRouteChildren: DashboardTeamSlugProjectIdRouteCh
       DashboardTeamSlugProjectIdVideoIdRoute,
     DashboardTeamSlugProjectIdContractRoute:
       DashboardTeamSlugProjectIdContractRoute,
+    DashboardTeamSlugProjectIdPlaybackLabRoute:
+      DashboardTeamSlugProjectIdPlaybackLabRoute,
     DashboardTeamSlugProjectIdIndexRoute: DashboardTeamSlugProjectIdIndexRoute,
     DashboardTeamSlugProjectIdContractContractIdRoute:
       DashboardTeamSlugProjectIdContractContractIdRoute,

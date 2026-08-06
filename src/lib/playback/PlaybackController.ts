@@ -562,10 +562,10 @@ export class BrowserPlaybackController implements PlaybackController {
     const onPause = () => this.emit("pause", { currentTime: video.currentTime });
     const onWaiting = () => this.emit("waiting", { currentTime: video.currentTime });
     const onEnded = () => this.emit("ended", { currentTime: video.currentTime });
-    const onError = () =>
-      this.emit("error", {
-        error: video.error ?? new Error("The proxy playback failed."),
-      });
+    const onError = () => {
+      const message = video.error?.message || "The proxy playback failed.";
+      this.emit("error", { error: new Error(message) });
+    };
     video.addEventListener("timeupdate", onTime);
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
