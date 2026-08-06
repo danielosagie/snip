@@ -15,6 +15,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import {
   Outlet,
   useLocation,
+  useNavigate,
   useParams,
 } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
@@ -259,9 +260,20 @@ export default function DashboardLayout() {
       dismissUpload,
     ],
   );
+  const navigate = useNavigate();
   const isResolvingPublicPlaybackExemption =
     Boolean(isLoaded && !userId && routeVideoId) && publicPlaybackId === undefined;
 
+  // Client-side navigation, NOT window.location: a full-page navigation
+  // inside the desktop shell trips its will-navigate guard on installed
+  // binaries that still trust only the legacy origin, which kicks the
+  // sign-in page out to the system browser and strands the app window.
+  // pushState routing never hits that guard.
+  const spaNavigate = navigate as unknown as (opts: {
+    to: string;
+    search?: Record<string, string>;
+    replace?: boolean;
+  }) => void;
   useEffect(() => {
     if (!isLoaded || userId) return;
     if (typeof window === "undefined") return;
@@ -269,27 +281,31 @@ export default function DashboardLayout() {
     if (routeVideoId) {
       if (publicPlaybackId === undefined) return;
       if (publicPlaybackId) {
-        window.location.replace(`/watch/${publicPlaybackId}`);
+        spaNavigate({ to: `/watch/${publicPlaybackId}`, replace: true });
         return;
       }
     }
 
     const redirectUrl = `${pathname}${searchStr}`;
-    window.location.replace(`/sign-in?redirect_url=${encodeURIComponent(redirectUrl)}`);
-  }, [isLoaded, userId, pathname, searchStr, routeVideoId, publicPlaybackId]);
+    spaNavigate({
+      to: "/sign-in",
+      search: { redirect_url: redirectUrl },
+      replace: true,
+    });
+  }, [isLoaded, userId, pathname, searchStr, routeVideoId, publicPlaybackId, spaNavigate]);
 
   if (!isLoaded) {
     return (
-      <div className="h-full flex items-center justify-center bg-[#f0f0e8]">
-        <div className="text-[#888]">Loading...</div>
+      <div className="h-full flex items-center justify-center bg-[#FAFAFA]">
+        <div className="text-[#6E6E73]">Loading...</div>
       </div>
     );
   }
 
   if (!userId) {
     return (
-      <div className="h-full flex items-center justify-center bg-[#f0f0e8]">
-        <div className="text-[#888]">
+      <div className="h-full flex items-center justify-center bg-[#FAFAFA]">
+        <div className="text-[#6E6E73]">
           {isResolvingPublicPlaybackExemption
             ? "Checking public playback access..."
             : "Redirecting to sign in..."}
@@ -300,10 +316,10 @@ export default function DashboardLayout() {
 
   return (
     <SidebarProvider>
-    <div className={cn("relative h-full flex flex-col bg-[#f0f0e8]")}>
+    <div className={cn("relative h-full flex flex-col bg-[#FAFAFA]")}>
       {isDesktop ? (
         <div
-          className="h-7 w-full flex-shrink-0 bg-[#f0f0e8]"
+          className="h-7 w-full flex-shrink-0 bg-white"
           style={DESKTOP_DRAG_REGION}
         />
       ) : null}
@@ -321,16 +337,16 @@ export default function DashboardLayout() {
 
       {isGlobalDragActive && (
         <div className="pointer-events-none fixed inset-0 z-40">
-          <div className="absolute inset-0 bg-[#1a1a1a]/20" />
-          <div className="absolute inset-4 border-4 border-dashed border-[#FF6600] bg-[#FF6600]/10 flex items-center justify-center">
-            <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] px-4 py-3 text-center">
-              <p className="text-sm font-black tracking-tight text-[#1a1a1a]">
+          <div className="absolute inset-0 bg-[#131315]/20" />
+          <div className="absolute inset-4 flex items-center justify-center rounded-[14px] border border-[#FF6600]/50 bg-[#FFF0E6]/80">
+            <div className="rounded-[14px] border border-[#E8E8EC] bg-white px-5 py-4 text-center">
+              <p className="text-sm font-semibold tracking-tight text-[#131315]">
                 Drop files to upload
               </p>
-              <p className="text-[10px] font-mono text-[#888] mt-1 uppercase tracking-wider">
+              <p className="mt-1 text-xs text-[#6E6E73]">
                 {routeProjectId
-                  ? "lands in this project"
-                  : "you'll pick a project after dropping"}
+                  ? "Added to this project"
+                  : "Choose a project next"}
               </p>
             </div>
           </div>
@@ -357,22 +373,22 @@ export default function DashboardLayout() {
             </DialogDescription>
           </DialogHeader>
           {uploadTargets === undefined ? (
-            <p className="text-sm text-[#888]">Loading projects...</p>
+            <p className="text-sm text-[#6E6E73]">Loading projects...</p>
           ) : uploadTargets.length === 0 ? (
-            <p className="text-sm text-[#888]">
+            <p className="text-sm text-[#6E6E73]">
               No uploadable projects found for your account.
             </p>
           ) : (
-            <div className="max-h-80 overflow-y-auto border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
+            <div className="max-h-80 overflow-y-auto rounded-[11px] border border-[#E8E8EC] bg-white divide-y divide-[#F1F1F3]">
               {uploadTargets.map((target) => (
                 <button
                   key={target.projectId}
                   type="button"
-                  className="w-full px-4 py-3 text-left hover:bg-[#e8e8e0] transition-colors"
+                  className="w-full px-4 py-3 text-left transition-colors hover:bg-[#FAFAFA]"
                   onClick={() => handleProjectSelected(target.projectId)}
                 >
-                  <p className="font-bold text-[#1a1a1a]">{target.projectName}</p>
-                  <p className="text-xs text-[#888]">{target.teamName}</p>
+                  <p className="font-medium text-[#131315]">{target.projectName}</p>
+                  <p className="text-xs text-[#6E6E73]">{target.teamName}</p>
                 </button>
               ))}
             </div>
