@@ -60,8 +60,7 @@ function PlaybackLabRoute() {
   const { teamSlug, projectId: rawProjectId } = Route.useParams();
   const projectId = rawProjectId as Id<"projects">;
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
-  const isDev = typeof import.meta !== "undefined" && import.meta.env.DEV;
-  const enabled = isDev && featureStatus?.demoMode === true;
+  const enabled = featureStatus?.demoMode === true;
   const videos = useQuery(
     api.videos.list,
     enabled ? { projectId, folderId: null } : "skip",
@@ -294,14 +293,14 @@ function PlaybackLabRoute() {
         <main className="grid flex-1 place-items-center p-8">
           <section className="max-w-xl border-2 border-[#1a1a1a] bg-[#f0f0e8] p-8 shadow-[8px_8px_0_0_#1a1a1a]">
             <p className="font-mono text-xs font-bold uppercase tracking-[0.18em] text-[#C2410C]">
-              Dev only
+              Demo feature
             </p>
             <h1 className="mt-3 text-3xl font-black tracking-tight">
               Playback lab is disabled
             </h1>
             <p className="mt-4 max-w-[60ch] text-sm leading-6 text-[#555]">
-              Run a development build with DEMO_MODE configured in Convex to
-              exercise browser proxy playback.
+              Set DEMO_MODE in Convex to exercise browser proxy playback in a
+              local or preview deployment.
             </p>
           </section>
         </main>
@@ -321,7 +320,7 @@ function PlaybackLabRoute() {
         ]}
       >
         <span className="border-2 border-[#1a1a1a] bg-[#FFEDD5] px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.14em]">
-          Dev only
+          Playback lab
         </span>
       </DashboardHeader>
 
