@@ -15,6 +15,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+const SOFT_MENU_CONTENT =
+  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
+const SOFT_MENU_ITEM =
+  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
+
 /**
  * Compact "Add" dropdown in the DashboardHeader on a project page. Actions:
  * upload files, create a folder, add a contract.
@@ -98,18 +103,22 @@ export function ProjectAddButton({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] text-xs font-bold uppercase tracking-wider hover:bg-[#FF6600] transition-colors"
+          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#131315] px-3.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="h-4 w-4" />
           Add
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[220px]">
-        <DropdownMenuItem onClick={onAddFiles}>
+      <DropdownMenuContent
+        align="end"
+        className={`${SOFT_MENU_CONTENT} min-w-[220px]`}
+      >
+        <DropdownMenuItem className={SOFT_MENU_ITEM} onClick={onAddFiles}>
           <Upload className="mr-2 h-4 w-4" />
           Add files
         </DropdownMenuItem>
         <DropdownMenuItem
+          className={SOFT_MENU_ITEM}
           onClick={() => void handleAddFolder()}
           disabled={creatingFolder}
         >
@@ -117,6 +126,7 @@ export function ProjectAddButton({
           Add folder
         </DropdownMenuItem>
         <DropdownMenuItem
+          className={SOFT_MENU_ITEM}
           onClick={() => void handleAdd("document")}
           disabled={creatingDocumentItem}
         >
@@ -124,6 +134,7 @@ export function ProjectAddButton({
           Add document
         </DropdownMenuItem>
         <DropdownMenuItem
+          className={SOFT_MENU_ITEM}
           onClick={() => void handleAdd("contract")}
           disabled={creatingDocumentItem}
         >

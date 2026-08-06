@@ -26,6 +26,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { publicShareUrl } from "@/lib/publicUrl";
+import { cn } from "@/lib/utils";
+import {
+  softButton,
+  softButtonPrimary,
+  softInput,
+} from "@/components/soft";
+
+const SOFT_MENU_CONTENT =
+  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
+const SOFT_MENU_ITEM =
+  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
 
 /**
  * Slim sibling of ShareDialog used when the user has multi-selected items
@@ -139,25 +150,25 @@ export function ShareSelectionDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto flex flex-col gap-4">
+      <DialogContent className="surface-soft flex max-h-[85vh] max-w-lg flex-col gap-4 overflow-y-auto rounded-[14px] border border-[#E8E8EC] bg-white text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="text-lg font-semibold normal-case tracking-[-0.01em] text-[#131315]">
             Share {videoIds.length} item{videoIds.length === 1 ? "" : "s"}
           </DialogTitle>
         </DialogHeader>
 
         {createdUrl ? (
-          <div className="border-2 border-[#1a1a1a] p-5 bg-[#f0f0e8] space-y-3">
-            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <div className="space-y-3 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-5">
+            <div className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Share URL
             </div>
-            <code className="block text-sm bg-[#e8e8e0] border border-[#1a1a1a] px-2 py-1.5 font-mono break-all">
+            <code className="block break-all rounded-[8px] border border-[#E8E8EC] bg-white px-2.5 py-2 font-mono text-sm text-[#131315]">
               {createdUrl}
             </code>
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                className="flex-1"
+                className={cn(softButton, "flex-1")}
                 onClick={async () => {
                   await navigator.clipboard.writeText(createdUrl);
                   setCopied(true);
@@ -173,62 +184,70 @@ export function ShareSelectionDialog({
               </Button>
               <Button
                 variant="outline"
-                className="flex-1"
+                className={cn(softButton, "flex-1")}
                 onClick={() => window.open(createdUrl, "_blank")}
               >
                 <ExternalLink className="mr-2 h-4 w-4" />
                 Open
               </Button>
             </div>
-            <p className="text-xs text-[#888]">
+            <p className="text-xs text-[#6E6E73]">
               Bundle saved as <span className="font-mono">{name}</span>. New
-              uploads to this project do NOT auto-join — selection bundles are
+              uploads to this project do not auto-join. Selection bundles are
               frozen at the items picked.
             </p>
           </div>
         ) : (
-          <section className="border-2 border-[#1a1a1a] p-5 bg-[#e8e8e0] space-y-5">
+          <section className="space-y-5 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-5">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+              <label className="text-[13px] font-medium text-[#6E6E73]">
                 Bundle name
               </label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Final delivery: brand campaign"
+                className={softInput}
               />
-              <p className="text-[11px] text-[#888]">
+              <p className="text-[11px] text-[#A0A0A5]">
                 Shown at the top of the share page above the item grid.
               </p>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+              <label className="text-[13px] font-medium text-[#6E6E73]">
                 Expiration
               </label>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-full justify-between">
+                  <Button
+                    variant="outline"
+                    className={cn(softButton, "w-full justify-between")}
+                  >
                     {opts.expiresInDays ? `${opts.expiresInDays} days` : "Never"}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent>
+                <DropdownMenuContent className={SOFT_MENU_CONTENT}>
                   <DropdownMenuItem
+                    className={SOFT_MENU_ITEM}
                     onClick={() => setOpts((o) => ({ ...o, expiresInDays: undefined }))}
                   >
                     Never
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    className={SOFT_MENU_ITEM}
                     onClick={() => setOpts((o) => ({ ...o, expiresInDays: 1 }))}
                   >
                     1 day
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    className={SOFT_MENU_ITEM}
                     onClick={() => setOpts((o) => ({ ...o, expiresInDays: 7 }))}
                   >
                     7 days
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    className={SOFT_MENU_ITEM}
                     onClick={() => setOpts((o) => ({ ...o, expiresInDays: 30 }))}
                   >
                     30 days
@@ -238,7 +257,7 @@ export function ShareSelectionDialog({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+              <label className="text-[13px] font-medium text-[#6E6E73]">
                 Password (optional)
               </label>
               <Input
@@ -248,33 +267,34 @@ export function ShareSelectionDialog({
                 onChange={(e) =>
                   setOpts((o) => ({ ...o, password: e.target.value }))
                 }
+                className={softInput}
               />
             </div>
 
-            <div className="flex items-center justify-between gap-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-4 py-3.5">
-              <div className="font-bold text-sm">Allow download</div>
+            <div className="flex items-center justify-between gap-3 rounded-[11px] border border-[#E8E8EC] bg-white px-4 py-3.5">
+              <div className="text-sm font-medium">Allow download</div>
               <button
                 type="button"
                 onClick={() => setAllowDownload((d) => !d)}
                 aria-pressed={allowDownload}
-                className={`px-3 py-1 border-2 border-[#1a1a1a] font-bold text-xs ${
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                   allowDownload
-                    ? "bg-[#FF6600] text-[#f0f0e8]"
-                    : "bg-[#e8e8e0] text-[#1a1a1a]"
+                    ? "bg-[#131315] text-white"
+                    : "bg-[#F1F1F3] text-[#6E6E73]"
                 }`}
               >
-                {allowDownload ? "ON" : "OFF"}
+                {allowDownload ? "On" : "Off"}
               </button>
             </div>
 
-            <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+            <div className="overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-white">
               <div className="flex items-center justify-between gap-2 px-4 py-3.5">
-                <div className="font-bold text-sm flex items-center gap-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
                   <DollarSign className="h-4 w-4" />
                   Paywall
                   {!paywallProductionReady ? (
-                    <span className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 bg-[#1a1a1a] text-[#f0f0e8]">
-                      demo
+                    <span className="rounded-[6px] bg-[#F1F1F3] px-1.5 py-0.5 text-[10px] font-medium text-[#6E6E73]">
+                      Demo
                     </span>
                   ) : null}
                 </div>
@@ -282,20 +302,20 @@ export function ShareSelectionDialog({
                   type="button"
                   onClick={() => setPaywallEnabled((p) => !p)}
                   aria-pressed={paywallEnabled}
-                  className={`px-3 py-1 border-2 border-[#1a1a1a] font-bold text-xs ${
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                     paywallEnabled
-                      ? "bg-[#FF6600] text-[#f0f0e8]"
-                      : "bg-[#e8e8e0] text-[#1a1a1a]"
+                      ? "bg-[#131315] text-white"
+                      : "bg-[#F1F1F3] text-[#6E6E73]"
                   }`}
                 >
-                  {paywallEnabled ? "ON" : "OFF"}
+                  {paywallEnabled ? "On" : "Off"}
                 </button>
               </div>
               {paywallEnabled ? (
-                <div className="border-t-2 border-[#1a1a1a] p-4 space-y-3">
+                <div className="space-y-3 border-t border-[#F1F1F3] p-4">
                   <div className="flex gap-2">
                     <div className="flex-1 space-y-1.5">
-                      <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+                      <label className="text-[13px] font-medium text-[#6E6E73]">
                         Price
                       </label>
                       <Input
@@ -307,10 +327,11 @@ export function ShareSelectionDialog({
                         onChange={(e) =>
                           setOpts((o) => ({ ...o, priceDollars: e.target.value }))
                         }
+                        className={softInput}
                       />
                     </div>
                     <div className="w-24 space-y-1.5">
-                      <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+                      <label className="text-[13px] font-medium text-[#6E6E73]">
                         Currency
                       </label>
                       <Input
@@ -321,12 +342,12 @@ export function ShareSelectionDialog({
                             currency: e.target.value.toLowerCase().slice(0, 4),
                           }))
                         }
-                        className="uppercase"
+                        className={softInput}
                       />
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+                    <label className="text-[13px] font-medium text-[#6E6E73]">
                       Client email (for invoice + watermark)
                     </label>
                     <Input
@@ -336,10 +357,11 @@ export function ShareSelectionDialog({
                       onChange={(e) =>
                         setOpts((o) => ({ ...o, clientEmail: e.target.value }))
                       }
+                      className={softInput}
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wider text-[#888]">
+                    <label className="text-[13px] font-medium text-[#6E6E73]">
                       Invoice description (optional)
                     </label>
                     <Input
@@ -348,6 +370,7 @@ export function ShareSelectionDialog({
                       onChange={(e) =>
                         setOpts((o) => ({ ...o, description: e.target.value }))
                       }
+                      className={softInput}
                     />
                   </div>
                 </div>
@@ -355,7 +378,7 @@ export function ShareSelectionDialog({
             </div>
 
             {createError ? (
-              <div className="text-xs text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
+              <div className="rounded-[10px] bg-[#FFF5F5] px-3 py-2 text-xs text-[#D8434F]">
                 {createError}
               </div>
             ) : null}
@@ -363,7 +386,7 @@ export function ShareSelectionDialog({
             <Button
               onClick={handleCreate}
               disabled={isCreating || videoIds.length === 0}
-              className="w-full"
+              className={cn(softButtonPrimary, "w-full")}
             >
               <Plus className="mr-2 h-4 w-4" />
               {isCreating

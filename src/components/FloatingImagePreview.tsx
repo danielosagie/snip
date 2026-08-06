@@ -28,13 +28,13 @@ export function FloatingImagePreview({
   const top = Math.min(pos.y + padding, window.innerHeight - (maxSize + padding));
   return (
     <div
-      className="fixed z-[80] pointer-events-none border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[6px_6px_0px_0px_var(--shadow-color)] p-1"
+      className="pointer-events-none fixed z-[80] rounded-[12px] border border-[#E8E8EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(19,19,21,0.10)]"
       style={{ left, top }}
     >
       <img
         src={src}
         alt={alt}
-        className="block object-contain"
+        className="block rounded-[8px] object-contain"
         style={{ maxWidth: maxSize, maxHeight: maxSize }}
       />
     </div>

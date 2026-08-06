@@ -27,7 +27,12 @@ interface Props {
     folderId: Id<"folders">,
     event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean },
   ) => void;
+  onDragSelectOnly?: (folderId: Id<"folders">) => void;
   onDropVideo?: (videoId: Id<"videos">, targetFolderId: Id<"folders">) => void;
+  onDropVideos?: (
+    videoIds: Id<"videos">[],
+    targetFolderId: Id<"folders">,
+  ) => void;
   onDropFolder?: (
     droppedFolderId: Id<"folders">,
     targetFolderId: Id<"folders">,
@@ -47,7 +52,9 @@ export function FolderRow({
   selectedFolderIds,
   selectionMode,
   onSelectToggle,
+  onDragSelectOnly,
   onDropVideo,
+  onDropVideos,
   onDropFolder,
   onDropFiles,
   renameFolderId,
@@ -57,7 +64,7 @@ export function FolderRow({
 
   return (
     <section className="px-6 pt-4">
-      <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+      <div className="mb-2 font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
         Folders
       </div>
       <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
@@ -73,7 +80,9 @@ export function FolderRow({
             selected={selectedFolderIds?.has(f._id)}
             selectionMode={selectionMode}
             onSelectToggle={(event) => onSelectToggle?.(f._id, event)}
+            onDragSelectOnly={() => onDragSelectOnly?.(f._id)}
             onDropVideo={onDropVideo}
+            onDropVideos={onDropVideos}
             onDropFolder={onDropFolder}
             onDropFiles={onDropFiles}
             autoRename={renameFolderId === f._id}

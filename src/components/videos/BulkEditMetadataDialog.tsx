@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
-import { X } from "lucide-react";
+import { AlignLeft, CircleDot, Tags as TagsIcon, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+  softButton,
+  softButtonPrimary,
+  softInput,
+} from "@/components/soft";
 
 /**
  * Bulk-edit metadata across the selected videos. Only fields you fill in are
@@ -36,12 +41,12 @@ interface Props {
 }
 
 const SELECT_CLASS =
-  "h-10 w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-sm font-medium text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#C2410C]";
+  "h-10 w-full rounded-[10px] border border-[#E8E8EC] bg-white px-3 text-sm font-medium text-[#131315] outline-none focus:border-[#FF6600]";
 
 function FieldLabel({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 text-sm font-bold text-[#1a1a1a]">
-      <span className="text-[#888]">{icon}</span>
+    <div className="flex items-center gap-1.5 text-[13px] font-medium text-[#6E6E73]">
+      <span className="text-[#A0A0A5]">{icon}</span>
       {children}
     </div>
   );
@@ -111,15 +116,17 @@ export function BulkEditMetadataDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+      <DialogContent className="surface-soft max-h-[85vh] max-w-md overflow-y-auto rounded-[14px] border border-[#E8E8EC] bg-white text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]">
         <DialogHeader>
-          <DialogTitle>Bulk edit metadata</DialogTitle>
+          <DialogTitle className="text-lg font-semibold normal-case tracking-[-0.01em] text-[#131315]">
+            Bulk edit metadata
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Status */}
           <div className="space-y-1.5">
-            <FieldLabel icon={<span className="text-base leading-none">◔</span>}>
+            <FieldLabel icon={<CircleDot className="h-4 w-4" />}>
               Approval status
             </FieldLabel>
             <select
@@ -136,20 +143,20 @@ export function BulkEditMetadataDialog({
 
           {/* Description */}
           <div className="space-y-1.5">
-            <FieldLabel icon={<span className="text-base leading-none">T</span>}>
+            <FieldLabel icon={<AlignLeft className="h-4 w-4" />}>
               Description
             </FieldLabel>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Leave blank to keep existing descriptions"
-              className="min-h-[72px]"
+              className={cn(softInput, "min-h-[72px]")}
             />
           </div>
 
           {/* Tags */}
           <div className="space-y-1.5">
-            <FieldLabel icon={<span className="text-base leading-none">≣</span>}>
+            <FieldLabel icon={<TagsIcon className="h-4 w-4" />}>
               Tags
             </FieldLabel>
             {tags.length > 0 ? (
@@ -157,7 +164,7 @@ export function BulkEditMetadataDialog({
                 {tags.map((t) => (
                   <span
                     key={t}
-                    className="inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#FFEDD5] px-2 py-0.5 text-xs font-bold text-[#1a1a1a]"
+                    className="inline-flex items-center gap-1 rounded-full bg-[#FFF0E6] px-2.5 py-1 text-xs font-medium text-[#D14E00]"
                   >
                     {t}
                     <button
@@ -182,9 +189,10 @@ export function BulkEditMetadataDialog({
               }}
               onBlur={() => addTag(tagInput)}
               placeholder="Type a tag and press Enter"
+              className={softInput}
             />
             <div className="flex items-center justify-between pt-1">
-              <span className="text-xs text-[#888]">
+              <span className="text-[13px] text-[#6E6E73]">
                 Append to existing tags
               </span>
               <button
@@ -192,22 +200,22 @@ export function BulkEditMetadataDialog({
                 onClick={() => setAppendTags((a) => !a)}
                 aria-pressed={appendTags}
                 className={cn(
-                  "px-3 py-1 border-2 border-[#1a1a1a] font-bold text-xs",
+                  "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
                   appendTags
-                    ? "bg-[#FF6600] text-[#f0f0e8]"
-                    : "bg-[#e8e8e0] text-[#1a1a1a]",
+                    ? "bg-[#131315] text-white"
+                    : "bg-[#F1F1F3] text-[#6E6E73]",
                 )}
               >
-                {appendTags ? "ON" : "OFF"}
+                {appendTags ? "On" : "Off"}
               </button>
             </div>
           </div>
 
-          {error ? <p className="text-xs text-[#dc2626]">{error}</p> : null}
+          {error ? <p className="text-xs text-[#D8434F]">{error}</p> : null}
 
           <div className="space-y-2 pt-2">
             <Button
-              className="w-full"
+              className={cn(softButtonPrimary, "w-full")}
               onClick={() => void handleSave()}
               disabled={busy || fieldCount === 0}
             >
@@ -217,7 +225,7 @@ export function BulkEditMetadataDialog({
             </Button>
             <Button
               variant="outline"
-              className="w-full"
+              className={cn(softButton, "w-full")}
               onClick={() => onOpenChange(false)}
               disabled={busy}
             >

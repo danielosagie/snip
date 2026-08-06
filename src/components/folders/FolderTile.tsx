@@ -15,6 +15,16 @@ import {
 import { cn } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
 import { friendlyError } from "@/lib/friendlyError";
+import {
+  SNIP_VIDEOS_DRAG_TYPE,
+  SNIP_VIDEO_DRAG_TYPE,
+  readDraggedVideoIds,
+} from "@/lib/projectDrag";
+
+const SOFT_MENU_CONTENT =
+  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
+const SOFT_MENU_ITEM =
+  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
 
 /**
  * Single folder card. Small, dense — meant to live in a horizontal row at
@@ -36,7 +46,12 @@ interface Props {
     ctrlKey: boolean;
     shiftKey: boolean;
   }) => void;
+  onDragSelectOnly?: () => void;
   onDropVideo?: (videoId: Id<"videos">, targetFolderId: Id<"folders">) => void;
+  onDropVideos?: (
+    videoIds: Id<"videos">[],
+    targetFolderId: Id<"folders">,
+  ) => void;
   onDropFolder?: (
     droppedFolderId: Id<"folders">,
     targetFolderId: Id<"folders">,
@@ -58,7 +73,9 @@ export function FolderTile({
   selected,
   selectionMode,
   onSelectToggle,
+  onDragSelectOnly,
   onDropVideo,
+  onDropVideos,
   onDropFolder,
   onDropFiles,
   autoRename,
@@ -148,8 +165,9 @@ export function FolderTile({
         open();
       }}
       onContextMenu={(e) => e.stopPropagation()}
-      draggable={canEdit && !editing && !selectionMode}
+      draggable={canEdit && !editing}
       onDragStart={(e) => {
+        if (selectionMode && !selected) onDragSelectOnly?.();
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("application/x-snip-folder", folderId);
       }}
@@ -158,7 +176,8 @@ export function FolderTile({
         const types = e.dataTransfer.types;
         const hasFiles = types.includes("Files");
         const hasSnipItems =
-          types.includes("application/x-snip-video") ||
+          types.includes(SNIP_VIDEO_DRAG_TYPE) ||
+          types.includes(SNIP_VIDEOS_DRAG_TYPE) ||
           types.includes("application/x-snip-folder");
         if (hasFiles || hasSnipItems) {
           e.preventDefault();
@@ -180,9 +199,15 @@ export function FolderTile({
           return;
         }
         e.stopPropagation();
-        const videoId = e.dataTransfer.getData("application/x-snip-video");
-        if (videoId) {
-          onDropVideo?.(videoId as Id<"videos">, folderId);
+        const videoIds = readDraggedVideoIds(e.dataTransfer);
+        if (videoIds.length > 0) {
+          if (videoIds.length > 1 && onDropVideos) {
+            onDropVideos(videoIds, folderId);
+          } else {
+            for (const videoId of videoIds) {
+              onDropVideo?.(videoId, folderId);
+            }
+          }
           return;
         }
         const draggedFolderId = e.dataTransfer.getData(
@@ -193,26 +218,30 @@ export function FolderTile({
         }
       }}
       className={cn(
-        "group relative flex min-h-12 items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] cursor-pointer transition-[background-color,box-shadow] w-full min-w-0",
+        "group relative flex min-h-12 w-full min-w-0 cursor-pointer items-center gap-2 rounded-[12px] border border-[#E8E8EC] bg-white px-3 py-2 text-[#131315] transition-[background-color,border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm",
         dropKind
-          ? "bg-[#FF6600] text-[#f0f0e8]"
-          : "bg-[#f0f0e8] hover:bg-[#e8e8e0]",
-        selected && !dropKind && "bg-[#fff1e8] shadow-[inset_0_0_0_2px_#FF6600]",
+          ? "border-[#FF6600] bg-[#FFF0E6] text-[#D14E00] shadow-[inset_0_0_0_0.5px_#FF6600]"
+          : "hover:bg-[#FAFAFA]",
+        selected && !dropKind &&
+          "bg-white shadow-[inset_0_0_0_1.5px_#FF6600]",
+        (selectionMode || selected) && "pl-10",
       )}
     >
-      {selectionMode ? (
+      {selectionMode || selected ? (
         <span
           aria-hidden="true"
           className={cn(
-            "flex h-5 w-5 shrink-0 items-center justify-center border-2 border-[#1a1a1a]",
-            selected ? "bg-[#FF6600] text-white" : "bg-[#f0f0e8]",
+            "absolute left-2 top-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+            selected
+              ? "bg-[#FF6600] text-white"
+              : "border border-[#D8D8DE] bg-white text-transparent",
           )}
         >
           {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
         </span>
       ) : null}
       <Folder
-        className={cn("h-5 w-5 flex-shrink-0", dropKind ? "text-[#f0f0e8]" : "text-[#888]")}
+        className={cn("h-5 w-5 flex-shrink-0", dropKind ? "text-[#D14E00]" : "text-[#6E6E73]")}
         strokeWidth={1.75}
       />
       <div className="flex-1 min-w-0">
@@ -231,14 +260,14 @@ export function FolderTile({
             onBlur={() => void handleRename()}
             onFocus={(e) => e.currentTarget.select()}
             autoFocus
-            className="w-full px-1 py-0.5 text-sm font-bold border border-[#1a1a1a] bg-[#f0f0e8]"
+            className="w-full rounded-[8px] border border-[#E8E8EC] bg-white px-2 py-1 text-sm font-medium text-[#131315] outline-none focus:border-[#FF6600]"
           />
         ) : (
           <>
-            <div className={cn("text-sm font-bold truncate", dropKind ? "text-[#f0f0e8]" : "text-[#1a1a1a]")}>
+            <div className={cn("truncate text-sm font-semibold", dropKind ? "text-[#D14E00]" : "text-[#131315]")}>
               {dropKind === "files" ? `Upload into ${name}` : name}
             </div>
-            <div className={cn("text-[10px] font-mono", dropKind ? "text-[#f0f0e8]/80" : "text-[#888]")}>
+            <div className={cn("font-['Geist_Mono',system-ui,sans-serif] text-[11px]", dropKind ? "text-[#D14E00]/80" : "text-[#A0A0A5]")}>
               {dropKind === "files"
                 ? "Release to choose this folder"
                 : `${itemCount} ${itemCount === 1 ? "item" : "items"}`}
@@ -258,13 +287,15 @@ export function FolderTile({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="inline-flex h-10 w-10 items-center justify-center hover:bg-[#1a1a1a] hover:text-[#f0f0e8]"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-[8px] text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
+                aria-label="Folder actions"
               >
                 <MoreVertical className="h-3.5 w-3.5" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className={SOFT_MENU_CONTENT}>
               <DropdownMenuItem
+                className={SOFT_MENU_ITEM}
                 onClick={() => {
                   setDraftName(name);
                   setEditing(true);
@@ -275,7 +306,10 @@ export function FolderTile({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => void handleDelete()}
-                className="text-[#dc2626] focus:text-[#dc2626]"
+                className={cn(
+                  SOFT_MENU_ITEM,
+                  "text-[#D8434F] hover:bg-[#FFF5F5] focus:bg-[#FFF5F5] focus:text-[#D8434F]",
+                )}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete

@@ -71,12 +71,23 @@ import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
 import { ShareFolderDialog } from "@/components/ShareFolderDialog";
 import { MoveToFolderDialog } from "@/components/MoveToFolderDialog";
 import { friendlyError } from "@/lib/friendlyError";
+import {
+  SNIP_VIDEO_DRAG_TYPE,
+  setDraggedVideoData,
+} from "@/lib/projectDrag";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
   tone: "success" | "error";
   message: string;
 };
+
+const SOFT_MENU_CONTENT =
+  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
+const SOFT_MENU_ITEM =
+  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
+const SELECTION_BAR_BUTTON =
+  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] disabled:pointer-events-none disabled:opacity-40";
 
 async function copyTextToClipboard(text: string) {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -115,6 +126,8 @@ type VideoIntentTargetProps = {
   muxPlaybackId?: string;
   draggable?: boolean;
   selected?: boolean;
+  selectedVideoIds?: readonly Id<"videos">[];
+  onDragSelectOnly?: () => void;
   /** When true, a plain click toggles selection instead of opening the
    *  video — this is what the header "Select" button turns on so users
    *  don't have to know the Cmd/Ctrl/Shift shortcuts. */
@@ -157,6 +170,8 @@ function VideoIntentTarget({
   muxPlaybackId,
   draggable,
   selected,
+  selectedVideoIds,
+  onDragSelectOnly,
   selectionMode,
   onCombine,
   onOpen,
@@ -182,8 +197,9 @@ function VideoIntentTarget({
       className={cn(
         "relative",
         className,
-        selected && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
-        combineActive && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
+        selected &&
+          "after:pointer-events-none after:absolute after:inset-0 after:z-20 after:rounded-[12px] after:shadow-[inset_0_0_0_1.5px_#FF6600]",
+        combineActive && "ring-[1.5px] ring-inset ring-[#FF6600]",
       )}
       onDragOver={
         onCombine
@@ -192,7 +208,7 @@ function VideoIntentTarget({
               // arbitrary desktop files. A self-drop can't be detected here
               // (the payload isn't readable during dragover) so we let it
               // highlight, then no-op on drop.
-              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
                 return;
               e.preventDefault();
               e.stopPropagation();
@@ -205,13 +221,13 @@ function VideoIntentTarget({
       onDrop={
         onCombine
           ? (e) => {
-              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
                 return;
               e.preventDefault();
               e.stopPropagation();
               setCombineActive(false);
               const draggedId = e.dataTransfer.getData(
-                "application/x-snip-video",
+                SNIP_VIDEO_DRAG_TYPE,
               );
               if (draggedId && draggedId !== videoId) {
                 onCombine(draggedId as Id<"videos">);
@@ -239,29 +255,35 @@ function VideoIntentTarget({
         }
         onOpen();
       }}
-      draggable={draggable && !selectionMode}
+      draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("application/x-snip-video", videoId);
+        if (selectionMode && !selected) onDragSelectOnly?.();
+        const draggedIds =
+          selected && selectedVideoIds && selectedVideoIds.length > 1
+            ? selectedVideoIds
+            : [videoId];
+        setDraggedVideoData(e.dataTransfer, videoId, draggedIds);
       }}
       {...prewarmIntentHandlers}
     >
       {combineActive ? (
-        <div className="pointer-events-none absolute left-1 top-1 z-20 inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#FF6600] px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-[#f0f0e8]">
+        <div className="pointer-events-none absolute left-2 top-2 z-30 inline-flex items-center gap-1 rounded-[6px] bg-[#FFF0E6] px-2 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[10px] font-medium uppercase tracking-widest text-[#D14E00]">
           <FolderPlus className="h-3 w-3" />
           New folder
         </div>
       ) : null}
-      {selectionMode ? (
+      {selectionMode || selected ? (
         <span
           aria-hidden="true"
           className={cn(
-            "absolute left-2 top-2 z-30 flex h-6 w-6 items-center justify-center border-2 border-[#1a1a1a]",
-            selected ? "bg-[#FF6600] text-white" : "bg-[#f0f0e8]",
+            "absolute left-2 top-2 z-40 flex h-5 w-5 items-center justify-center rounded-full",
+            selected
+              ? "bg-[#FF6600] text-white"
+              : "border border-[#D8D8DE] bg-white text-transparent",
           )}
         >
-          {selected ? <Check className="h-4 w-4" strokeWidth={3} /> : null}
+          {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
         </span>
       ) : null}
       {children}
@@ -478,7 +500,7 @@ export default function ProjectPage({
     async (videoId: Id<"videos">) => {
       try {
         await requestProxies({ videoId });
-        alert("Generating a 720p proxy — it'll appear here once Mux finishes.");
+        alert("Generating a 720p proxy. It will appear here once Mux finishes.");
       } catch (error) {
         alert(error instanceof Error ? error.message : "Couldn't start proxy generation.");
       }
@@ -678,8 +700,9 @@ export default function ProjectPage({
 
   const handleBulkMove = async (
     destinationFolderId: Id<"folders"> | null,
+    videoIds: readonly Id<"videos">[] = Array.from(selectedVideoIds),
   ) => {
-    const ids = Array.from(selectedVideoIds);
+    const ids = Array.from(videoIds);
     if (ids.length === 0) return;
     for (const videoId of ids) {
       await moveVideoToFolder({
@@ -780,7 +803,7 @@ export default function ProjectPage({
       }
       for (const r of preparing) {
         proxyEntries.push({
-          label: `Proxy (${r.resolution}) — generating…`,
+          label: `Proxy (${r.resolution}), generating…`,
           icon: <Download className="h-4 w-4" />,
           disabled: true,
           onSelect: () => {},
@@ -1032,6 +1055,26 @@ export default function ProjectPage({
     [filteredVideos, lastClickedVideoId],
   );
 
+  const handleVideoDragSelectOnly = useCallback(
+    (videoId: Id<"videos">) => {
+      setSelectedVideoIds(new Set([videoId]));
+      setSelectedFolderIds(new Set());
+      setSelectedContractIds(new Set());
+      setLastClickedVideoId(videoId);
+    },
+    [],
+  );
+
+  const handleFolderDragSelectOnly = useCallback(
+    (draggedFolderId: Id<"folders">) => {
+      setSelectedVideoIds(new Set());
+      setSelectedFolderIds(new Set([draggedFolderId]));
+      setSelectedContractIds(new Set());
+      setLastClickedVideoId(null);
+    },
+    [],
+  );
+
   const selectedVideoIdsArray = useMemo(
     () => Array.from(selectedVideoIds),
     [selectedVideoIds],
@@ -1175,7 +1218,7 @@ export default function ProjectPage({
   if (context === null || project === null) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Project not found</div>
+        <div className="text-[#6E6E73]">Project not found</div>
       </div>
     );
   }
@@ -1186,7 +1229,7 @@ export default function ProjectPage({
   if (!project) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Loading project…</div>
+        <div className="text-[#6E6E73]">Loading project…</div>
       </div>
     );
   }
@@ -1194,27 +1237,30 @@ export default function ProjectPage({
   const canUpload = project?.role !== "viewer";
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col bg-[#FAFAFA] font-['Inter_Tight',system-ui,sans-serif] text-[#131315]">
       {/* Floating selection toolbar — surfaces only when the user has
           multi-selected items. Drives the ad-hoc bundle share flow. */}
       {selectionMode || selectedCount > 0 ? (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] px-4 py-2.5 shadow-[4px_4px_0px_0px_var(--shadow-color)] max-w-[95vw] flex-wrap justify-center">
-          <span className="font-mono text-xs uppercase tracking-wider mr-1">
+        <div className="fixed bottom-6 left-1/2 z-40 flex max-w-[95vw] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-full border border-[#E8E8EC] bg-white px-3 py-2 shadow-[0_8px_24px_rgba(19,19,21,0.10)]">
+          <span className="mr-1 shrink-0 text-[13px] font-medium text-[#6E6E73]">
             {selectedCount} selected
           </span>
           <button
             type="button"
             disabled={Boolean(bulkBusy)}
             onClick={selectAllVisible}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className={SELECTION_BAR_BUTTON}
           >
-            Select all <span className="font-mono opacity-70">⌘A</span>
+            Select all <span className="text-[11px] text-[#A0A0A5]">⌘A</span>
           </button>
           <button
             type="button"
             disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setSelectionShareOpen(true)}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-[#FF6600] text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#9A3412] disabled:opacity-40"
+            className={cn(
+              SELECTION_BAR_BUTTON,
+              "bg-[#131315] text-white hover:bg-[#131315] hover:opacity-85",
+            )}
           >
             <LinkIcon className="inline h-3.5 w-3.5 mr-1" />
             Share
@@ -1223,7 +1269,7 @@ export default function ProjectPage({
             type="button"
             disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => void handleBulkDownload()}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className={SELECTION_BAR_BUTTON}
           >
             <Download className="inline h-3.5 w-3.5 mr-1" />
             {bulkBusy === "download" ? "Downloading…" : "Download"}
@@ -1232,7 +1278,7 @@ export default function ProjectPage({
             type="button"
             disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setMoveOpen(true)}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className={SELECTION_BAR_BUTTON}
           >
             <FolderInput className="inline h-3.5 w-3.5 mr-1" />
             Move
@@ -1241,16 +1287,20 @@ export default function ProjectPage({
             type="button"
             disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => void handleBulkDuplicate()}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className={SELECTION_BAR_BUTTON}
           >
             <Copy className="inline h-3.5 w-3.5 mr-1" />
-            {bulkBusy === "duplicate" ? "Duplicating…" : "Duplicate ⌘D"}
+            {bulkBusy === "duplicate" ? (
+              "Duplicating…"
+            ) : (
+              <>Duplicate <span className="text-[11px] text-[#A0A0A5]">⌘D</span></>
+            )}
           </button>
           <button
             type="button"
             disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setBulkRenameOpen(true)}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className={SELECTION_BAR_BUTTON}
           >
             <Pencil className="inline h-3.5 w-3.5 mr-1" />
             Rename
@@ -1259,7 +1309,7 @@ export default function ProjectPage({
             type="button"
             disabled={Boolean(bulkBusy) || hasNonFileSelection || selectedVideoIds.size === 0}
             onClick={() => setBulkMetaOpen(true)}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a] disabled:opacity-40"
+            className={SELECTION_BAR_BUTTON}
           >
             <Tags className="inline h-3.5 w-3.5 mr-1" />
             Metadata
@@ -1268,24 +1318,31 @@ export default function ProjectPage({
             type="button"
             disabled={Boolean(bulkBusy) || selectedCount === 0}
             onClick={() => void handleBulkDelete()}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8] bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#dc2626] hover:border-[#dc2626] disabled:opacity-40"
+            className={cn(
+              SELECTION_BAR_BUTTON,
+              "text-[#D8434F] hover:bg-[#FFF5F5] hover:text-[#D8434F]",
+            )}
           >
             <Trash2 className="inline h-3.5 w-3.5 mr-1" />
-            {bulkBusy === "delete" ? "Deleting…" : "Delete ⌘⌫"}
+            {bulkBusy === "delete" ? (
+              "Deleting…"
+            ) : (
+              <>Delete <span className="text-[11px] text-[#A0A0A5]">⌘⌫</span></>
+            )}
           </button>
           <button
             type="button"
             onClick={clearSelection}
-            className="min-h-10 px-3 py-1 border-2 border-[#f0f0e8]/40 bg-transparent text-[#f0f0e8] font-bold text-xs uppercase tracking-wider hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
+            className={cn(SELECTION_BAR_BUTTON, "text-[#6E6E73]")}
           >
-            Done <span className="font-mono opacity-70">Esc</span>
+            Done <span className="text-[11px] text-[#A0A0A5]">Esc</span>
           </button>
         </div>
       ) : null}
 
       <ShareSelectionDialog
         videoIds={selectedVideoIdsArray}
-        defaultName={project?.name ? `${project.name} — selection` : undefined}
+        defaultName={project?.name ? `${project.name} selection` : undefined}
         open={selectionShareOpen}
         onOpenChange={(open) => {
           setSelectionShareOpen(open);
@@ -1344,10 +1401,10 @@ export default function ProjectPage({
               }}
               aria-pressed={selectionMode}
               className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-colors flex-shrink-0",
+                "inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium transition-colors",
                 selectionMode
-                  ? "bg-[#FF6600] text-[#f0f0e8] hover:bg-[#9A3412]"
-                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                  ? "border-[#F0D2C3] bg-[#FFF0E6] text-[#D14E00] hover:bg-[#FFE8D8]"
+                  : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
               )}
               title={
                 selectionMode
@@ -1355,7 +1412,7 @@ export default function ProjectPage({
                   : "Select multiple items for bulk actions"
               }
             >
-              <CheckSquare className="h-3.5 w-3.5" />
+              <CheckSquare className="h-4 w-4" />
               <span className="hidden sm:inline">
                 {selectionMode ? "Done" : "Select"}
               </span>
@@ -1368,10 +1425,10 @@ export default function ProjectPage({
                 navigator.vibrate?.(8);
                 setFolderShareOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] active:translate-y-px active:bg-[#d8d8cf] transition-[background-color,transform] flex-shrink-0"
+              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3.5 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
               title="Share this folder & everything in it"
             >
-              <Share2 className="h-3.5 w-3.5" />
+              <Share2 className="h-4 w-4" />
               <span className="hidden sm:inline">Share folder</span>
             </button>
           ) : null}
@@ -1380,10 +1437,10 @@ export default function ProjectPage({
               type="button"
               onClick={() => void handleShareProject()}
               disabled={isSharingProject}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] disabled:opacity-50 transition-colors flex-shrink-0"
-              title="Share the whole project — every file in every folder. Link is copied to your clipboard."
+              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3.5 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] disabled:opacity-50"
+              title="Share the whole project, every file in every folder. The link is copied to your clipboard."
             >
-              <Share2 className="h-3.5 w-3.5" />
+              <Share2 className="h-4 w-4" />
               <span className="hidden sm:inline">
                 {isSharingProject ? "Creating…" : "Share project"}
               </span>
@@ -1431,12 +1488,21 @@ export default function ProjectPage({
           kindFilter={kindFilter}
           onKindFilterChange={setKindFilter}
           availableKindBuckets={availableKindBuckets}
-          onDropVideoOnBreadcrumb={(videoId, targetFolderId) =>
-            void handleMoveVideo(videoId, targetFolderId)
+          onDropVideoOnBreadcrumb={(videoId, targetFolderId) => {
+            if (selectedVideoIds.has(videoId)) {
+              void handleBulkMove(targetFolderId, [videoId]);
+            } else {
+              void handleMoveVideo(videoId, targetFolderId);
+            }
+          }}
+          onDropVideosOnBreadcrumb={(videoIds, targetFolderId) =>
+            void handleBulkMove(targetFolderId, videoIds)
           }
-          onDropFolderOnBreadcrumb={(folderId, targetFolderId) =>
-            void handleMoveFolder(folderId, targetFolderId)
-          }
+          onDropFolderOnBreadcrumb={(droppedFolderId, targetFolderId) => {
+            void handleMoveFolder(droppedFolderId, targetFolderId).then(() => {
+              if (selectedFolderIds.has(droppedFolderId)) clearSelection();
+            });
+          }}
         />
       ) : null}
 
@@ -1498,12 +1564,22 @@ export default function ProjectPage({
               selectedFolderIds={selectedFolderIds}
               selectionMode={selectionMode}
               onSelectToggle={(folderId) => handleFolderSelectionToggle(folderId)}
-              onDropVideo={(videoId, folderId) =>
-                void handleMoveVideo(videoId, folderId)
+              onDragSelectOnly={handleFolderDragSelectOnly}
+              onDropVideo={(videoId, folderId) => {
+                if (selectedVideoIds.has(videoId)) {
+                  void handleBulkMove(folderId, [videoId]);
+                } else {
+                  void handleMoveVideo(videoId, folderId);
+                }
+              }}
+              onDropVideos={(videoIds, folderId) =>
+                void handleBulkMove(folderId, videoIds)
               }
-              onDropFolder={(droppedId, targetId) =>
-                void handleMoveFolder(droppedId, targetId)
-              }
+              onDropFolder={(droppedId, targetId) => {
+                void handleMoveFolder(droppedId, targetId).then(() => {
+                  if (selectedFolderIds.has(droppedId)) clearSelection();
+                });
+              }}
               onDropFiles={(files, targetId) =>
                 requestUpload(files, project._id, targetId)
               }
@@ -1514,19 +1590,21 @@ export default function ProjectPage({
                 them as the project's organizational/metadata strip.
                 Hidden when empty AND the viewer can't create one. */}
             {currentFolderId === null && (
-              <ContractListSection
-                projectId={project._id}
-                teamSlug={resolvedTeamSlug}
-                items={contractDocuments}
-                search={search}
-                selectedIds={selectedContractIds}
-                selectionMode={selectionMode}
-                onSelectToggle={handleContractSelectionToggle}
-              />
+              <div className="[&_section>div>div:first-child>div]:!text-[11px] [&_section>div>div:first-child>div]:!font-medium [&_section>div>div:first-child>div]:!tracking-widest [&_section>div>div:first-child>div]:!text-[#A0A0A5]">
+                <ContractListSection
+                  projectId={project._id}
+                  teamSlug={resolvedTeamSlug}
+                  items={contractDocuments}
+                  search={search}
+                  selectedIds={selectedContractIds}
+                  selectionMode={selectionMode}
+                  onSelectToggle={handleContractSelectionToggle}
+                />
+              </div>
             )}
             <div className="px-6 pt-4 pb-6">
               {(filteredFolders?.length ?? 0) > 0 ? (
-                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+                <div className="mb-2 font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
                   Files
                 </div>
               ) : null}
@@ -1562,6 +1640,10 @@ export default function ProjectPage({
                       draggable={canUpload}
                       selected={selectedVideoIds.has(video._id)}
                       selectionMode={selectionMode}
+                      selectedVideoIds={selectedVideoIdsArray}
+                      onDragSelectOnly={() =>
+                        handleVideoDragSelectOnly(video._id)
+                      }
                       onSelectToggle={(mods) =>
                         handleSelectionToggle(video._id, mods)
                       }
@@ -1601,7 +1683,7 @@ export default function ProjectPage({
                     items={() => buildVideoMenu(video, canDownload)}
                   >
                   <VideoIntentTarget
-                    className="group cursor-pointer flex flex-col"
+                    className="group flex cursor-pointer flex-col overflow-hidden rounded-[12px] border border-[#E8E8EC] bg-white transition-[border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm"
                     teamSlug={resolvedTeamSlug}
                     projectId={project._id}
                     videoId={video._id}
@@ -1609,6 +1691,10 @@ export default function ProjectPage({
                     draggable={canUpload}
                     selected={selectedVideoIds.has(video._id)}
                     selectionMode={selectionMode}
+                    selectedVideoIds={selectedVideoIdsArray}
+                    onDragSelectOnly={() =>
+                      handleVideoDragSelectOnly(video._id)
+                    }
                     onCombine={
                       canUpload
                         ? (draggedId) =>
@@ -1625,7 +1711,7 @@ export default function ProjectPage({
                     }
                   >
                     <div
-                      className="relative aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all"
+                      className="relative aspect-video overflow-hidden bg-[#F1F1F3]"
                     >
                       {thumbnailSrc ? (
                         <img
@@ -1635,7 +1721,7 @@ export default function ProjectPage({
                         />
                       ) : (
                         <div className="absolute inset-0 flex items-center justify-center">
-                          <Play className="h-10 w-10 text-[#888]" />
+                          <Play className="h-10 w-10 text-[#A0A0A5]" />
                         </div>
                       )}
                       {video.status === "ready" ? (
@@ -1647,13 +1733,13 @@ export default function ProjectPage({
                         />
                       ) : null}
                     {video.status === "ready" && video.duration && (
-                      <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[11px] font-mono px-1.5 py-0.5">
+                      <div className="absolute bottom-2 right-2 rounded-[6px] bg-[#131315]/80 px-1.5 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-white">
                         {formatDuration(video.duration)}
                       </div>
                     )}
                     {video.status !== "ready" && (
                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                        <span className="text-white text-xs font-bold uppercase tracking-wider">
+                        <span className="text-[13px] font-medium text-white">
                           {video.renditionEvictedAt
                             ? video.status === "processing"
                               ? "Rebuilding…"
@@ -1677,14 +1763,16 @@ export default function ProjectPage({
                         >
                           <button
                             type="button"
-                            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center bg-black/60 hover:bg-black/80 text-white"
+                            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] border border-[#E8E8EC] bg-white text-[#6E6E73] shadow-sm hover:bg-[#F1F1F3] hover:text-[#131315]"
+                            aria-label="Video actions"
                           >
                             <MoreVertical className="h-4 w-4" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
+                        <DropdownMenuContent align="end" className={SOFT_MENU_CONTENT}>
                           {canDownload && (
                             <DropdownMenuItem
+                              className={SOFT_MENU_ITEM}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void handleDownloadVideo(
@@ -1698,6 +1786,7 @@ export default function ProjectPage({
                             </DropdownMenuItem>
                           )}
                           <DropdownMenuItem
+                            className={SOFT_MENU_ITEM}
                             onClick={(e) => {
                               e.stopPropagation();
                               void handleShareVideo(video);
@@ -1708,7 +1797,10 @@ export default function ProjectPage({
                           </DropdownMenuItem>
                           {canUpload && (
                             <DropdownMenuItem
-                              className="text-[#dc2626] focus:text-[#dc2626]"
+                              className={cn(
+                                SOFT_MENU_ITEM,
+                                "text-[#D8434F] hover:bg-[#FFF5F5] focus:bg-[#FFF5F5] focus:text-[#D8434F]",
+                              )}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDeleteVideo(video._id);
@@ -1722,13 +1814,14 @@ export default function ProjectPage({
                       </DropdownMenu>
                     </div>
                   </div>
-                  <div className="mt-2.5">
-                    <p className="text-[15px] text-[#1a1a1a] font-black truncate leading-tight">
+                  <div className="px-3 pb-3 pt-2.5">
+                    <p className="truncate text-sm font-semibold leading-5 text-[#131315]">
                       {video.title}
                     </p>
                     <div className="mt-1.5 flex items-center gap-3">
-                      <VideoWorkflowStatusControl
-                        status={video.workflowStatus}
+                        <VideoWorkflowStatusControl
+                          status={video.workflowStatus}
+                          soft
                         stopPropagation
                         disabled={!canUpload}
                         onChange={(workflowStatus) =>
@@ -1736,18 +1829,18 @@ export default function ProjectPage({
                         }
                       />
                       {video.commentCount > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-[#888]">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-[#A0A0A5]">
                           <MessageSquare className="h-3 w-3" />
                           {video.commentCount}
                         </span>
                       )}
                       {watchingCount > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-[#1a1a1a]">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-[#6E6E73]">
                           <Eye className="h-3 w-3" />
                           {watchingCount}
                         </span>
                       )}
-                      <span className="text-[11px] text-[#888] ml-auto font-mono">
+                      <span className="ml-auto font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
                         {formatRelativeTime(video._creationTime)}
                       </span>
                     </div>
@@ -1781,12 +1874,22 @@ export default function ProjectPage({
               selectedFolderIds={selectedFolderIds}
               selectionMode={selectionMode}
               onSelectToggle={(folderId) => handleFolderSelectionToggle(folderId)}
-              onDropVideo={(videoId, folderId) =>
-                void handleMoveVideo(videoId, folderId)
+              onDragSelectOnly={handleFolderDragSelectOnly}
+              onDropVideo={(videoId, folderId) => {
+                if (selectedVideoIds.has(videoId)) {
+                  void handleBulkMove(folderId, [videoId]);
+                } else {
+                  void handleMoveVideo(videoId, folderId);
+                }
+              }}
+              onDropVideos={(videoIds, folderId) =>
+                void handleBulkMove(folderId, videoIds)
               }
-              onDropFolder={(droppedId, targetId) =>
-                void handleMoveFolder(droppedId, targetId)
-              }
+              onDropFolder={(droppedId, targetId) => {
+                void handleMoveFolder(droppedId, targetId).then(() => {
+                  if (selectedFolderIds.has(droppedId)) clearSelection();
+                });
+              }}
               onDropFiles={(files, targetId) =>
                 requestUpload(files, project._id, targetId)
               }
@@ -1794,17 +1897,19 @@ export default function ProjectPage({
               onRenameConsumed={() => setRenameFolderId(null)}
             />
             {currentFolderId === null && (
-              <ContractListSection
-                projectId={project._id}
-                teamSlug={resolvedTeamSlug}
-                items={contractDocuments}
-                search={search}
-                selectedIds={selectedContractIds}
-                selectionMode={selectionMode}
-                onSelectToggle={handleContractSelectionToggle}
-              />
+              <div className="[&_section>div>div:first-child>div]:!text-[11px] [&_section>div>div:first-child>div]:!font-medium [&_section>div>div:first-child>div]:!tracking-widest [&_section>div>div:first-child>div]:!text-[#A0A0A5]">
+                <ContractListSection
+                  projectId={project._id}
+                  teamSlug={resolvedTeamSlug}
+                  items={contractDocuments}
+                  search={search}
+                  selectedIds={selectedContractIds}
+                  selectionMode={selectionMode}
+                  onSelectToggle={handleContractSelectionToggle}
+                />
+              </div>
             )}
-            <div className="divide-y-2 divide-[#1a1a1a]">
+            <div className="bg-white">
             {filteredVideos?.map((video) => {
               const isPlayableVideo =
                 Boolean(video.muxPlaybackId) ||
@@ -1829,6 +1934,10 @@ export default function ProjectPage({
                     draggable={canUpload}
                     selected={selectedVideoIds.has(video._id)}
                     selectionMode={selectionMode}
+                    selectedVideoIds={selectedVideoIdsArray}
+                    onDragSelectOnly={() =>
+                      handleVideoDragSelectOnly(video._id)
+                    }
                     onSelectToggle={(mods) =>
                       handleSelectionToggle(video._id, mods)
                     }
@@ -1868,7 +1977,7 @@ export default function ProjectPage({
                   items={() => buildVideoMenu(video, canDownload)}
                 >
                 <VideoIntentTarget
-                  className="group flex items-center gap-5 px-6 py-3 hover:bg-[#e8e8e0] cursor-pointer transition-colors"
+                  className="group flex cursor-pointer items-center gap-5 border-b border-[#F1F1F3] bg-white px-6 py-3 transition-colors hover:bg-[#FAFAFA]"
                   teamSlug={resolvedTeamSlug}
                   projectId={project._id}
                   videoId={video._id}
@@ -1876,6 +1985,10 @@ export default function ProjectPage({
                   draggable={canUpload}
                   selected={selectedVideoIds.has(video._id)}
                   selectionMode={selectionMode}
+                  selectedVideoIds={selectedVideoIdsArray}
+                  onDragSelectOnly={() =>
+                    handleVideoDragSelectOnly(video._id)
+                  }
                   onCombine={
                     canUpload
                       ? (draggedId) =>
@@ -1893,7 +2006,7 @@ export default function ProjectPage({
                 >
                   {/* Thumbnail */}
                   <div
-                    className="relative w-44 aspect-video bg-[#e8e8e0] overflow-hidden border-2 border-[#1a1a1a] shrink-0 shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all"
+                    className="relative aspect-video w-44 shrink-0 overflow-hidden rounded-[12px] border border-[#E8E8EC] bg-[#F1F1F3]"
                   >
                     {thumbnailSrc ? (
                       <img
@@ -1903,7 +2016,7 @@ export default function ProjectPage({
                       />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <Play className="h-6 w-6 text-[#888]" />
+                        <Play className="h-6 w-6 text-[#A0A0A5]" />
                       </div>
                     )}
                     {video.status === "ready" ? (
@@ -1916,7 +2029,7 @@ export default function ProjectPage({
                     ) : null}
                     {video.status !== "ready" && (
                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                        <span className="text-white text-[10px] font-bold uppercase tracking-wider">
+                        <span className="text-[13px] font-medium text-white">
                           {video.renditionEvictedAt
                             ? video.status === "processing"
                               ? "Rebuilding…"
@@ -1932,7 +2045,7 @@ export default function ProjectPage({
                       </div>
                     )}
                     {video.status === "ready" && video.duration && (
-                      <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-mono px-1 py-0.5">
+                      <div className="absolute bottom-1 right-1 rounded-[6px] bg-[#131315]/80 px-1.5 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[10px] text-white">
                         {formatDuration(video.duration)}
                       </div>
                     )}
@@ -1940,12 +2053,13 @@ export default function ProjectPage({
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <p className="font-black text-[#1a1a1a] truncate">
+                  <p className="truncate text-sm font-semibold text-[#131315]">
                     {video.title}
                   </p>
                   <div className="flex items-center gap-3 mt-1">
                     <VideoWorkflowStatusControl
                       status={video.workflowStatus}
+                      soft
                       stopPropagation
                       disabled={!canUpload}
                       onChange={(workflowStatus) =>
@@ -1953,22 +2067,22 @@ export default function ProjectPage({
                       }
                     />
                     {video.commentCount > 0 && (
-                      <span className="inline-flex items-center gap-1 text-xs text-[#888]">
+                      <span className="inline-flex items-center gap-1 text-xs text-[#A0A0A5]">
                         <MessageSquare className="h-3.5 w-3.5" />
                         {video.commentCount}
                       </span>
                     )}
                     {watchingCount > 0 && (
-                      <span className="inline-flex items-center gap-1 text-xs text-[#1a1a1a]">
+                      <span className="inline-flex items-center gap-1 text-xs text-[#6E6E73]">
                         <Eye className="h-3.5 w-3.5" />
                         {watchingCount}
                       </span>
                     )}
-                    <span className="text-xs text-[#888] font-mono">
+                    <span className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
                       {formatRelativeTime(video._creationTime)}
                     </span>
                     {video.uploaderName && (
-                      <span className="text-xs text-[#888]">
+                      <span className="text-xs text-[#A0A0A5]">
                         {video.uploaderName}
                       </span>
                     )}
@@ -1984,14 +2098,16 @@ export default function ProjectPage({
                     >
                       <button
                         type="button"
-                        className="inline-flex h-8 w-8 cursor-pointer items-center justify-center text-[#888] hover:text-[#1a1a1a]"
+                        className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
+                        aria-label="Video actions"
                       >
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
+                    <DropdownMenuContent align="end" className={SOFT_MENU_CONTENT}>
                       {canDownload && (
                         <DropdownMenuItem
+                          className={SOFT_MENU_ITEM}
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleDownloadVideo(video._id, video.title);
@@ -2002,6 +2118,7 @@ export default function ProjectPage({
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
+                        className={SOFT_MENU_ITEM}
                         onClick={(e) => {
                           e.stopPropagation();
                           void handleShareVideo(video);
@@ -2012,7 +2129,10 @@ export default function ProjectPage({
                       </DropdownMenuItem>
                       {canUpload && (
                         <DropdownMenuItem
-                          className="text-[#dc2626] focus:text-[#dc2626]"
+                          className={cn(
+                            SOFT_MENU_ITEM,
+                            "text-[#D8434F] hover:bg-[#FFF5F5] focus:bg-[#FFF5F5] focus:text-[#D8434F]",
+                          )}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteVideo(video._id);
@@ -2042,10 +2162,10 @@ export default function ProjectPage({
         <div className="fixed right-4 top-4 z-50" aria-live="polite">
           <div
             className={cn(
-              "border-2 px-3 py-2 text-sm font-bold shadow-[4px_4px_0px_0px_var(--shadow-color)]",
+              "rounded-[12px] border bg-white px-3 py-2 text-[13px] font-medium shadow-[0_8px_24px_rgba(19,19,21,0.10)]",
               shareToast.tone === "success"
-                ? "border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a]"
-                : "border-[#dc2626] bg-[#fef2f2] text-[#dc2626]",
+                ? "border-[#E8E8EC] text-[#131315]"
+                : "border-[#F0D2D4] bg-[#FFF5F5] text-[#D8434F]",
             )}
           >
             {shareToast.message}

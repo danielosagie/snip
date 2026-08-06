@@ -41,6 +41,7 @@ export type VideoWorkflowStatusControlProps = {
   stopPropagation?: boolean;
   disabled?: boolean;
   className?: string;
+  soft?: boolean;
 };
 
 export function VideoWorkflowStatusControl({
@@ -50,6 +51,7 @@ export function VideoWorkflowStatusControl({
   stopPropagation = false,
   disabled = false,
   className,
+  soft = false,
 }: VideoWorkflowStatusControlProps) {
   const handleClick = (event: MouseEvent) => {
     if (stopPropagation) {
@@ -66,11 +68,16 @@ export function VideoWorkflowStatusControl({
           type="button"
           disabled={disabled}
           className={cn(
-            "inline-flex items-center gap-1.5 font-bold uppercase tracking-wider transition-colors",
+            "inline-flex items-center gap-1.5 transition-colors",
+            soft
+              ? "rounded-full bg-[#F1F1F3] px-2.5 py-1 text-[11px] font-medium tracking-normal text-[#6E6E73] hover:bg-[#E8E8EC] hover:text-[#131315]"
+              : "font-bold uppercase tracking-wider",
             disabled
               ? "cursor-not-allowed opacity-50"
-              : "cursor-pointer hover:text-[#1a1a1a]",
-            isLg ? "text-xs text-[#1a1a1a]" : "text-[10px] text-[#888]",
+              : soft
+                ? "cursor-pointer"
+                : "cursor-pointer hover:text-[#1a1a1a]",
+            !soft && (isLg ? "text-xs text-[#1a1a1a]" : "text-[10px] text-[#888]"),
             className,
           )}
           aria-label="Update review status"
@@ -88,7 +95,14 @@ export function VideoWorkflowStatusControl({
           )} />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" onClick={handleClick}>
+      <DropdownMenuContent
+        align="start"
+        onClick={handleClick}
+        className={cn(
+          soft &&
+            "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]",
+        )}
+      >
         <DropdownMenuRadioGroup
           value={status}
           onValueChange={(nextStatus) => {
@@ -97,7 +111,15 @@ export function VideoWorkflowStatusControl({
           }}
         >
           {VIDEO_WORKFLOW_STATUS_OPTIONS.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value} className="gap-2">
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              className={cn(
+                "gap-2",
+                soft &&
+                  "rounded-[8px] py-1.5 pl-8 pr-2.5 text-[13px] font-medium hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]",
+              )}
+            >
               <span className={cn(
                 "h-2 w-2 rounded-full shrink-0",
                 workflowStatusDotColor(option.value),
