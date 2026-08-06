@@ -27,6 +27,32 @@ import {
   setDraggedVideoData,
 } from "@/lib/projectDrag";
 
+/**
+ * Signed original-file URLs, shared across every tile in the session.
+ *
+ * Tiles now mount and unmount as the windowed grid scrolls, so without this
+ * a scroll through a folder of images re-requests the same URLs on every
+ * pass. Mirrors the `previewSessions` cache in MediaHoverPreview; a failed
+ * request is evicted so it can be retried.
+ */
+const originalUrlRequests = new Map<string, Promise<{ url: string }>>();
+
+function getOriginalUrlCached(
+  videoId: Id<"videos">,
+  fetcher: (args: { videoId: Id<"videos"> }) => Promise<{ url: string }>,
+) {
+  const key = String(videoId);
+  let request = originalUrlRequests.get(key);
+  if (!request) {
+    request = fetcher({ videoId });
+    originalUrlRequests.set(key, request);
+  }
+  return request.catch((error) => {
+    originalUrlRequests.delete(key);
+    throw error;
+  });
+}
+
 const SOFT_MENU_CONTENT =
   "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
 const SOFT_MENU_ITEM =
@@ -56,7 +82,9 @@ interface FileTileProps {
   draggable?: boolean;
   selected?: boolean;
   selectionMode?: boolean;
-  selectedVideoIds?: readonly Id<"videos">[];
+  /** Getter, not a value: the selection Set changes identity on every
+   *  click, and reading it at dragstart keeps it out of the render path. */
+  getSelectedVideoIds?: () => readonly Id<"videos">[];
   onDragSelectOnly?: () => void;
   onSelectToggle?: (event: {
     metaKey: boolean;
@@ -85,7 +113,7 @@ export function FileTile({
   draggable,
   selected,
   selectionMode,
-  selectedVideoIds,
+  getSelectedVideoIds,
   onDragSelectOnly,
   onSelectToggle,
   onDelete,
@@ -111,7 +139,7 @@ export function FileTile({
   useEffect(() => {
     if (!isImage || !isReady) return;
     let cancelled = false;
-    getOriginalPlaybackUrl({ videoId })
+    getOriginalUrlCached(videoId, getOriginalPlaybackUrl)
       .then(({ url }) => {
         if (!cancelled) setThumbnailSrc(url);
       })
@@ -139,6 +167,9 @@ export function FileTile({
 
   return (
     <article
+      // Marks this as a measurable cell for the project grid's windowing
+      // (src/lib/useGridWindow.ts). Harmless anywhere else.
+      data-grid-cell=""
       onClick={(e) => {
         if (
           onSelectToggle &&
@@ -160,10 +191,9 @@ export function FileTile({
       onDragStart={(e) => {
         if (!draggable) return;
         if (selectionMode && !selected) onDragSelectOnly?.();
+        const selection = getSelectedVideoIds?.() ?? [];
         const draggedIds =
-          selected && selectedVideoIds && selectedVideoIds.length > 1
-            ? selectedVideoIds
-            : [videoId];
+          selected && selection.length > 1 ? selection : [videoId];
         setDraggedVideoData(e.dataTransfer, videoId, draggedIds);
       }}
       onDragOver={
@@ -364,7 +394,7 @@ export function FileListRow({
   draggable,
   selected,
   selectionMode,
-  selectedVideoIds,
+  getSelectedVideoIds,
   onDragSelectOnly,
   onSelectToggle,
   onDelete,
@@ -386,7 +416,7 @@ export function FileListRow({
   useEffect(() => {
     if (!isImage || !isReady) return;
     let cancelled = false;
-    getOriginalPlaybackUrl({ videoId })
+    getOriginalUrlCached(videoId, getOriginalPlaybackUrl)
       .then(({ url }) => {
         if (!cancelled) setThumbnailSrc(url);
       })
@@ -432,10 +462,9 @@ export function FileListRow({
       onDragStart={(e) => {
         if (!draggable) return;
         if (selectionMode && !selected) onDragSelectOnly?.();
+        const selection = getSelectedVideoIds?.() ?? [];
         const draggedIds =
-          selected && selectedVideoIds && selectedVideoIds.length > 1
-            ? selectedVideoIds
-            : [videoId];
+          selected && selection.length > 1 ? selection : [videoId];
         setDraggedVideoData(e.dataTransfer, videoId, draggedIds);
       }}
       onDragOver={

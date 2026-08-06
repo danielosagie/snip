@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 /**
- * Landing page — direct implementation of the Paper artboard
+ * Landing page: direct implementation of the Paper artboard
  * 01KTVW7BP98EVMSBJHSWY56FZ0/3-0/1SN-0 (Aug 6, 2026). Layout, copy,
  * and tokens follow that export exactly; only responsiveness, real
  * routes, and the marquee animation are added. Do not restyle without
@@ -71,8 +71,8 @@ export default function Homepage() {
           </h2>
           <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2">
             <FeatureCard
-              title="Stream the cloud, locally"
-              body="Mount your whole library like a local disk. Bytes stream straight from the edge — open a 40GB master without downloading it first."
+              title="Mounts like a hard drive"
+              body="Your whole library shows up in Finder. Open a 40 GB file without downloading it first."
             >
               <div className="mt-6 flex flex-col gap-2">
                 <FolderRow path="clients/2026/rooftop_wedding/" />
@@ -81,8 +81,8 @@ export default function Homepage() {
             </FeatureCard>
 
             <FeatureCard
-              title="Review without the back-and-forth"
-              body="Comments pin to the exact frame. Threads resolve in place, and markers export straight to your NLE — no more “the part around two minutes in.”"
+              title="Notes land on the frame"
+              body="Your client gets a link, not an account. Every comment sticks to the frame it belongs to."
             >
               <div className="mt-6 flex flex-wrap gap-2">
                 <Chip>
@@ -99,11 +99,11 @@ export default function Homepage() {
             </FeatureCard>
 
             <FeatureCard
-              title="Contracts clients actually sign"
-              body="Freeze the terms, verify by one-time code, and keep a court-grade audit trail — consent, hashes, and signatures in the same link as the cut."
+              title="Signing lives with the cut"
+              body="Send the cut and the contract together. They sign with an emailed code, and the terms lock the moment you send."
             >
               <div className="mt-6 flex items-center justify-between rounded-xl border-[0.625px] border-dashed border-[#D9D9DE] p-4">
-                <span className="font-['Instrument_Serif',system-ui,serif] text-[20px] italic leading-7 text-[#131315]">
+                <span className=" text-[16px] text-[#131315]">
                   Maya R.
                 </span>
                 <span className="flex items-center gap-1 rounded-full bg-[#FDF7EE] px-2.5 py-1">
@@ -116,8 +116,8 @@ export default function Homepage() {
             </FeatureCard>
 
             <FeatureCard
-              title="Get paid before the download"
-              body="Put final delivery behind a paywall. Clients watch a watermarked preview until the invoice clears — then downloads unlock themselves."
+              title="Paid before the download"
+              body="Clients watch a watermarked preview. The real file unlocks itself when the invoice clears."
             >
               <div className="mt-6 flex items-center gap-3 rounded-xl bg-[#FAFAFA] px-4 py-3">
                 <Lock className="h-[13px] w-[13px] shrink-0 text-[#6E6E73]" />
@@ -308,7 +308,7 @@ export default function Homepage() {
               </span>
             </div>
             <div className="font-['Geist_Mono',system-ui,monospace] text-[10px] uppercase leading-[15px] tracking-[2px] text-[#A0A0A5]">
-              Video review for creative teams — open source forever
+              Video review for creative teams, open source forever
             </div>
           </div>
         </div>
@@ -560,7 +560,7 @@ const TRUST_CARDS: Array<{
     icon: <KeyRound className="h-[15px] w-[15px] text-[#131315]" />,
     tint: "#F3FBF4",
     title: "OTP-verified signing",
-    body: "Signers confirm identity with a one-time code — no accounts.",
+    body: "Signers confirm identity with a one-time code. No accounts.",
     rotate: "1.2deg",
   },
   {
@@ -588,7 +588,7 @@ const TRUST_CARDS: Array<{
     icon: <Zap className="h-[15px] w-[15px] text-[#131315]" />,
     tint: "#FFF7F2",
     title: "Streams from the edge",
-    body: "Bytes come straight from edge storage — no proxy in the way.",
+    body: "Bytes come straight from edge storage. No proxy in the way.",
     rotate: "1.2deg",
   },
   {

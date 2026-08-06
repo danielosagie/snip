@@ -29,6 +29,8 @@ import {
 import {
   ArrowLeft,
   AtSign,
+  ChevronRight,
+  Folder,
   Calendar,
   Camera,
   CheckSquare,
@@ -589,6 +591,11 @@ export function DocumentEditorPage({
           canCreate={canEdit}
           creating={creatingDocument}
           onCreate={() => void handleCreateDocument()}
+          isDocument={isDocument}
+          recipients={data.recipients}
+          fields={data.fields}
+          onManageSigning={() => setSigningOpen(true)}
+          onPlaceFields={() => setFieldsSheetOpen(true)}
         />
         <ContractBody
           key={syncKey}
@@ -929,11 +936,13 @@ function InlineTitle({
   };
 
   if (!editable) {
-    return <h1 className="max-w-[28rem] truncate text-base font-semibold leading-5 text-[#131315]">{title}</h1>;
+    return <h1 className="max-w-[28rem] truncate px-2 py-1.5 text-base font-semibold leading-5 text-[#131315]">{title}</h1>;
   }
 
   return (
     <div className="flex min-w-0 items-center gap-2">
+      {/* Reads as a heading until you reach for it: the field only shows
+          its edges on hover and focus. */}
       <input
         value={draft}
         onFocus={() => {
@@ -956,7 +965,7 @@ function InlineTitle({
         }}
         aria-label={`Rename ${kind}`}
         maxLength={160}
-        className="min-w-[8rem] max-w-[28rem] truncate border-0 bg-transparent p-0 text-base font-semibold leading-5 text-[#131315] outline-none focus-visible:ring-0"
+        className="field-bare title-field min-w-[8rem] max-w-[28rem] truncate px-2 py-1.5 text-base font-semibold leading-5 text-[#131315]"
         size={Math.min(Math.max(draft.length, 12), 42)}
       />
       {error ? <span className="text-xs text-[#D8434F]" role="alert">{error}</span> : null}
@@ -985,6 +994,11 @@ function DocumentTabsRail({
   canCreate,
   creating,
   onCreate,
+  isDocument,
+  recipients,
+  fields,
+  onManageSigning,
+  onPlaceFields,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -998,6 +1012,11 @@ function DocumentTabsRail({
   canCreate: boolean;
   creating: boolean;
   onCreate: () => void;
+  isDocument: boolean;
+  recipients: RecipientDoc[];
+  fields: FieldDoc[];
+  onManageSigning: () => void;
+  onPlaceFields: () => void;
 }) {
   if (collapsed) {
     // Google-Docs-style: the closed rail leaves a floating handle over the
@@ -1070,6 +1089,87 @@ function DocumentTabsRail({
         )}
       </nav>
 
+      {/* Signing lives in the rail for contracts: recipients and fields are
+          the contract's real structure, the same way headings are a
+          document's. The sheets stay for editing. */}
+      {!isDocument ? (
+        <>
+          <div className="mt-6 px-2.5 pb-2 text-[13px] leading-[18px] text-[#A0A0A5]">Signing</div>
+          <nav className="space-y-0.5">
+            {recipients.length === 0 ? (
+              <p className="px-2.5 py-1 text-[13px] leading-[18px] text-[#A0A0A5]">
+                No recipients yet.
+              </p>
+            ) : (
+              recipients.map((recipient) => (
+                <button
+                  key={recipient._id}
+                  type="button"
+                  onClick={onManageSigning}
+                  className="flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[#F1F1F3] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315]"
+                >
+                  <User className="h-4 w-4 shrink-0 text-[#6E6E73]" strokeWidth={1.75} />
+                  <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] text-[#131315]">
+                    {recipient.name || recipient.email}
+                  </span>
+                  <span className="shrink-0 text-[11px] capitalize text-[#A0A0A5]">
+                    {recipient.status}
+                  </span>
+                </button>
+              ))
+            )}
+            <button
+              type="button"
+              onClick={onManageSigning}
+              className="flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] leading-[18px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315]"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              Add recipient
+            </button>
+          </nav>
+
+          <div className="mt-5 px-2.5 pb-2 text-[13px] leading-[18px] text-[#A0A0A5]">Fields</div>
+          <nav className="space-y-0.5">
+            {fields.length === 0 ? (
+              <p className="px-2.5 py-1 text-[13px] leading-[18px] text-[#A0A0A5]">
+                No fields placed.
+              </p>
+            ) : (
+              fields.map((field) => {
+                const Icon = FIELD_TYPE_ICONS[field.type];
+                const signer = recipients.find((r) => r._id === field.recipientId);
+                return (
+                  <button
+                    key={field._id}
+                    type="button"
+                    onClick={onPlaceFields}
+                    className="flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[#F1F1F3] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315]"
+                  >
+                    <Icon className="h-4 w-4 shrink-0 text-[#6E6E73]" strokeWidth={1.75} />
+                    <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] text-[#131315]">
+                      {FIELD_TYPE_LABELS[field.type]}
+                    </span>
+                    {signer ? (
+                      <span className="shrink-0 truncate text-[11px] text-[#A0A0A5]">
+                        {(signer.name || signer.email).split(" ")[0]}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })
+            )}
+            <button
+              type="button"
+              onClick={onPlaceFields}
+              className="flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] leading-[18px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315]"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              Place field
+            </button>
+          </nav>
+        </>
+      ) : null}
+
       <div className="mt-6 px-2.5 pb-2 text-[13px] leading-[18px] text-[#A0A0A5]">Documents</div>
       <nav className="space-y-0.5">
         {documents?.map((item) => (
@@ -1105,6 +1205,14 @@ function DocumentTabsRail({
         </>
       ) : null}
 
+      <div className="mt-5 px-2.5 pb-2 text-[13px] leading-[18px] text-[#A0A0A5]">Folders</div>
+      <FolderTree
+        projectId={projectId}
+        teamSlug={teamSlug}
+        parentFolderId={null}
+        depth={0}
+      />
+
       {canCreate ? (
         <button
           type="button"
@@ -1117,6 +1225,112 @@ function DocumentTabsRail({
         </button>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * One level of the project's folder tree. Children are queried only once
+ * a folder is expanded, so a deep project costs nothing until you open
+ * it. Clicking a folder leaves the editor for that folder in the project.
+ */
+function FolderTree({
+  projectId,
+  teamSlug,
+  parentFolderId,
+  depth,
+}: {
+  projectId: Id<"projects">;
+  teamSlug: string;
+  parentFolderId: Id<"folders"> | null;
+  depth: number;
+}) {
+  const folders = useQuery(api.folders.list, {
+    projectId,
+    ...(parentFolderId ? { parentFolderId } : {}),
+  });
+  const [expanded, setExpanded] = useState<Set<Id<"folders">>>(new Set());
+  const navigate = useNavigate();
+
+  // The typed router can't know this route's search schema from a
+  // runtime-built `to`, so the folder param goes through the same cast
+  // FolderTile uses. validateSearch still checks it on arrival.
+  const openFolder = (folderId: Id<"folders">) => {
+    (navigate as unknown as (opts: {
+      to: string;
+      search?: Record<string, string>;
+    }) => void)({
+      to: projectPath(teamSlug, projectId),
+      search: { folder: folderId },
+    });
+  };
+
+  if (folders === undefined) {
+    return depth === 0 ? (
+      <div className="mx-2.5 h-8 animate-pulse rounded-[10px] bg-[#F1F1F3]" />
+    ) : null;
+  }
+  if (folders.length === 0) {
+    return depth === 0 ? (
+      <p className="px-2.5 py-1 text-[13px] leading-[18px] text-[#A0A0A5]">
+        No folders yet.
+      </p>
+    ) : null;
+  }
+
+  return (
+    <nav className="space-y-0.5">
+      {folders.map((folder) => {
+        const isOpen = expanded.has(folder._id);
+        // itemCount counts files too, so this is "might have children".
+        const mightNest = folder.itemCount > 0;
+        return (
+          <div key={folder._id}>
+            <div
+              className="flex items-center rounded-[10px] transition-colors hover:bg-[#F1F1F3]"
+              style={{ paddingLeft: depth * 12 }}
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  setExpanded((current) => {
+                    const next = new Set(current);
+                    if (next.has(folder._id)) next.delete(folder._id);
+                    else next.add(folder._id);
+                    return next;
+                  })
+                }
+                aria-label={isOpen ? "Collapse folder" : "Expand folder"}
+                aria-expanded={isOpen}
+                className={cn(
+                  "ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[#A0A0A5] transition-colors hover:text-[#131315] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315]",
+                  mightNest ? "" : "invisible",
+                )}
+              >
+                <ChevronRight
+                  className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-90")}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => openFolder(folder._id)}
+                className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-2.5 text-left text-[13px] leading-[18px] text-[#131315] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315]"
+              >
+                <Folder className="h-4 w-4 shrink-0 text-[#6E6E73]" strokeWidth={1.75} />
+                <span className="truncate">{folder.name}</span>
+              </button>
+            </div>
+            {isOpen ? (
+              <FolderTree
+                projectId={projectId}
+                teamSlug={teamSlug}
+                parentFolderId={folder._id}
+                depth={depth + 1}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </nav>
   );
 }
 

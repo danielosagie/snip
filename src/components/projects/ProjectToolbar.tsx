@@ -138,7 +138,7 @@ export function ProjectToolbar({
   const crumbs = breadcrumbs ?? [];
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-[#E8E8EC] bg-[#FAFAFA] px-2 py-2.5 sm:flex-nowrap sm:px-6">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-[#E8E8EC] bg-[#FFF] px-2 py-2.5 sm:flex-nowrap sm:px-6">
       {/* Breadcrumbs — only when inside a folder. Project root is
           implicit (it's where you land); the back-up drop target is
           the leftmost crumb. When at root there's no breadcrumb row

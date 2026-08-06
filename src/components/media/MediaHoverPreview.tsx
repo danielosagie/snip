@@ -131,7 +131,13 @@ export function MediaHoverPreview({
         pendingFractionRef.current = null;
       }}
       onPointerMove={(event) => {
-        if (!active) return;
+        if (!active) {
+          // The project grid mounts this lazily, on tile hover — by then the
+          // pointer can already be inside, so `onPointerEnter` never fires.
+          // Treat the first move as the enter.
+          setActive(true);
+          return;
+        }
         const rect = event.currentTarget.getBoundingClientRect();
         const fraction = Math.min(
           1,

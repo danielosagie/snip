@@ -276,13 +276,13 @@ export function CommandSearch({
       className="fixed inset-0 z-[60] flex items-start justify-center pt-[10vh] px-4"
       onClick={() => onOpenChange(false)}
     >
-      <div className="absolute inset-0 bg-[#1a1a1a]/70 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-[#131315]/20 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-2xl bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_var(--shadow-color)] flex flex-col max-h-[70vh]"
+        className="relative flex max-h-[70vh] w-full max-w-2xl flex-col overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white shadow-[0_8px_24px_rgba(19,19,21,0.10)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 px-4 py-3 border-b-2 border-[#1a1a1a]">
-          <Search className="h-4 w-4 text-[#888] flex-shrink-0" />
+        <div className="field-shell flex items-center gap-3 border-b border-[#E8E8EC] px-4 py-3">
+          <Search className="h-4 w-4 flex-shrink-0 text-[#A0A0A5]" />
           <input
             ref={inputRef}
             type="text"
@@ -290,14 +290,14 @@ export function CommandSearch({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search files, documents, comments, projects…"
-            className="field-bare flex-1 text-base placeholder:text-[#888]"
+            className="field-bare flex-1 text-[15px] text-[#131315] placeholder:text-[#A0A0A5]"
           />
-          <kbd className="text-[10px] font-mono font-bold px-1.5 py-0.5 border border-[#1a1a1a] bg-[#e8e8e0]">
+          <kbd className="rounded-[6px] bg-[#F1F1F3] px-1.5 py-0.5 text-[11px] text-[#6E6E73]">
             esc
           </kbd>
         </div>
 
-        <div className="px-3 py-2 border-b-2 border-[#1a1a1a] flex items-center gap-1 flex-wrap">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E8E8EC] px-3 py-2">
           {(
             ["all", "content", "projects", "teams", "nav"] as SearchScope[]
           ).map((s) => {
@@ -308,28 +308,28 @@ export function CommandSearch({
                 type="button"
                 onClick={() => setScope(s)}
                 className={cn(
-                  "inline-flex items-center gap-1 px-2 py-0.5 border-2 border-[#1a1a1a] text-[10px] font-bold uppercase tracking-wider transition-colors",
+                  "inline-flex h-8 items-center gap-1 rounded-full px-3 text-[13px] font-medium transition-colors",
                   active
-                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                    ? "bg-[#FFF0E6] text-[#D14E00]"
+                    : "border border-[#D8D8DE] bg-white text-[#6E6E73] hover:bg-[#F1F1F3]",
                 )}
               >
                 {s === "nav" ? "go to" : s === "content" ? "in files" : s}
               </button>
             );
           })}
-          <span className="ml-auto text-[10px] font-mono text-[#888] uppercase tracking-wider">
+          <span className="ml-auto font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             {results.length} result{results.length === 1 ? "" : "s"}
           </span>
         </div>
 
         <div className="overflow-y-auto flex-1">
           {results.length === 0 ? (
-            <div className="p-6 text-sm text-[#888] text-center">
+            <div className="p-6 text-center text-sm text-[#A0A0A5]">
               No matches.
             </div>
           ) : (
-            <ul className="divide-y divide-[#ccc]">
+            <ul className="p-2">
               {results.map((r, i) => {
                 const focused = i === focusIndex;
                 return (
@@ -340,34 +340,38 @@ export function CommandSearch({
                       onClick={() => onOpenChange(false)}
                       onMouseEnter={() => setFocusIndex(i)}
                       className={cn(
-                        "flex items-center gap-3 px-4 py-2 cursor-pointer",
-                        focused ? "bg-[#1a1a1a] text-[#f0f0e8]" : "text-[#1a1a1a]",
+                        "flex cursor-pointer items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-sm",
+                        focused
+                          ? "bg-[#FFF0E6] text-[#D14E00]"
+                          : "text-[#131315] hover:bg-[#F1F1F3]",
                       )}
                     >
                       <span
                         className={cn(
-                          "flex-shrink-0 w-7 h-7 flex items-center justify-center border-2",
+                          "flex-shrink-0",
                           focused
-                            ? "border-[#f0f0e8] bg-transparent"
-                            : "border-[#1a1a1a] bg-[#e8e8e0]",
+                            ? "text-[#D14E00]"
+                            : "text-[#6E6E73]",
                         )}
                       >
                         {r.icon}
                       </span>
                       <span className="flex-1 min-w-0">
-                        <span className="block font-black text-sm truncate">
+                        <span className="block truncate text-sm font-medium">
                           {r.label}
                         </span>
-                        <span
-                          className={cn(
-                            "block text-[11px] font-mono truncate",
-                            focused ? "opacity-80" : "text-[#888]",
-                          )}
-                        >
+                        <span className="block truncate text-xs text-[#A0A0A5]">
                           {r.subtitle}
                         </span>
                       </span>
-                      <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 opacity-60" />
+                      <ArrowRight
+                        className={cn(
+                          "h-4 w-4 flex-shrink-0",
+                          focused
+                            ? "text-[#D14E00]"
+                            : "text-[#6E6E73]",
+                        )}
+                      />
                     </Link>
                   </li>
                 );
@@ -376,17 +380,23 @@ export function CommandSearch({
           )}
         </div>
 
-        <div className="px-3 py-2 border-t-2 border-[#1a1a1a] flex items-center gap-3 text-[10px] font-mono text-[#888] uppercase tracking-wider">
+        <div className="flex items-center gap-3 border-t border-[#E8E8EC] px-3 py-2 text-[11px] text-[#6E6E73]">
           <span>
-            <kbd className="px-1 border border-[#1a1a1a] bg-[#e8e8e0]">↑↓</kbd>{" "}
+            <kbd className="rounded-[6px] bg-[#F1F1F3] px-1.5 py-0.5 text-[11px] text-[#6E6E73]">
+              ↑↓
+            </kbd>{" "}
             navigate
           </span>
           <span>
-            <kbd className="px-1 border border-[#1a1a1a] bg-[#e8e8e0]">↵</kbd>{" "}
+            <kbd className="rounded-[6px] bg-[#F1F1F3] px-1.5 py-0.5 text-[11px] text-[#6E6E73]">
+              ↵
+            </kbd>{" "}
             open
           </span>
           <span>
-            <kbd className="px-1 border border-[#1a1a1a] bg-[#e8e8e0]">tab</kbd>{" "}
+            <kbd className="rounded-[6px] bg-[#F1F1F3] px-1.5 py-0.5 text-[11px] text-[#6E6E73]">
+              tab
+            </kbd>{" "}
             switch scope
           </span>
           <span className="ml-auto">⌘ K to reopen</span>
@@ -417,7 +427,7 @@ export function CommandSearchTrigger({
     >
       <Search className="h-3.5 w-3.5 flex-shrink-0" />
       <span className="flex-1 truncate">Search…</span>
-      <kbd className="text-[11px] font-medium text-[#A0A0A5]">
+      <kbd className="rounded-[6px] bg-[#F1F1F3] px-1.5 py-0.5 text-[11px] font-medium text-[#6E6E73]">
         ⌘K
       </kbd>
     </button>

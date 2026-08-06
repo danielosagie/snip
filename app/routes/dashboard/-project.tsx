@@ -4,36 +4,34 @@ import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { DropZone } from "@/components/upload/DropZone";
-import { formatDuration, formatRelativeTime } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
 import { useDriveAutoRefresh } from "@/lib/useDriveAutoRefresh";
 import {
-  Play,
-  MoreVertical,
   Trash2,
   Link as LinkIcon,
   Download,
-  MessageSquare,
   Eye,
   Share2,
   Copy,
   FolderInput,
   CheckSquare,
-  Check,
   Pencil,
   Tags,
-  FolderPlus,
 } from "lucide-react";
-import { FileTile, FileListRow } from "@/components/files/FileTile";
 import {
   fileKindBucketFromContent,
   type FileKindBucket,
 } from "@/lib/fileTypes";
-import { MediaHoverPreview } from "@/components/media/MediaHoverPreview";
+import { type ContextMenuEntry } from "@/components/ui/context-menu";
 import {
-  ContextMenu,
-  type ContextMenuEntry,
-} from "@/components/ui/context-menu";
+  ProjectFileGrid,
+  ProjectFileList,
+} from "@/components/projects/ProjectFileGrid";
+import {
+  useStableActions,
+  type ProjectTileActions,
+  type ProjectVideoItem,
+} from "@/components/projects/projectTileShared";
 import { BulkRenameDialog } from "@/components/videos/BulkRenameDialog";
 import { BulkEditMetadataDialog } from "@/components/videos/BulkEditMetadataDialog";
 import { VideoKanban } from "@/components/videos/VideoKanban";
@@ -47,21 +45,11 @@ import { ProjectAddButton } from "@/components/projects/ProjectAddButton";
 import { ProjectBackgroundMenu } from "@/components/projects/ProjectBackgroundMenu";
 import { FolderRow } from "@/components/folders/FolderRow";
 import { ContractListSection } from "@/components/contracts/ContractListSection";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Id } from "@convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
 import { videoPath, contractPath, documentPath } from "@/lib/routes";
 import { prefetchHlsRuntime, prefetchMuxPlaybackManifest } from "@/lib/muxPlayback";
-import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
-import {
-  VideoWorkflowStatusControl,
-  type VideoWorkflowStatus,
-} from "@/components/videos/VideoWorkflowStatusControl";
+import { type VideoWorkflowStatus } from "@/components/videos/VideoWorkflowStatusControl";
 import { useProjectData } from "./-project.data";
 import { prewarmVideo } from "./-video.data";
 import { useDashboardUploadContext } from "@/lib/dashboardUploadContext";
@@ -71,10 +59,6 @@ import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
 import { ShareFolderDialog } from "@/components/ShareFolderDialog";
 import { MoveToFolderDialog } from "@/components/MoveToFolderDialog";
 import { friendlyError } from "@/lib/friendlyError";
-import {
-  SNIP_VIDEO_DRAG_TYPE,
-  setDraggedVideoData,
-} from "@/lib/projectDrag";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
@@ -118,179 +102,6 @@ async function copyTextToClipboard(text: string) {
   return copied;
 }
 
-type VideoIntentTargetProps = {
-  className: string;
-  teamSlug: string;
-  projectId: Id<"projects">;
-  videoId: Id<"videos">;
-  muxPlaybackId?: string;
-  draggable?: boolean;
-  selected?: boolean;
-  selectedVideoIds?: readonly Id<"videos">[];
-  onDragSelectOnly?: () => void;
-  /** When true, a plain click toggles selection instead of opening the
-   *  video — this is what the header "Select" button turns on so users
-   *  don't have to know the Cmd/Ctrl/Shift shortcuts. */
-  selectionMode?: boolean;
-  /** When provided, dropping ANOTHER video onto this one combines the two
-   *  into a new folder (Finder-style). Self-drops are ignored upstream. */
-  onCombine?: (draggedVideoId: Id<"videos">) => void;
-  onOpen: () => void;
-  onSelectToggle?: (
-    event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean },
-  ) => void;
-  children: ReactNode;
-};
-
-// Content types that have an in-app focused view (the asset detail
-// page). Click in the project grid → navigate to the editor view
-// instead of triggering a download. Everything else (zips, source
-// files, etc.) downloads on click as before.
-const DOC_CONTENT_TYPES = new Set([
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  "text/x-markdown",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-]);
-
-function computeHasFocusedView(contentType: string | null | undefined): boolean {
-  if (!contentType) return false;
-  if (contentType.startsWith("image/")) return true;
-  if (contentType.startsWith("text/")) return true;
-  return DOC_CONTENT_TYPES.has(contentType);
-}
-
-function VideoIntentTarget({
-  className,
-  teamSlug,
-  projectId,
-  videoId,
-  muxPlaybackId,
-  draggable,
-  selected,
-  selectedVideoIds,
-  onDragSelectOnly,
-  selectionMode,
-  onCombine,
-  onOpen,
-  onSelectToggle,
-  children,
-}: VideoIntentTargetProps) {
-  const convex = useConvex();
-  const [combineActive, setCombineActive] = useState(false);
-  const prewarmIntentHandlers = useRoutePrewarmIntent(() => {
-    prewarmVideo(convex, {
-      teamSlug,
-      projectId,
-      videoId,
-    });
-    prefetchHlsRuntime();
-    if (muxPlaybackId) {
-      prefetchMuxPlaybackManifest(muxPlaybackId);
-    }
-  });
-
-  return (
-    <div
-      className={cn(
-        "relative",
-        className,
-        selected &&
-          "after:pointer-events-none after:absolute after:inset-0 after:z-20 after:rounded-[12px] after:shadow-[inset_0_0_0_1.5px_#FF6600]",
-        combineActive && "ring-[1.5px] ring-inset ring-[#FF6600]",
-      )}
-      onDragOver={
-        onCombine
-          ? (e) => {
-              // Only react to a dragged video; ignore folder drags and
-              // arbitrary desktop files. A self-drop can't be detected here
-              // (the payload isn't readable during dragover) so we let it
-              // highlight, then no-op on drop.
-              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
-                return;
-              e.preventDefault();
-              e.stopPropagation();
-              e.dataTransfer.dropEffect = "copy";
-              if (!combineActive) setCombineActive(true);
-            }
-          : undefined
-      }
-      onDragLeave={onCombine ? () => setCombineActive(false) : undefined}
-      onDrop={
-        onCombine
-          ? (e) => {
-              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
-                return;
-              e.preventDefault();
-              e.stopPropagation();
-              setCombineActive(false);
-              const draggedId = e.dataTransfer.getData(
-                SNIP_VIDEO_DRAG_TYPE,
-              );
-              if (draggedId && draggedId !== videoId) {
-                onCombine(draggedId as Id<"videos">);
-              }
-            }
-          : undefined
-      }
-      onClick={(e) => {
-        // In selection mode a plain click toggles. Otherwise Cmd/Ctrl+click
-        // toggles a single item, Shift+click extends the range, and a plain
-        // click falls through to onOpen. The selection-toggle callback owns
-        // whichever modifier behavior is set up at the parent.
-        if (
-          onSelectToggle &&
-          (selectionMode || e.metaKey || e.ctrlKey || e.shiftKey)
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          onSelectToggle({
-            metaKey: e.metaKey,
-            ctrlKey: e.ctrlKey,
-            shiftKey: e.shiftKey,
-          });
-          return;
-        }
-        onOpen();
-      }}
-      draggable={draggable}
-      onDragStart={(e) => {
-        if (!draggable) return;
-        if (selectionMode && !selected) onDragSelectOnly?.();
-        const draggedIds =
-          selected && selectedVideoIds && selectedVideoIds.length > 1
-            ? selectedVideoIds
-            : [videoId];
-        setDraggedVideoData(e.dataTransfer, videoId, draggedIds);
-      }}
-      {...prewarmIntentHandlers}
-    >
-      {combineActive ? (
-        <div className="pointer-events-none absolute left-2 top-2 z-30 inline-flex items-center gap-1 rounded-[6px] bg-[#FFF0E6] px-2 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[10px] font-medium uppercase tracking-widest text-[#D14E00]">
-          <FolderPlus className="h-3 w-3" />
-          New folder
-        </div>
-      ) : null}
-      {selectionMode || selected ? (
-        <span
-          aria-hidden="true"
-          className={cn(
-            "absolute left-2 top-2 z-40 flex h-5 w-5 items-center justify-center rounded-full",
-            selected
-              ? "bg-[#FF6600] text-white"
-              : "border border-[#D8D8DE] bg-white text-transparent",
-          )}
-        >
-          {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
-        </span>
-      ) : null}
-      {children}
-    </div>
-  );
-}
-
 export default function ProjectPage({
   teamSlug,
   projectId,
@@ -302,6 +113,7 @@ export default function ProjectPage({
 }) {
   const navigate = useNavigate({});
   const pathname = useLocation().pathname;
+  const convex = useConvex();
 
   const currentFolderId = folderId ?? null;
 
@@ -443,6 +255,10 @@ export default function ProjectPage({
     },
     [requestUpload, resolvedProjectId, currentFolderId],
   );
+
+  // The scrolling content column. The windowed file grid measures its
+  // viewport against this element.
+  const contentScrollRef = useRef<HTMLDivElement>(null);
 
   // Hidden <input type=file> opened by the toolbar's "Add files" action.
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -728,16 +544,7 @@ export default function ProjectPage({
   // multi-selection, the actions apply to the whole selection (reusing the
   // existing bulk handlers); otherwise they act on the single item.
   const buildVideoMenu = (
-    video: {
-      _id: Id<"videos">;
-      title: string;
-      muxAssetId?: string;
-      staticRenditions?: Array<{
-        name: string;
-        resolution: string;
-        status: string;
-      }>;
-    },
+    video: ProjectVideoItem,
     canDownload: boolean,
   ): ContextMenuEntry[] => {
     if (!project) return [];
@@ -938,12 +745,7 @@ export default function ProjectPage({
   ]);
 
   const handleShareVideo = useCallback(
-    async (video: {
-      _id: Id<"videos">;
-      publicId?: string;
-      status: string;
-      visibility: "public" | "private";
-    }) => {
+    async (video: ProjectVideoItem) => {
       const canSharePublicly =
         Boolean(video.publicId) &&
         video.status === "ready" &&
@@ -1079,6 +881,40 @@ export default function ProjectPage({
     () => Array.from(selectedVideoIds),
     [selectedVideoIds],
   );
+
+  // Every per-tile callback, behind one reference-stable object. This is what
+  // makes React.memo on the tiles actually hold: a tile's props become its own
+  // data plus booleans, so a selection click re-renders the one tile that
+  // changed instead of all 369. `currentSelectionIds` is a getter for the same
+  // reason — the selection Set's identity must never reach a tile's props.
+  const tileActions = useStableActions({
+    open: (videoId) => {
+      if (!resolvedProjectId) return;
+      navigate({ to: videoPath(resolvedTeamSlug, resolvedProjectId, videoId) });
+    },
+    prewarm: (videoId, muxPlaybackId) => {
+      if (!resolvedProjectId) return;
+      prewarmVideo(convex, {
+        teamSlug: resolvedTeamSlug,
+        projectId: resolvedProjectId,
+        videoId,
+      });
+      prefetchHlsRuntime();
+      if (muxPlaybackId) prefetchMuxPlaybackManifest(muxPlaybackId);
+    },
+    selectToggle: (videoId, modifiers) =>
+      handleSelectionToggle(videoId, modifiers),
+    dragSelectOnly: handleVideoDragSelectOnly,
+    currentSelectionIds: () => selectedVideoIdsArray,
+    combine: (targetVideoId, draggedVideoId) =>
+      void handleCombineVideos(targetVideoId, draggedVideoId),
+    remove: (videoId) => void handleDeleteVideo(videoId),
+    download: (videoId, title) => void handleDownloadVideo(videoId, title),
+    share: (video) => void handleShareVideo(video),
+    setWorkflowStatus: (videoId, status) =>
+      void handleUpdateWorkflowStatus(videoId, status),
+    buildMenu: (video, canDownload) => buildVideoMenu(video, canDownload),
+  } satisfies ProjectTileActions);
 
   // {_id, title} for the selected videos — needed by the bulk rename preview.
   const selectedRenameItems = useMemo(
@@ -1506,8 +1342,8 @@ export default function ProjectPage({
         />
       ) : null}
 
-      {/* Content */}
-      <div className="flex-1 overflow-auto">
+      {/* Content — also the scroll container the file grid windows against. */}
+      <div ref={contentScrollRef} className="flex-1 overflow-auto">
         {!isLoadingData &&
         videos.length === 0 &&
         (folders?.length ?? 0) === 0 ? (
@@ -1606,248 +1442,15 @@ export default function ProjectPage({
                   Files
                 </div>
               ) : null}
-              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
-              {/* The contract (legacy embedded + new multi-contracts) now
-                  renders in the folder-styled ContractListSection above
-                  the FolderRow. Keeping the file grid pure files. */}
-              {filteredVideos?.map((video) => {
-                // Non-video assets (PDF, docs, images, source files) take
-                // a separate Drive-style tile — no thumbnail, no
-                // playback, just a big file-type icon and a download
-                // affordance. Detection: a "video" without a Mux playback
-                // ID after processing finished is, by definition, not a
-                // playable video.
-                const isPlayableVideo =
-                  Boolean(video.muxPlaybackId) ||
-                  (video.contentType?.startsWith("video/") ?? false) ||
-                  video.status === "uploading" ||
-                  video.status === "processing";
-                if (!isPlayableVideo) {
-                  const hasFocusedView = computeHasFocusedView(video.contentType);
-                  return (
-                    <FileTile
-                      key={video._id}
-                      videoId={video._id}
-                      title={video.title}
-                      contentType={video.contentType}
-                      fileSize={video.fileSize}
-                      uploaderName={video.uploaderName}
-                      createdAt={video._creationTime}
-                      status={video.status}
-                      canDelete={canUpload}
-                      draggable={canUpload}
-                      selected={selectedVideoIds.has(video._id)}
-                      selectionMode={selectionMode}
-                      selectedVideoIds={selectedVideoIdsArray}
-                      onDragSelectOnly={() =>
-                        handleVideoDragSelectOnly(video._id)
-                      }
-                      onSelectToggle={(mods) =>
-                        handleSelectionToggle(video._id, mods)
-                      }
-                      onDelete={() => handleDeleteVideo(video._id)}
-                      onCombine={
-                        canUpload
-                          ? (draggedId) =>
-                              void handleCombineVideos(video._id, draggedId)
-                          : undefined
-                      }
-                      onOpen={
-                        hasFocusedView
-                          ? () =>
-                              navigate({
-                                to: videoPath(
-                                  resolvedTeamSlug,
-                                  project._id,
-                                  video._id,
-                                ),
-                              })
-                          : undefined
-                      }
-                    />
-                  );
-                }
-
-                const thumbnailSrc = video.thumbnailUrl?.startsWith("http")
-                  ? video.thumbnailUrl
-                  : undefined;
-                const canDownload = Boolean(video.s3Key) && video.status !== "failed" && video.status !== "uploading";
-                const watchingCount =
-                  projectPresenceCounts?.counts?.[video._id] ?? 0;
-
-                return (
-                  <ContextMenu
-                    key={video._id}
-                    items={() => buildVideoMenu(video, canDownload)}
-                  >
-                  <VideoIntentTarget
-                    className="group flex cursor-pointer flex-col overflow-hidden rounded-[12px] border border-[#E8E8EC] bg-white transition-[border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm"
-                    teamSlug={resolvedTeamSlug}
-                    projectId={project._id}
-                    videoId={video._id}
-                    muxPlaybackId={video.muxPlaybackId}
-                    draggable={canUpload}
-                    selected={selectedVideoIds.has(video._id)}
-                    selectionMode={selectionMode}
-                    selectedVideoIds={selectedVideoIdsArray}
-                    onDragSelectOnly={() =>
-                      handleVideoDragSelectOnly(video._id)
-                    }
-                    onCombine={
-                      canUpload
-                        ? (draggedId) =>
-                            void handleCombineVideos(video._id, draggedId)
-                        : undefined
-                    }
-                    onSelectToggle={(mods) =>
-                      handleSelectionToggle(video._id, mods)
-                    }
-                    onOpen={() =>
-                      navigate({
-                        to: videoPath(resolvedTeamSlug, project._id, video._id),
-                      })
-                    }
-                  >
-                    <div
-                      className="relative aspect-video overflow-hidden bg-[#F1F1F3]"
-                    >
-                      {thumbnailSrc ? (
-                        <img
-                          src={thumbnailSrc}
-                          alt={video.title}
-                          className="object-cover w-full h-full"
-                        />
-                      ) : (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <Play className="h-10 w-10 text-[#A0A0A5]" />
-                        </div>
-                      )}
-                      {video.status === "ready" ? (
-                        <MediaHoverPreview
-                          videoId={video._id}
-                          title={video.title}
-                          posterUrl={thumbnailSrc}
-                          duration={video.duration}
-                        />
-                      ) : null}
-                    {video.status === "ready" && video.duration && (
-                      <div className="absolute bottom-2 right-2 rounded-[6px] bg-[#131315]/80 px-1.5 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-white">
-                        {formatDuration(video.duration)}
-                      </div>
-                    )}
-                    {video.status !== "ready" && (
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                        <span className="text-[13px] font-medium text-white">
-                          {video.renditionEvictedAt
-                            ? video.status === "processing"
-                              ? "Rebuilding…"
-                              : "Archived"
-                            : (
-                              <>
-                                {video.status === "uploading" && "Uploading..."}
-                                {video.status === "processing" && "Processing..."}
-                                {video.status === "failed" && "Failed"}
-                              </>
-                            )}
-                        </span>
-                      </div>
-                    )}
-                    {/* Hover menu */}
-                    <div className="absolute top-2 right-2 z-40 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          asChild
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] border border-[#E8E8EC] bg-white text-[#6E6E73] shadow-sm hover:bg-[#F1F1F3] hover:text-[#131315]"
-                            aria-label="Video actions"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className={SOFT_MENU_CONTENT}>
-                          {canDownload && (
-                            <DropdownMenuItem
-                              className={SOFT_MENU_ITEM}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleDownloadVideo(
-                                  video._id,
-                                  video.title,
-                                );
-                              }}
-                            >
-                              <Download className="mr-2 h-4 w-4" />
-                              Download
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem
-                            className={SOFT_MENU_ITEM}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleShareVideo(video);
-                            }}
-                          >
-                            <LinkIcon className="mr-2 h-4 w-4" />
-                            Share
-                          </DropdownMenuItem>
-                          {canUpload && (
-                            <DropdownMenuItem
-                              className={cn(
-                                SOFT_MENU_ITEM,
-                                "text-[#D8434F] hover:bg-[#FFF5F5] focus:bg-[#FFF5F5] focus:text-[#D8434F]",
-                              )}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteVideo(video._id);
-                              }}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                  <div className="px-3 pb-3 pt-2.5">
-                    <p className="truncate text-sm font-semibold leading-5 text-[#131315]">
-                      {video.title}
-                    </p>
-                    <div className="mt-1.5 flex items-center gap-3">
-                        <VideoWorkflowStatusControl
-                          status={video.workflowStatus}
-                          soft
-                        stopPropagation
-                        disabled={!canUpload}
-                        onChange={(workflowStatus) =>
-                          void handleUpdateWorkflowStatus(video._id, workflowStatus)
-                        }
-                      />
-                      {video.commentCount > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-[#A0A0A5]">
-                          <MessageSquare className="h-3 w-3" />
-                          {video.commentCount}
-                        </span>
-                      )}
-                      {watchingCount > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-[#6E6E73]">
-                          <Eye className="h-3 w-3" />
-                          {watchingCount}
-                        </span>
-                      )}
-                      <span className="ml-auto font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
-                        {formatRelativeTime(video._creationTime)}
-                      </span>
-                    </div>
-                  </div>
-                  </VideoIntentTarget>
-                  </ContextMenu>
-                );
-              })}
-              </div>
+              <ProjectFileGrid
+                videos={filteredVideos ?? []}
+                actions={tileActions}
+                selectedVideoIds={selectedVideoIds}
+                selectionMode={selectionMode}
+                canEdit={canUpload}
+                presenceCounts={projectPresenceCounts?.counts}
+                scrollRef={contentScrollRef}
+              />
             </div>
           </div>
           </ProjectBackgroundMenu>
@@ -1905,247 +1508,14 @@ export default function ProjectPage({
                 onSelectToggle={handleContractSelectionToggle}
               />
             )}
-            <div className="bg-white">
-            {filteredVideos?.map((video) => {
-              const isPlayableVideo =
-                Boolean(video.muxPlaybackId) ||
-                (video.contentType?.startsWith("video/") ?? false) ||
-                video.status === "uploading" ||
-                video.status === "processing";
-              if (!isPlayableVideo) {
-                const hasFocusedView =
-                  (video.contentType?.startsWith("image/") ?? false) ||
-                  video.contentType === "application/pdf";
-                return (
-                  <FileListRow
-                    key={video._id}
-                    videoId={video._id}
-                    title={video.title}
-                    contentType={video.contentType}
-                    fileSize={video.fileSize}
-                    uploaderName={video.uploaderName}
-                    createdAt={video._creationTime}
-                    status={video.status}
-                    canDelete={canUpload}
-                    draggable={canUpload}
-                    selected={selectedVideoIds.has(video._id)}
-                    selectionMode={selectionMode}
-                    selectedVideoIds={selectedVideoIdsArray}
-                    onDragSelectOnly={() =>
-                      handleVideoDragSelectOnly(video._id)
-                    }
-                    onSelectToggle={(mods) =>
-                      handleSelectionToggle(video._id, mods)
-                    }
-                    onDelete={() => handleDeleteVideo(video._id)}
-                    onCombine={
-                      canUpload
-                        ? (draggedId) =>
-                            void handleCombineVideos(video._id, draggedId)
-                        : undefined
-                    }
-                    onOpen={
-                      hasFocusedView
-                        ? () =>
-                            navigate({
-                              to: videoPath(
-                                resolvedTeamSlug,
-                                project._id,
-                                video._id,
-                              ),
-                            })
-                        : undefined
-                    }
-                  />
-                );
-              }
-
-              const thumbnailSrc = video.thumbnailUrl?.startsWith("http")
-                ? video.thumbnailUrl
-                : undefined;
-              const canDownload = Boolean(video.s3Key) && video.status !== "failed" && video.status !== "uploading";
-              const watchingCount =
-                projectPresenceCounts?.counts?.[video._id] ?? 0;
-
-              return (
-                <ContextMenu
-                  key={video._id}
-                  items={() => buildVideoMenu(video, canDownload)}
-                >
-                <VideoIntentTarget
-                  className="group flex cursor-pointer items-center gap-5 border-b border-[#F1F1F3] bg-white px-6 py-3 transition-colors hover:bg-[#FAFAFA]"
-                  teamSlug={resolvedTeamSlug}
-                  projectId={project._id}
-                  videoId={video._id}
-                  muxPlaybackId={video.muxPlaybackId}
-                  draggable={canUpload}
-                  selected={selectedVideoIds.has(video._id)}
-                  selectionMode={selectionMode}
-                  selectedVideoIds={selectedVideoIdsArray}
-                  onDragSelectOnly={() =>
-                    handleVideoDragSelectOnly(video._id)
-                  }
-                  onCombine={
-                    canUpload
-                      ? (draggedId) =>
-                          void handleCombineVideos(video._id, draggedId)
-                      : undefined
-                  }
-                  onSelectToggle={(mods) =>
-                    handleSelectionToggle(video._id, mods)
-                  }
-                  onOpen={() =>
-                    navigate({
-                      to: videoPath(resolvedTeamSlug, project._id, video._id),
-                    })
-                  }
-                >
-                  {/* Thumbnail */}
-                  <div
-                    className="relative aspect-video w-44 shrink-0 overflow-hidden rounded-[12px] border border-[#E8E8EC] bg-[#F1F1F3]"
-                  >
-                    {thumbnailSrc ? (
-                      <img
-                        src={thumbnailSrc}
-                        alt={video.title}
-                        className="object-cover w-full h-full"
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Play className="h-6 w-6 text-[#A0A0A5]" />
-                      </div>
-                    )}
-                    {video.status === "ready" ? (
-                      <MediaHoverPreview
-                        videoId={video._id}
-                        title={video.title}
-                        posterUrl={thumbnailSrc}
-                        duration={video.duration}
-                      />
-                    ) : null}
-                    {video.status !== "ready" && (
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                        <span className="text-[13px] font-medium text-white">
-                          {video.renditionEvictedAt
-                            ? video.status === "processing"
-                              ? "Rebuilding…"
-                              : "Archived"
-                            : (
-                              <>
-                                {video.status === "uploading" && "Uploading..."}
-                                {video.status === "processing" && "Processing..."}
-                                {video.status === "failed" && "Failed"}
-                              </>
-                            )}
-                        </span>
-                      </div>
-                    )}
-                    {video.status === "ready" && video.duration && (
-                      <div className="absolute bottom-1 right-1 rounded-[6px] bg-[#131315]/80 px-1.5 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[10px] text-white">
-                        {formatDuration(video.duration)}
-                      </div>
-                    )}
-                  </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <p className="truncate text-sm font-semibold text-[#131315]">
-                    {video.title}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1">
-                    <VideoWorkflowStatusControl
-                      status={video.workflowStatus}
-                      soft
-                      stopPropagation
-                      disabled={!canUpload}
-                      onChange={(workflowStatus) =>
-                        void handleUpdateWorkflowStatus(video._id, workflowStatus)
-                      }
-                    />
-                    {video.commentCount > 0 && (
-                      <span className="inline-flex items-center gap-1 text-xs text-[#A0A0A5]">
-                        <MessageSquare className="h-3.5 w-3.5" />
-                        {video.commentCount}
-                      </span>
-                    )}
-                    {watchingCount > 0 && (
-                      <span className="inline-flex items-center gap-1 text-xs text-[#6E6E73]">
-                        <Eye className="h-3.5 w-3.5" />
-                        {watchingCount}
-                      </span>
-                    )}
-                    <span className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
-                      {formatRelativeTime(video._creationTime)}
-                    </span>
-                    {video.uploaderName && (
-                      <span className="text-xs text-[#A0A0A5]">
-                        {video.uploaderName}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      asChild
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-[8px] text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
-                        aria-label="Video actions"
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className={SOFT_MENU_CONTENT}>
-                      {canDownload && (
-                        <DropdownMenuItem
-                          className={SOFT_MENU_ITEM}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleDownloadVideo(video._id, video.title);
-                          }}
-                        >
-                          <Download className="mr-2 h-4 w-4" />
-                          Download
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuItem
-                        className={SOFT_MENU_ITEM}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleShareVideo(video);
-                        }}
-                      >
-                        <LinkIcon className="mr-2 h-4 w-4" />
-                        Share
-                      </DropdownMenuItem>
-                      {canUpload && (
-                        <DropdownMenuItem
-                          className={cn(
-                            SOFT_MENU_ITEM,
-                            "text-[#D8434F] hover:bg-[#FFF5F5] focus:bg-[#FFF5F5] focus:text-[#D8434F]",
-                          )}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteVideo(video._id);
-                          }}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                </VideoIntentTarget>
-                </ContextMenu>
-              );
-            })}
-            </div>
+            <ProjectFileList
+              videos={filteredVideos ?? []}
+              actions={tileActions}
+              selectedVideoIds={selectedVideoIds}
+              selectionMode={selectionMode}
+              canEdit={canUpload}
+              presenceCounts={projectPresenceCounts?.counts}
+            />
           </div>
           </ProjectBackgroundMenu>
         )}
