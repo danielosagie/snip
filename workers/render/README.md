@@ -14,7 +14,7 @@ Bun is used because it is already the repository runtime and can execute the Typ
 4. `upload`: atomically PUT the MP4 and manifest to deterministic R2 keys.
 5. `complete`: commit the result and cache accounting through `JobStore`.
 
-Wave 1 provides `LocalJobStore`, backed by an atomically replaced JSON state file. It accepts a job spec from `JOB_SPEC_PATH` or inline `RENDER_JOB_JSON`. The pipeline only depends on the `JobStore` interface, so wave 2 can add Convex claim, heartbeat, release, fail, and complete operations without changing media code.
+`LocalJobStore` is backed by an atomically replaced JSON state file and accepts a job spec from `JOB_SPEC_PATH` or inline `RENDER_JOB_JSON`. `ConvexJobStore` implements the same interface through plugin-token-authenticated HTTP actions. The media pipeline is unchanged and depends only on `JobStore`.
 
 SIGINT or SIGTERM aborts ffmpeg and releases an owned local lease back to `queued`. Downloads use temporary `.part` files and rename only after success. R2 PUTs are atomic at the object level and use deterministic keys, cache objects are create-if-absent, and the manifest is uploaded after the MP4. A stopped attempt can therefore restart safely. Completed cache segments survive and reduce restart work. Individual transfers retry three times; cross-process multipart resume is intentionally deferred until production file-size data justifies the extra state.
 
@@ -112,6 +112,11 @@ Other optional settings:
 | `WORK_DIR` | `/tmp/snip-render` | Per-attempt temporary files |
 | `KEEP_WORK_DIR` | false | Preserve attempt files for debugging |
 | `RESULT_MANIFEST_PATH` | unset outside Docker | Extra local manifest copy |
+| `JOB_STORE_BACKEND` | `local` | `local` for one file-backed job or `convex` for fleet polling |
+| `CONVEX_SITE_URL` | unset | Convex `.convex.site` URL for the fleet HTTP adapter |
+| `RENDER_WORKER_PLUGIN_TOKEN` | unset | Existing team plugin token used as the Bearer credential |
+| `POLL_BASE_DELAY_MS` | `500` | Initial idle/error poll delay before jitter |
+| `POLL_MAX_DELAY_MS` | `10000` | Maximum idle/error poll delay before jitter |
 
 ## Job shape
 
@@ -119,8 +124,7 @@ See `examples/r2-job.example.json`. A single normalized target applies to every 
 
 The job's `outputKey` and `manifestKey` are deterministic retry targets. They must differ. A completed local state is not claimable again; use a new job ID and state file to model a new export request.
 
-## Wave 2 Convex contract needs
+## Convex queue
 
-The Convex-backed `JobStore` needs an internal atomic claim mutation that returns the job ID, immutable spec or snapshot, attempt number, worker ID, and an unguessable claim token. Heartbeat, complete, fail, and release mutations must compare that token before writing.
-
-The `renderJobs` row needs status, priority, creation time, attempt count, claim owner/token, heartbeat and lease expiry timestamps, phase, progress, cancellation request, output and manifest keys, result cache accounting, error details, completion time, requester, team, and workspace owner. Queue and stale-lease indexes should support `(status, priority, createdAt)` and `(status, leaseExpiresAt)`. Only internal authenticated server actions should create or mutate fleet state.
+See [CONVEX_JOBSTORE.md](./CONVEX_JOBSTORE.md) for the exact export mutation,
+progress query, worker environment, authentication choice, and A3 schema seams.

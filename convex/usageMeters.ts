@@ -22,6 +22,39 @@ import { requireUser } from "./auth";
 const ONE_GIB = 1024 ** 3;
 const ONE_MIN_MS = 60_000;
 
+export interface RenderUsageDelta {
+  renderMinutes: number;
+  cacheHitSavingsMinutes: number;
+}
+
+/**
+ * Normalize the render completion accounting used by renderJobs.complete.
+ *
+ * A3's protected usageMeters schema does not yet contain render-minute fields,
+ * so each completed renderJobs row is the durable source of truth for this
+ * delta. getOwnerRenderUsage folds those immutable completion rows into the
+ * current billing period. Once the two numeric meter columns land, this helper
+ * can feed the same getOrCreateRow write-through used by transcription.
+ */
+export function renderUsageForCompletion(cache: {
+  totalDurationSeconds: number;
+  hitDurationSeconds: number;
+}): RenderUsageDelta {
+  if (
+    !Number.isFinite(cache.totalDurationSeconds)
+    || !Number.isFinite(cache.hitDurationSeconds)
+    || cache.totalDurationSeconds < 0
+    || cache.hitDurationSeconds < 0
+    || cache.hitDurationSeconds > cache.totalDurationSeconds
+  ) {
+    throw new Error("Render cache durations must be finite, non-negative, and internally consistent.");
+  }
+  return {
+    renderMinutes: cache.totalDurationSeconds / 60,
+    cacheHitSavingsMinutes: cache.hitDurationSeconds / 60,
+  };
+}
+
 /**
  * Calendar-month period: start of the UTC month, exclusive end at the
  * start of the next UTC month. Cheap to compute, deterministic, and
@@ -208,6 +241,46 @@ export const getOwnerMeterRow = internalQuery({
       )
       .unique();
     return row;
+  },
+});
+
+/**
+ * Render meter seam for the current UTC billing period.
+ *
+ * Completion already writes totalDurationSeconds and hitDurationSeconds on the
+ * render job in the same atomic mutation as status=done. Until A3 adds the two
+ * usageMeters columns, deriving the tally from those rows avoids dropped or
+ * double-counted events. Stripe and storage-GB-month reporting intentionally
+ * remain out of scope for this wave.
+ */
+export const getOwnerRenderUsage = internalQuery({
+  args: { ownerClerkId: v.string() },
+  handler: async (ctx, args) => {
+    const period = currentPeriod();
+    const completions = await ctx.db
+      .query("renderJobs")
+      .withIndex("by_status", (q) => q.eq("status", "done"))
+      .collect();
+    return completions.reduce<RenderUsageDelta>(
+      (total, job) => {
+        if (
+          job.workspaceOwnerClerkId !== args.ownerClerkId
+          || job.completedAt === undefined
+          || job.completedAt < period.start
+          || job.completedAt >= period.end
+          || !job.cacheResult
+        ) {
+          return total;
+        }
+        const delta = renderUsageForCompletion(job.cacheResult);
+        return {
+          renderMinutes: total.renderMinutes + delta.renderMinutes,
+          cacheHitSavingsMinutes:
+            total.cacheHitSavingsMinutes + delta.cacheHitSavingsMinutes,
+        };
+      },
+      { renderMinutes: 0, cacheHitSavingsMinutes: 0 },
+    );
   },
 });
 

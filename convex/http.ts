@@ -11,7 +11,11 @@ import {
 import type Stripe from "stripe";
 import { components, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import type { TimelinePresencePayload } from "../src/lib/timeline/types";
+import type {
+  RenderCacheResult,
+  RenderWorkerSpec,
+  TimelinePresencePayload,
+} from "../src/lib/timeline/types";
 import {
   isTimelinePresencePayload,
   normalizeTimelinePresencePayload,
@@ -857,6 +861,99 @@ const getNleSnapshotRef = makeFunctionReference<
   }
 >("http:agentEGetNleSnapshot");
 
+type RenderClaimResponse = {
+  jobId: Id<"renderJobs">;
+  claimToken: string;
+  workerId: string;
+  attempt: number;
+  spec: RenderWorkerSpec;
+} | null;
+
+type RenderWriteResponse = {
+  accepted: boolean;
+  cancellationRequested: boolean;
+  usage?: { renderMinutes: number; cacheHitSavingsMinutes: number };
+};
+
+const claimRenderJobRef = makeFunctionReference<
+  "mutation",
+  { teamId: Id<"teams">; workerId: string; leaseMs: number },
+  RenderClaimResponse
+>("renderJobs:claim");
+
+const heartbeatRenderJobRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    jobId: Id<"renderJobs">;
+    workerId: string;
+    claimToken: string;
+    phase: "claimed" | "downloading" | "probing" | "rendering" | "uploading" | "complete";
+    progress: number;
+    message?: string;
+    leaseMs: number;
+  },
+  RenderWriteResponse
+>("renderJobs:heartbeat");
+
+const progressRenderJobRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    jobId: Id<"renderJobs">;
+    workerId: string;
+    claimToken: string;
+    phase: "claimed" | "downloading" | "probing" | "rendering" | "uploading" | "complete";
+    progress: number;
+    message?: string;
+  },
+  RenderWriteResponse
+>("renderJobs:progress");
+
+const completeRenderJobRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    jobId: Id<"renderJobs">;
+    workerId: string;
+    claimToken: string;
+    outputObjectKey: string;
+    manifestObjectKey: string;
+    outputBytes: number;
+    cache: RenderCacheResult;
+  },
+  RenderWriteResponse
+>("renderJobs:complete");
+
+const failRenderJobRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    jobId: Id<"renderJobs">;
+    workerId: string;
+    claimToken: string;
+    failure: {
+      code: string;
+      retryable: boolean;
+      message?: string;
+      detail?: Record<string, string>;
+    };
+  },
+  boolean
+>("renderJobs:fail");
+
+const releaseRenderJobRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    jobId: Id<"renderJobs">;
+    workerId: string;
+    claimToken: string;
+    reason: string;
+  },
+  boolean
+>("renderJobs:release");
+
 http.route({
   path: "/timelines/presence",
   method: "POST",
@@ -1204,6 +1301,169 @@ http.route({
       return nleJson({ ok: true, snapshot });
     } catch (error) {
       return nleJson({ ok: false, error: error instanceof Error ? error.message : "Snapshot rejected." }, 400);
+    }
+  }),
+});
+
+// Render fleet HTTP adapter. These routes deliberately reuse the NLE panel's
+// team pluginToken Bearer authentication. Every internal mutation also receives
+// that resolved teamId, preventing a token from operating another team's job.
+async function renderWorkerBody(request: Request): Promise<Record<string, unknown> | null> {
+  return await request.json().catch(() => null) as Record<string, unknown> | null;
+}
+
+function renderWorkerError(error: unknown): Response {
+  return nleJson(
+    { ok: false, error: error instanceof Error ? error.message : "Render worker request rejected." },
+    400,
+  );
+}
+
+http.route({
+  path: "/render-jobs/claim",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = await renderWorkerBody(request);
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+    try {
+      const claim = await ctx.runMutation(claimRenderJobRef, {
+        teamId: team._id,
+        workerId: body.workerId as string,
+        leaseMs: body.leaseMs as number,
+      });
+      return nleJson({ ok: true, claim });
+    } catch (error) {
+      return renderWorkerError(error);
+    }
+  }),
+});
+
+http.route({
+  path: "/render-jobs/heartbeat",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = await renderWorkerBody(request);
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+    try {
+      const result = await ctx.runMutation(heartbeatRenderJobRef, {
+        teamId: team._id,
+        jobId: body.jobId as Id<"renderJobs">,
+        workerId: body.workerId as string,
+        claimToken: body.claimToken as string,
+        phase: body.phase as "claimed" | "downloading" | "probing" | "rendering" | "uploading" | "complete",
+        progress: body.progress as number,
+        message: body.message as string | undefined,
+        leaseMs: body.leaseMs as number,
+      });
+      return nleJson({ ok: true, ...result });
+    } catch (error) {
+      return renderWorkerError(error);
+    }
+  }),
+});
+
+http.route({
+  path: "/render-jobs/progress",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = await renderWorkerBody(request);
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+    try {
+      const result = await ctx.runMutation(progressRenderJobRef, {
+        teamId: team._id,
+        jobId: body.jobId as Id<"renderJobs">,
+        workerId: body.workerId as string,
+        claimToken: body.claimToken as string,
+        phase: body.phase as "claimed" | "downloading" | "probing" | "rendering" | "uploading" | "complete",
+        progress: body.progress as number,
+        message: body.message as string | undefined,
+      });
+      return nleJson({ ok: true, ...result });
+    } catch (error) {
+      return renderWorkerError(error);
+    }
+  }),
+});
+
+http.route({
+  path: "/render-jobs/complete",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = await renderWorkerBody(request);
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+    try {
+      const result = await ctx.runMutation(completeRenderJobRef, {
+        teamId: team._id,
+        jobId: body.jobId as Id<"renderJobs">,
+        workerId: body.workerId as string,
+        claimToken: body.claimToken as string,
+        outputObjectKey: body.outputObjectKey as string,
+        manifestObjectKey: body.manifestObjectKey as string,
+        outputBytes: body.outputBytes as number,
+        cache: body.cache as RenderCacheResult,
+      });
+      return nleJson({ ok: true, ...result });
+    } catch (error) {
+      return renderWorkerError(error);
+    }
+  }),
+});
+
+http.route({
+  path: "/render-jobs/fail",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = await renderWorkerBody(request);
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+    try {
+      const accepted = await ctx.runMutation(failRenderJobRef, {
+        teamId: team._id,
+        jobId: body.jobId as Id<"renderJobs">,
+        workerId: body.workerId as string,
+        claimToken: body.claimToken as string,
+        failure: body.failure as {
+          code: string;
+          retryable: boolean;
+          message?: string;
+          detail?: Record<string, string>;
+        },
+      });
+      return nleJson({ ok: true, accepted });
+    } catch (error) {
+      return renderWorkerError(error);
+    }
+  }),
+});
+
+http.route({
+  path: "/render-jobs/release",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = await renderWorkerBody(request);
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+    try {
+      const accepted = await ctx.runMutation(releaseRenderJobRef, {
+        teamId: team._id,
+        jobId: body.jobId as Id<"renderJobs">,
+        workerId: body.workerId as string,
+        claimToken: body.claimToken as string,
+        reason: body.reason as string,
+      });
+      return nleJson({ ok: true, accepted });
+    } catch (error) {
+      return renderWorkerError(error);
     }
   }),
 });
