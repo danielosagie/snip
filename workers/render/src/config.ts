@@ -3,7 +3,9 @@ import { hostname } from "node:os";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SegmentCache } from "./cache";
+import { ConvexJobStore, HttpConvexJobTransport } from "./convexJobStore";
 import { LocalJobStore } from "./jobStore";
+import type { JobStore } from "./jobStore";
 import {
   createObjectStoreFromEnv,
   createR2ObjectStoreFromEnv,
@@ -29,6 +31,24 @@ function envFlag(name: string): boolean {
   return ["1", "true", "yes"].includes(process.env[name]?.trim().toLowerCase() ?? "");
 }
 
+function requiredEnv(name: string, aliases: string[] = []): string {
+  for (const candidate of [name, ...aliases]) {
+    const value = process.env[candidate]?.trim();
+    if (value) return value;
+  }
+  throw new Error(`${name} is required.`);
+}
+
+export type JobStoreBackend = "local" | "convex";
+
+export function jobStoreBackendFromEnv(): JobStoreBackend {
+  const backend = process.env.JOB_STORE_BACKEND?.trim().toLowerCase() || "local";
+  if (backend !== "local" && backend !== "convex") {
+    throw new Error("JOB_STORE_BACKEND must be local or convex.");
+  }
+  return backend;
+}
+
 async function readJobInput(): Promise<unknown> {
   const inline = process.env.RENDER_JOB_JSON?.trim();
   if (inline) return JSON.parse(inline) as unknown;
@@ -50,22 +70,32 @@ function cacheStore(primary: ObjectStore): ObjectStore {
 }
 
 export async function createRunnerFromEnv(): Promise<JobRunner> {
-  const input = await readJobInput();
-  const envelope = input && typeof input === "object" && !Array.isArray(input)
-    ? input as Record<string, unknown>
-    : {};
-  const spec = normalizeJobSpec(envelope.spec ?? input);
-  const defaultId = `local-${createHash("sha256")
-    .update(stableStringify(spec))
-    .digest("hex")
-    .slice(0, 16)}`;
-  const jobId = typeof envelope.id === "string" && envelope.id.trim()
-    ? envelope.id.trim()
-    : process.env.RENDER_JOB_ID?.trim() || defaultId;
   const workRoot = process.env.WORK_DIR?.trim() || "/tmp/snip-render";
-  const statePath = process.env.LOCAL_JOB_STATE_PATH?.trim()
-    || join(workRoot, `${jobId}.state.json`);
-  const store = await LocalJobStore.open({ statePath, jobId, spec });
+  const backend = jobStoreBackendFromEnv();
+  let store: JobStore;
+  if (backend === "convex") {
+    store = new ConvexJobStore(new HttpConvexJobTransport({
+      siteUrl: requiredEnv("CONVEX_SITE_URL", ["VITE_CONVEX_SITE_URL"]),
+      pluginToken: requiredEnv("RENDER_WORKER_PLUGIN_TOKEN"),
+      timeoutMs: positiveEnvNumber("CONVEX_HTTP_TIMEOUT_MS", 15_000),
+    }));
+  } else {
+    const input = await readJobInput();
+    const envelope = input && typeof input === "object" && !Array.isArray(input)
+      ? input as Record<string, unknown>
+      : {};
+    const spec = normalizeJobSpec(envelope.spec ?? input);
+    const defaultId = `local-${createHash("sha256")
+      .update(stableStringify(spec))
+      .digest("hex")
+      .slice(0, 16)}`;
+    const jobId = typeof envelope.id === "string" && envelope.id.trim()
+      ? envelope.id.trim()
+      : process.env.RENDER_JOB_ID?.trim() || defaultId;
+    const statePath = process.env.LOCAL_JOB_STATE_PATH?.trim()
+      || join(workRoot, `${jobId}.state.json`);
+    store = await LocalJobStore.open({ statePath, jobId, spec });
+  }
   const primary = createObjectStoreFromEnv();
   const cache = new SegmentCache(
     cacheStore(primary),
