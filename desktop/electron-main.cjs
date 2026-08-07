@@ -1645,22 +1645,53 @@ function commonRcloneInstallPaths() {
   ];
 }
 
+// Homebrew's macOS rclone is built without FUSE support and hard-refuses
+// `rclone mount` at runtime ("rclone mount is not supported on MacOS when
+// rclone is installed via Homebrew"), so resolving to it guarantees exit
+// code 1 the moment the drive starts. Brew always installs through a
+// Cellar symlink, which official rclone.org binaries never do, so the
+// realpath is a reliable tell on both Apple-silicon and Intel prefixes.
+function isHomebrewRclone(candidate) {
+  if (process.platform !== "darwin") return false;
+  try {
+    return fssync.realpathSync(candidate).includes("/Cellar/");
+  } catch {
+    return false;
+  }
+}
+
 function resolveRclonePath() {
   // 1. A bundled copy, if a future build ever ships one (signed).
   if (process.resourcesPath) {
     const bundled = path.join(process.resourcesPath, RCLONE_BIN);
     if (fssync.existsSync(bundled)) return bundled;
   }
-  // 2. Our own provisioned copy.
+  // 2. Our own provisioned copy (an official build, downloaded on first
+  //    mount — always mount-capable).
   const managed = path.join(SETTINGS_DIR, "bin", RCLONE_BIN);
   if (fssync.existsSync(managed)) return managed;
-  // 3. A system install at a known absolute path (covers Homebrew, which
-  //    isn't on a Finder-launched app's PATH).
+  // 3. A system install at a known absolute path (a Finder-launched app
+  //    doesn't see Homebrew's bin on PATH). Brew builds are skipped: they
+  //    cannot mount on macOS, and returning one here bricked the drive for
+  //    anyone with `brew install rclone` on their machine.
   for (const cand of commonRcloneInstallPaths()) {
-    if (fssync.existsSync(cand)) return cand;
+    if (fssync.existsSync(cand) && !isHomebrewRclone(cand)) return cand;
   }
-  // 4. Last resort: whatever is on PATH (works when launched from a terminal).
-  if (commandExists("rclone")) return "rclone";
+  // 4. Last resort: whatever is on PATH (works when launched from a
+  //    terminal), with the same brew guard.
+  if (commandExists("rclone")) {
+    try {
+      const onPath = execSync("command -v rclone", {
+        stdio: "pipe",
+        shell: "/bin/bash",
+      })
+        .toString()
+        .trim();
+      if (onPath && !isHomebrewRclone(onPath)) return onPath;
+    } catch {
+      // fall through to the download path
+    }
+  }
   return null;
 }
 
