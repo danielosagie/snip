@@ -36,9 +36,15 @@ import {
 import { applyTimelineOps } from "@/lib/timeline/operations";
 import {
   TIMELINE_CLIP_PROPERTIES,
+  type RenderOutputSpec,
   type TimelineDocument,
   type TimelineOp,
 } from "@/lib/timeline/types";
+import {
+  buildRenderOutputSpec,
+  exportProgressView,
+  type RenderJobProgress,
+} from "./exportModel";
 import {
   SequencePlaybackSurface,
   type SequencePlaybackHandle,
@@ -73,6 +79,17 @@ type MediaItem = {
   video: Doc<"videos">;
   displayName: string;
   mirrored?: NonNullable<Doc<"videos">["staticRenditions"]>[number];
+};
+
+type RenderJobCreateArgs = {
+  snapshot: {
+    timelineDocId: Id<"timelineDocs">;
+    timelineSnapshotId: Id<"timelineSnapshots">;
+    branch: string;
+    revision: number;
+  };
+  output: RenderOutputSpec;
+  priority?: number;
 };
 
 const EXPORT_ENABLED =
@@ -132,6 +149,22 @@ const timelineDocsApi = {
       snapshotId: Id<"timelineSnapshots">;
     }
   >("timelineDocs:restore"),
+} as const;
+
+const renderJobsApi = {
+  isEnabled: makeFunctionReference<"query", Record<string, never>, boolean>(
+    "renderJobs:isEnabled",
+  ),
+  create: makeFunctionReference<
+    "mutation",
+    RenderJobCreateArgs,
+    Id<"renderJobs">
+  >("renderJobs:create"),
+  getProgress: makeFunctionReference<
+    "query",
+    { jobId: Id<"renderJobs"> },
+    RenderJobProgress | null
+  >("renderJobs:getProgress"),
 } as const;
 
 function extensionOf(value: string | undefined): string | null {
@@ -205,6 +238,7 @@ export function TimelineEditor({ teamSlug, projectId }: TimelineEditorProps) {
   const applyOpsMutation = useMutation(timelineDocsApi.applyOps);
   const commitVersion = useMutation(timelineDocsApi.commit);
   const restoreVersion = useMutation(timelineDocsApi.restore);
+  const createRenderJob = useMutation(renderJobsApi.create);
   const getProxyUrl = useAction(api.desktopBrowse.getDownloadUrlForDesktop);
 
   const creatingRef = useRef(false);
@@ -232,6 +266,22 @@ export function TimelineEditor({ teamSlug, projectId }: TimelineEditorProps) {
   const [versionBusy, setVersionBusy] = useState(false);
   const [lockDismissed, setLockDismissed] = useState(false);
   const [sourceVersion, setSourceVersion] = useState(0);
+  const [renderJobId, setRenderJobId] = useState<Id<"renderJobs"> | null>(null);
+  const [lastExportRequest, setLastExportRequest] =
+    useState<RenderJobCreateArgs | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const renderQueueEnabled = useQuery(
+    renderJobsApi.isEnabled,
+    EXPORT_ENABLED ? {} : "skip",
+  );
+  const renderProgress = useQuery(
+    renderJobsApi.getProgress,
+    renderJobId ? { jobId: renderJobId } : "skip",
+  );
+  const exportView = renderProgress
+    ? exportProgressView(renderProgress)
+    : null;
 
   useEffect(() => {
     if (summaries === undefined || summaries.length > 0 || creatingRef.current) {
@@ -672,6 +722,61 @@ export function TimelineEditor({ teamSlug, projectId }: TimelineEditorProps) {
     }
   };
 
+  const submitExport = async (request: RenderJobCreateArgs) => {
+    setLastExportRequest(request);
+    const jobId = await createRenderJob(request);
+    setRenderJobId(jobId);
+    setEditStatus("Export queued");
+  };
+
+  const startExport = async () => {
+    if (!timelineDocId || !documentRef.current) return;
+    setExportBusy(true);
+    setExportError(null);
+    setRenderJobId(null);
+    setLastExportRequest(null);
+    try {
+      await operationQueueRef.current;
+      const currentDocument = documentRef.current;
+      if (!currentDocument) throw new Error("Timeline unavailable.");
+      const snapshot = await commitVersion({
+        timelineDocId,
+        message: "Export",
+      });
+      await submitExport({
+        snapshot: {
+          timelineDocId,
+          timelineSnapshotId: snapshot.snapshotId,
+          branch: snapshot.branch,
+          revision: snapshot.revision,
+        },
+        output: buildRenderOutputSpec(currentDocument),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Export failed";
+      setExportError(message);
+      setEditStatus(message);
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const retryExport = async () => {
+    if (!lastExportRequest) return;
+    setExportBusy(true);
+    setExportError(null);
+    setRenderJobId(null);
+    try {
+      await submitExport(lastExportRequest);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Retry failed";
+      setExportError(message);
+      setEditStatus(message);
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
   const restore = async (snapshotId: Id<"timelineSnapshots">) => {
     if (!timelineDocId) return;
     setVersionBusy(true);
@@ -709,6 +814,10 @@ export function TimelineEditor({ teamSlug, projectId }: TimelineEditorProps) {
   const playheadPosition = timelineTime(playhead, frameRate);
   const sequenceName =
     timelineDoc.document.sequence.properties.name?.value ?? "Assembly";
+  const exportFailure = exportError ?? exportView?.failureMessage ?? null;
+  const exportComplete = renderProgress?.status === "done";
+  const showExportPanel = EXPORT_ENABLED
+    && (exportBusy || renderJobId !== null || exportError !== null);
 
   return (
     <TimelinePresenceProvider
@@ -821,14 +930,133 @@ export function TimelineEditor({ teamSlug, projectId }: TimelineEditorProps) {
                   <Button
                     type="button"
                     size="sm"
-                    disabled
-                    title="Render pending"
+                    disabled={
+                      renderQueueEnabled !== true
+                      || exportBusy
+                      || exportView?.active === true
+                    }
+                    title={
+                      renderQueueEnabled === false
+                        ? "Render queue disabled"
+                        : renderQueueEnabled === undefined
+                          ? "Checking render queue"
+                          : undefined
+                    }
+                    onClick={() => void startExport()}
                   >
-                    Export
+                    {exportBusy ? "Queueing" : "Export"}
                   </Button>
                 ) : null}
               </div>
             </div>
+
+            {showExportPanel ? (
+              <section
+                aria-label="Export progress"
+                className="border-b-2 border-[#1a1a1a] bg-[#FFEDD5] px-3 py-2"
+              >
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                  <div>
+                    <p className="font-mono text-[8px] font-black uppercase tracking-[0.14em] text-[#66665f]">
+                      Phase
+                    </p>
+                    <p className="font-mono text-xs font-black uppercase">
+                      {exportBusy ? "queueing" : exportView?.phase ?? "queued"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[8px] font-black uppercase tracking-[0.14em] text-[#66665f]">
+                      Done
+                    </p>
+                    <p className="font-mono text-xs font-black tabular-nums">
+                      {exportView?.percent ?? 0}%
+                    </p>
+                  </div>
+                  {exportComplete ? (
+                    <div>
+                      <p className="font-mono text-[8px] font-black uppercase tracking-[0.14em] text-[#66665f]">
+                        Cache
+                      </p>
+                      <p className="font-mono text-xs font-black tabular-nums">
+                        {exportView?.streamCopyPercent === null
+                          ? "Unavailable"
+                          : `${exportView?.streamCopyPercent ?? 0}% copy`}
+                      </p>
+                    </div>
+                  ) : null}
+                  <div className="min-w-36 flex-1">
+                    <div
+                      className="h-2 border border-[#1a1a1a] bg-[#f0f0e8]"
+                      role="progressbar"
+                      aria-label="Render progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={exportView?.percent ?? 0}
+                    >
+                      <div
+                        className="h-full bg-[#C2410C] transition-[width] duration-200 motion-reduce:transition-none"
+                        style={{ width: `${exportView?.percent ?? 0}%` }}
+                      />
+                    </div>
+                    {renderProgress?.message && !exportFailure ? (
+                      <p className="mt-1 truncate font-mono text-[9px] font-bold">
+                        {renderProgress.message}
+                      </p>
+                    ) : null}
+                  </div>
+                  {exportFailure ? (
+                    <p className="w-full text-pretty font-mono text-[10px] font-black text-[#9A3412]">
+                      {exportFailure}
+                    </p>
+                  ) : null}
+                  {(renderProgress?.status === "failed" || exportError)
+                    && lastExportRequest ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={exportBusy || renderQueueEnabled !== true}
+                      onClick={() => void retryExport()}
+                    >
+                      Retry
+                    </Button>
+                  ) : null}
+                  {exportComplete ? (
+                    <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
+                      <dl className="grid min-w-0 gap-1 font-mono text-[8px] font-bold sm:grid-cols-2 sm:gap-3">
+                        <div className="min-w-0">
+                          <dt className="uppercase text-[#66665f]">Output</dt>
+                          <dd
+                            className="max-w-48 truncate"
+                            title={renderProgress.outputObjectKey ?? undefined}
+                          >
+                            {renderProgress.outputObjectKey ?? "Ready"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="uppercase text-[#66665f]">Manifest</dt>
+                          <dd
+                            className="max-w-48 truncate"
+                            title={renderProgress.manifestObjectKey ?? undefined}
+                          >
+                            {renderProgress.manifestObjectKey ?? "Ready"}
+                          </dd>
+                        </div>
+                      </dl>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled
+                        title="Needs an authenticated render output URL action"
+                      >
+                        Copy URL
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
 
             <div className="grid min-h-0 flex-1 grid-rows-[minmax(250px,44%)_minmax(300px,1fr)]">
               <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_170px] border-b-2 border-[#1a1a1a] bg-[#11110f]">
