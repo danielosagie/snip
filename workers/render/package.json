@@ -7,9 +7,10 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "demo": "bun run src/demo.ts",
+    "benchmark:render-cost": "bun run scripts/render-cost-fixture.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests"
+    "lint": "eslint src tests scripts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.991.0"
