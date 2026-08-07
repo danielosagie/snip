@@ -84,8 +84,8 @@ export function MountView({ settings, client }: Props) {
     if (mountPath) await api.shell.openFolder(mountPath);
   };
 
-  // Flip proxy mode and, if currently mounted, remount so the new filter (which
-  // hides/shows `originals/`) takes effect. Optimistic; reverts on failure.
+  // Remount into a mode-specific VFS cache namespace. This prevents the proxy
+  // and original, which share one logical drive path, from aliasing on disk.
   const handleToggleProxy = async (next: boolean) => {
     setProxyOn(next);
     setBusy(true);
@@ -116,7 +116,7 @@ export function MountView({ settings, client }: Props) {
         </h2>
         <p style={{ margin: 0, color: "#555", fontSize: 13, lineHeight: 1.55 }}>
           Streams your S3 / R2 bucket as a real Mac volume so Finder,
-          Premiere, and Resolve see project files natively — no manual pull.
+          Premiere, and Resolve see project files natively, with no manual pull.
           One mount per machine. Uses the same tuned rclone VFS flags as{" "}
           <code style={{ fontSize: 12 }}>docs/MOUNTING.md</code> (read-ahead +
           chunk size for big sequential reads).
@@ -215,8 +215,8 @@ export function MountView({ settings, client }: Props) {
             style={{ fontSize: 11, color: "#666", marginTop: 2, lineHeight: 1.5 }}
           >
             {proxyOn
-              ? "Streaming lightweight proxies — full-res originals hidden. Fast + cache-friendly for editing."
-              : "Showing full-res originals too — heavier, for conform / online."}
+              ? "Using lightweight proxies by default. Fast and cache-friendly for editing."
+              : "Using full-resolution originals. First touch downloads and caches each file for conform and online work."}
             {status === "mounted" ? " Toggling remounts the drive." : ""}
           </div>
         </div>

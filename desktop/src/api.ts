@@ -13,6 +13,8 @@
 export interface DesktopFeatureFlags {
   /** File-level presence + soft locks ("Alex has X open in Premiere"). */
   presence: { enabled: boolean };
+  /** Structured NLE project open/save activity published through presence. */
+  watcher: { enabled: boolean; directories: string[]; extensions: string[] };
   /** Predictive prefetch on `.prproj` open — warms rclone's VFS cache. */
   prefetch: { enabled: boolean };
   /** LAN-shared cache (mDNS-discovered peers serve cached files). */
@@ -20,9 +22,9 @@ export interface DesktopFeatureFlags {
   /** Filesystem-level ACLs / team folder permissions. */
   acls: { enabled: boolean };
   /**
-   * Proxy mode (defaults ON, unlike the others). When on, the mount hides the
-   * heavy `originals/` subtrees so editors browse + stream the lightweight Mux
-   * proxies. Toggle off to expose full-res for conform/online.
+   * Proxy mode (defaults ON, unlike the others). The mount resolves each
+   * logical media file to its mirrored proxy. Toggle off to resolve the
+   * matching original for conform/online.
    */
   proxy: { enabled: boolean };
 }
@@ -41,6 +43,8 @@ export interface DesktopSettings {
   rootDir: string;
   /** Which project the Resolve snapshot/restore actions push to / pull from. */
   activeProjectId?: string;
+  /** Optional team context used by desktop watcher presence. */
+  activeTeamId?: string;
   features: DesktopFeatureFlags;
 }
 

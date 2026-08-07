@@ -8,6 +8,14 @@ const fssync = require("node:fs");
 const { spawn, execSync, execFile } = require("node:child_process");
 const crypto = require("node:crypto");
 const zlib = require("node:zlib");
+const { parseProjectBufferSoft } = require("./lib/project-parsers.cjs");
+const {
+  DEFAULT_PROJECT_EXTENSIONS,
+  ProjectFileWatcher,
+  uniqueRoots,
+} = require("./lib/project-watcher.cjs");
+const { createConvexPresenceTransport } = require("./lib/watcher-transport.cjs");
+const { renditionCacheDirectory } = require("./lib/rendition-storage.cjs");
 
 // The desktop is a thin native shell around the WEB app — it loads
 // snipfilm.vercel.app directly (real https origin, so Clerk + Convex behave
@@ -28,6 +36,13 @@ const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 // in from the Settings → Features panel.
 const DEFAULT_FEATURES = {
   presence: { enabled: false },
+  // Structured NLE file activity. Disabled until the user opts in because
+  // local project directories can contain sensitive client filenames.
+  watcher: {
+    enabled: false,
+    directories: [],
+    extensions: DEFAULT_PROJECT_EXTENSIONS,
+  },
   // Prefetch defaults ON: with a cloud-backed mount the cold path is too slow
   // for scrubbing unless rclone's VFS cache already holds the first chunk of
   // every clip in the bin. The watcher warms the media referenced by a
@@ -38,11 +53,9 @@ const DEFAULT_FEATURES = {
   prefetch: { enabled: true },
   lanCache: { enabled: false, port: 17900 },
   acls: { enabled: false },
-  // Proxy mode is the ONE feature that defaults ON — proxy-first editing is the
-  // whole point of the drive (cheap, fast, cache-friendly). When on, the mount
-  // hides the heavy `originals/` subtrees so editors browse + stream the
-  // lightweight Mux proxies the backend mirrors to R2. Flip off to expose
-  // full-res for conform/online. See plans/proxies-unified.md.
+  // Proxy mode is the ONE feature that defaults ON. The WebDAV layer resolves
+  // each logical media path to a mirrored proxy when one is ready. Flip it off
+  // to resolve the original for conform/online. See plans/proxies-unified.md.
   proxy: { enabled: true },
 };
 
@@ -492,6 +505,81 @@ function stopPresenceLoop() {
   void convexCall("mutation", "desktopPresence:clearLocks", {
     clientId: getClientId(),
   }).catch(() => {});
+}
+
+// ---- Feature loop: structured project-file activity ------------------------
+//
+// This watcher is deliberately separate from the prefetch loop below. It
+// emits a small editor-agnostic contract (open/save, file, user, mtime, hash)
+// through WatcherTransport. Wave 2 can swap the transport for versioning and
+// timeline ingest without coupling those network paths to fs.watch.
+
+const projectWatcherState = {
+  watcher: null,
+  transport: null,
+  signature: "",
+};
+
+function watcherRoots(settings) {
+  const configured = Array.isArray(settings.features?.watcher?.directories)
+    ? settings.features.watcher.directories
+    : [];
+  const mounted =
+    mountState.status === "mounted" && mountState.mountPath
+      ? [mountState.mountPath]
+      : [];
+  return uniqueRoots([...mounted, ...configured]);
+}
+
+function stopProjectWatcher() {
+  projectWatcherState.watcher?.close();
+  projectWatcherState.transport?.close();
+  projectWatcherState.watcher = null;
+  projectWatcherState.transport = null;
+  projectWatcherState.signature = "";
+}
+
+async function reconcileProjectWatcher(settings) {
+  const config = settings.features?.watcher;
+  if (!config?.enabled) {
+    stopProjectWatcher();
+    return;
+  }
+  const roots = watcherRoots(settings);
+  const extensions = Array.isArray(config.extensions) ? config.extensions : [];
+  const signature = JSON.stringify({ roots, extensions: [...extensions].sort() });
+  if (projectWatcherState.watcher && projectWatcherState.signature === signature) return;
+  stopProjectWatcher();
+  if (roots.length === 0) {
+    pushLog("watcher: enabled, waiting for a mount or configured project directory");
+    return;
+  }
+
+  const transport = createConvexPresenceTransport({
+    convexCall,
+    onLog: pushLog,
+    getContext: async () => {
+      const current = await loadSettings();
+      return {
+        clientId: getClientId(),
+        projectId: current.activeProjectId || undefined,
+        teamId: current.activeTeamId || undefined,
+        mountPath: mountState.mountPath || roots[0],
+      };
+    },
+  });
+  const watcher = new ProjectFileWatcher({
+    roots,
+    extensions,
+    user: getClientId,
+    transport,
+    listOpenFiles: listOpenFilesUnderMount,
+    parseProjectBufferSoft,
+    onLog: pushLog,
+  }).start();
+  projectWatcherState.watcher = watcher;
+  projectWatcherState.transport = transport;
+  projectWatcherState.signature = signature;
 }
 
 // ---- Feature loop: predictive prefetch ---------------------------------------
@@ -1117,6 +1205,8 @@ async function reconcileFeatures() {
   if (flags.prefetch?.enabled) startPrefetchWatcher();
   else stopPrefetchWatcher();
 
+  await reconcileProjectWatcher(settings);
+
   if (flags.lanCache?.enabled) await startLanCacheServer();
   else stopLanCacheServer();
 
@@ -1704,21 +1794,21 @@ async function startMount({ mountPath } = {}) {
   // still lives under `features.lanCache` for that future work; it just doesn't
   // feed the mount. Tracked in bench/FINDINGS-AND-PLAN.md.
 
-  // Pin the cache dir so the second rclone process (the cache server)
-  // knows where to find our cached files to expose to peers.
-  const cacheDir = path.join(SETTINGS_DIR, "rclone-cache");
+  // Proxy bytes and originals share one logical Finder path, but they must not
+  // alias on disk. Separate namespaces guarantee that switching to full-res
+  // pulls the original on first touch and that subsequent reads stay local.
+  const cacheDir = renditionCacheDirectory(
+    path.join(SETTINGS_DIR, "rclone-cache"),
+    preferProxy,
+  );
   await fs.mkdir(cacheDir, { recursive: true });
 
-  // ── Optional: combined --filter-from (proxy mode + Convex ACLs) ──
+  // ── Optional: Convex ACLs through --filter-from ──
   //
   // We build ONE rclone filter file so rule precedence is explicit (rules
   // evaluate top-to-bottom, first match wins) and we never mix `--exclude`
-  // with `--filter-from` (their interaction is surprising). Two sources:
-  //  1. Proxy mode (default ON): hide the heavy `originals/` subtrees so the
-  //     drive presents the lightweight Mux proxies the backend mirrors to R2.
-  //     Toggle off (Settings → Proxy mode) to expose full-res for conform.
-  //  2. ACLs (`features.acls.enabled`): per-folder allow/deny from Convex,
-  //     fail-CLOSED to deny-all if the rule fetch fails.
+  // with `--filter-from` (their interaction is surprising). ACL rules are
+  // loaded from Convex and fail closed when the rule fetch fails.
   let filterFromArgs = [];
   const filterLines = [];
   // NOTE: proxy mode is no longer a path FILTER under the WebDAV mount. The
@@ -2684,6 +2774,7 @@ app.on("before-quit", async (event) => {
   // this client's lock row in Convex so the next "who's online" read
   // doesn't show a stale phantom.
   stopPresenceLoop();
+  stopProjectWatcher();
   stopPrefetchWatcher();
   stopLanCacheServer();
   if (mountChild) {

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PremiereData Name="Minimal Premiere Project">
+  <Sequence ObjectID="sequence-1">
+    <Name>Main Cut</Name>
+    <Timebase>24</Timebase>
+    <Duration>240</Duration>
+    <Video>
+      <Track ObjectID="video-1">
+        <Name>V1</Name>
+        <Index>0</Index>
+        <TrackItem ObjectID="clip-1">
+          <Name>Opening Shot</Name>
+          <MediaPath>file:///Volumes/Media/opening.mov</MediaPath>
+          <Start>24</Start>
+          <End>72</End>
+          <In>48</In>
+          <Out>96</Out>
+          <Enabled>true</Enabled>
+        </TrackItem>
+      </Track>
+    </Video>
+    <Audio>
+      <Track ObjectID="audio-1">
+        <Name>A1</Name>
+        <Index>0</Index>
+        <TrackItem ObjectID="clip-2">
+          <Name>Opening Audio</Name>
+          <MediaPath>file:///Volumes/Media/opening.wav</MediaPath>
+          <Start>24</Start>
+          <End>72</End>
+          <In>0</In>
+          <Out>48</Out>
+        </TrackItem>
+      </Track>
+    </Audio>
+  </Sequence>
+</PremiereData>
