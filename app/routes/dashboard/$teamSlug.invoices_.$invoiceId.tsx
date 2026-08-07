@@ -43,6 +43,7 @@ import {
 import { seoHead } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 import { useInvoiceDetailData } from "./-invoices.data";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type InvoiceDetail = NonNullable<
   FunctionReturnType<typeof api.invoices.get>
@@ -183,6 +184,7 @@ function InvoiceEditor({
   const sendInvoice = useMutation(api.invoices.send);
   const voidInvoice = useMutation(api.invoices.voidInvoice);
   const revokePayLink = useMutation(api.invoices.revokePayLink);
+  const confirmDialog = useConfirmDialog();
   const [form, setForm] = useState<InvoiceDraft>(() => draftFromInvoice(invoice));
   const [templateTotal, setTemplateTotal] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
@@ -373,33 +375,48 @@ function InvoiceEditor({
   };
 
   const voidCurrentInvoice = async () => {
-    if (!invoice || !window.confirm("Void this invoice?")) return;
-    setErrors({});
-    setNotice(null);
-    setBusy("void");
-    try {
-      await voidInvoice({ invoiceId: invoice._id });
-      setNotice("Voided.");
-    } catch (error) {
-      setErrors({ form: friendlyError(error, "Invoice could not be voided.") });
-    } finally {
-      setBusy(null);
-    }
+    if (!invoice) return;
+    await confirmDialog({
+      title: "Void invoice",
+      description: "This invoice will no longer accept payments.",
+      confirmLabel: "Void",
+      variant: "destructive",
+      action: async () => {
+        setErrors({});
+        setNotice(null);
+        setBusy("void");
+        try {
+          await voidInvoice({ invoiceId: invoice._id });
+          setNotice("Voided.");
+        } finally {
+          setBusy(null);
+        }
+      },
+      errorMessage: (error) =>
+        friendlyError(error, "Invoice could not be voided."),
+    });
   };
 
   const revokeCurrentPayLink = async () => {
-    if (!invoice || !window.confirm("Revoke this pay link?")) return;
-    setErrors({});
-    setNotice(null);
-    setBusy("revoke");
-    try {
-      await revokePayLink({ invoiceId: invoice._id });
-      setNotice("Link revoked.");
-    } catch (error) {
-      setErrors({ form: friendlyError(error, "Link could not be revoked.") });
-    } finally {
-      setBusy(null);
-    }
+    if (!invoice) return;
+    await confirmDialog({
+      title: "Revoke link",
+      description: "This pay link will stop working.",
+      confirmLabel: "Revoke",
+      variant: "destructive",
+      action: async () => {
+        setErrors({});
+        setNotice(null);
+        setBusy("revoke");
+        try {
+          await revokePayLink({ invoiceId: invoice._id });
+          setNotice("Link revoked.");
+        } finally {
+          setBusy(null);
+        }
+      },
+      errorMessage: (error) => friendlyError(error, "Link could not be revoked."),
+    });
   };
 
   const copyPayLink = async () => {

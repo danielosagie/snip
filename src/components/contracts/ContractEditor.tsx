@@ -41,6 +41,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { NamePromptDialog } from "@/components/ui/name-prompt-dialog";
 
 interface Props {
   contentHtml: string;
@@ -441,6 +442,7 @@ function ContractEditorStyles() {
 }
 
 function Toolbar({ editor }: { editor: Editor }) {
+  const [linkPromptOpen, setLinkPromptOpen] = useState(false);
   // Defensive: the editor view can be null briefly when Yjs is
   // (re)initializing or when the underlying ProseMirror view has been
   // torn down but the parent hasn't unmounted us yet. Calling
@@ -579,11 +581,7 @@ function Toolbar({ editor }: { editor: Editor }) {
 
       <ToolbarGroup>
         <ToolButton
-          onClick={() => {
-            const url = window.prompt("Link URL");
-            if (!url) return;
-            editor.chain().focus().setLink({ href: url }).run();
-          }}
+          onClick={() => setLinkPromptOpen(true)}
           active={editor.isActive("link")}
           title="Add link"
         >
@@ -610,6 +608,18 @@ function Toolbar({ editor }: { editor: Editor }) {
           <Eraser className="h-3.5 w-3.5" />
         </ToolButton>
       </ToolbarGroup>
+      <NamePromptDialog
+        open={linkPromptOpen}
+        onOpenChange={setLinkPromptOpen}
+        title="Add link"
+        inputLabel="URL"
+        initialValue=""
+        actionLabel="Add"
+        onSubmit={(url) => {
+          editor.chain().focus().setLink({ href: url }).run();
+          setLinkPromptOpen(false);
+        }}
+      />
     </div>
   );
 }
@@ -661,15 +671,19 @@ function ToolButton({
  * your cursor when you actually need it.
  */
 function EditorSelectionBubble({ editor }: { editor: Editor }) {
+  const [linkPromptOpen, setLinkPromptOpen] = useState(false);
+  const [linkValue, setLinkValue] = useState("");
+
   return (
-    <BubbleMenu
-      editor={editor}
-      options={{
-        placement: "top",
-        offset: 8,
-      }}
-    >
-      <div className="inline-flex items-center gap-0.5 rounded-[11px] border border-[#E8E8EC] bg-white p-1 text-[#131315]">
+    <>
+      <BubbleMenu
+        editor={editor}
+        options={{
+          placement: "top",
+          offset: 8,
+        }}
+      >
+        <div className="inline-flex items-center gap-0.5 rounded-[11px] border border-[#E8E8EC] bg-white p-1 text-[#131315]">
         <BubbleBtn
           active={editor.isActive("bold")}
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -731,25 +745,38 @@ function EditorSelectionBubble({ editor }: { editor: Editor }) {
             const previous = (editor.getAttributes("link").href as
               | string
               | undefined) ?? "";
-            const next = prompt("URL (leave empty to unlink)", previous);
-            if (next === null) return;
-            if (next === "") {
-              editor.chain().focus().unsetLink().run();
-              return;
-            }
+            setLinkValue(previous);
+            setLinkPromptOpen(true);
+          }}
+          title="Link"
+        >
+          <LinkIcon className="h-3.5 w-3.5" />
+        </BubbleBtn>
+        </div>
+      </BubbleMenu>
+      <NamePromptDialog
+        open={linkPromptOpen}
+        onOpenChange={setLinkPromptOpen}
+        title="Edit link"
+        inputLabel="URL"
+        initialValue={linkValue}
+        actionLabel="Apply"
+        allowEmpty
+        onSubmit={(next) => {
+          if (next === "") {
+            editor.chain().focus().unsetLink().run();
+          } else {
             editor
               .chain()
               .focus()
               .extendMarkRange("link")
               .setLink({ href: next })
               .run();
-          }}
-          title="Link"
-        >
-          <LinkIcon className="h-3.5 w-3.5" />
-        </BubbleBtn>
-      </div>
-    </BubbleMenu>
+          }
+          setLinkPromptOpen(false);
+        }}
+      />
+    </>
   );
 }
 

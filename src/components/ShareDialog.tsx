@@ -45,6 +45,7 @@ import {
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { ShareAccessPanel } from "@/components/share/ShareAccessPanel";
 import { publicShareUrl, publicWatchUrl } from "@/lib/publicUrl";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   formatUsdCents,
   parseUsdDollarsToCents,
@@ -962,6 +963,7 @@ interface ShareDialogProps {
 }
 
 export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
+  const confirmDialog = useConfirmDialog();
   const video = useQuery(api.videos.get, { videoId });
   const shareLinks = useQuery(api.shareLinks.list, { videoId });
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
@@ -1086,12 +1088,21 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   };
 
   const handleDeleteLink = async (linkId: Id<"shareLinks">) => {
-    if (!confirm("Delete this share link? Anyone holding it loses access.")) return;
-    try {
-      await deleteShareLink({ linkId });
-    } catch (error) {
-      console.error("Failed to delete share link:", error);
-    }
+    await confirmDialog({
+      title: "Delete link",
+      description: "Anyone with this link will lose access.",
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: async () => {
+        try {
+          await deleteShareLink({ linkId });
+        } catch (error) {
+          console.error("Failed to delete share link:", error);
+          throw error;
+        }
+      },
+      errorMessage: "Couldn't delete link.",
+    });
   };
 
   const resetComposer = () => {

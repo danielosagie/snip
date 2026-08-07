@@ -42,6 +42,7 @@ import {
   GripVertical,
   History,
   PanelLeft,
+  PanelLeftClose,
   Pencil,
   Plus,
   RotateCcw,
@@ -52,6 +53,9 @@ import {
   User,
   X,
 } from "lucide-react";
+import { useSidebarState } from "@/lib/sidebarContext";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 type ContractDetail = NonNullable<FunctionReturnType<typeof api.contractsTable.get>>;
 type ContractDoc = ContractDetail["contract"];
@@ -120,6 +124,9 @@ export function DocumentEditorPage({
   const contractId = params.contractId as Id<"contracts">;
   const navigate = useNavigate();
   const convexClient = useConvex();
+  const { collapsed, toggle: toggleSidebar } = useSidebarState();
+  const confirmDialog = useConfirmDialog();
+  const toast = useToast();
 
   const data = useQuery(api.contractsTable.get, { contractId });
   const projectItems = useQuery(api.contractsTable.list, { projectId });
@@ -335,7 +342,7 @@ export function DocumentEditorPage({
       });
       await navigate({ to: documentPath(teamSlug, projectId, documentId) });
     } catch (error) {
-      alert(friendlyError(error, "Could not create a document."));
+      toast.error(friendlyError(error, "Could not create a document."));
     } finally {
       // The rail survives the param-only navigation, so the flag must
       // reset on success too or the button stays stuck on "Creating".
@@ -355,7 +362,7 @@ export function DocumentEditorPage({
         shareTimerRef.current = null;
       }, 1800);
     } catch (error) {
-      alert(friendlyError(error, "Could not copy the link."));
+      toast.error(friendlyError(error, "Could not copy the link."));
     }
   };
 
@@ -424,15 +431,24 @@ export function DocumentEditorPage({
 
   const handleDelete = async () => {
     const label = isDocument ? "document" : "contract";
-    if (!confirm(`Move “${data.contract.title}” to Recently deleted?`)) return;
-    setDeleting(true);
-    try {
-      await deleteContract({ contractId });
-      await navigate({ to: projectPath(teamSlug, projectId) });
-    } catch (error) {
-      alert(friendlyError(error, `Could not delete this ${label}.`));
-      setDeleting(false);
-    }
+    await confirmDialog({
+      title: `Delete ${label}`,
+      description: `${data.contract.title} will move to Recently deleted.`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: async () => {
+        setDeleting(true);
+        try {
+          await deleteContract({ contractId });
+          await navigate({ to: projectPath(teamSlug, projectId) });
+        } catch (error) {
+          setDeleting(false);
+          throw error;
+        }
+      },
+      errorMessage: (error) =>
+        friendlyError(error, `Could not delete this ${label}.`),
+    });
   };
 
   const handlePromote = async () => {
@@ -454,6 +470,19 @@ export function DocumentEditorPage({
     <div className="surface-soft flex h-full min-w-0 flex-col overflow-hidden bg-[#FAFAFA] font-['Inter_Tight',system-ui,sans-serif] text-[#131315] antialiased">
       <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-[#E8E8EC] bg-white px-4">
         <div className="flex min-w-0 items-center gap-2.5">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315] md:inline-flex"
+            title={collapsed ? "Open sidebar" : "Close sidebar"}
+            aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
+          >
+            {collapsed ? (
+              <PanelLeft className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
           <Link
             to={projectPath(teamSlug, projectId)}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#131315] transition-colors hover:bg-[#F7F7F8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315]"
@@ -1349,6 +1378,7 @@ function RecipientsPanel({
   const removeRecipient = useMutation(api.contractsTable.removeRecipient);
   const sendForSignature = useMutation(api.contractsTable.sendForSignature);
   const voidContract = useMutation(api.contractsTable.voidContract);
+  const confirmDialog = useConfirmDialog();
   const [draftName, setDraftName] = useState("");
   const [draftEmail, setDraftEmail] = useState("");
   const [sending, setSending] = useState(false);
@@ -1505,9 +1535,15 @@ function RecipientsPanel({
           <button
             type="button"
             onClick={() => {
-              if (confirm("Void this contract? Signing links will stop working.")) {
-                voidContract({ contractId: contract._id });
-              }
+              void confirmDialog({
+                title: "Void contract",
+                description: "Signing links will stop working.",
+                confirmLabel: "Void",
+                variant: "destructive",
+                action: () => voidContract({ contractId: contract._id }),
+                errorMessage: (error) =>
+                  friendlyError(error, "Could not void this contract."),
+              });
             }}
             className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white text-[13px] font-medium text-[#D8434F] transition-colors hover:bg-[#FFF5F5]"
           >
@@ -1560,6 +1596,7 @@ function FieldsPanel({
   const [selectedRecipient, setSelectedRecipient] = useState<Id<"contractRecipients"> | "">("");
   const [recipientMenuOpen, setRecipientMenuOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [panelError, setPanelError] = useState<string | null>(null);
   const isDraft = canEdit && contract.status === "draft";
 
   // Default the selected recipient to the first signer so a single
@@ -1572,6 +1609,7 @@ function FieldsPanel({
 
   const handleAddType = async (type: FieldDoc["type"]) => {
     if (!selectedRecipient) return;
+    setPanelError(null);
     try {
       await addField({
         contractId: contract._id,
@@ -1580,7 +1618,9 @@ function FieldsPanel({
       });
     } catch (err) {
       console.error("addField failed", err);
-      alert(err instanceof Error ? err.message : "Failed to add field.");
+      setPanelError(
+        err instanceof Error ? err.message : "Failed to add field.",
+      );
     }
   };
 
@@ -1599,13 +1639,16 @@ function FieldsPanel({
 
   const handleSend = async () => {
     setSending(true);
+    setPanelError(null);
     try {
       await sendForSignature({
         contractId: contract._id,
         contentHtml: currentHtml,
       });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Couldn't send for signature.");
+      setPanelError(
+        err instanceof Error ? err.message : "Couldn't send for signature.",
+      );
     } finally {
       setSending(false);
     }
@@ -1624,6 +1667,11 @@ function FieldsPanel({
       </div>
 
       <div className="p-4 space-y-5">
+        {panelError ? (
+          <p className="text-xs font-bold text-[#DC2626]" role="alert">
+            {panelError}
+          </p>
+        ) : null}
         {/* Drag-and-drop placement on the document */}
         <button
           type="button"
@@ -1849,11 +1897,14 @@ function VersionHistoryPanel({
   const snapshot = useMutation(api.contractsTable.snapshotVersion);
   const restore = useMutation(api.contractsTable.restoreVersion);
   const remove = useMutation(api.contractsTable.removeVersion);
+  const confirmDialog = useConfirmDialog();
   const [label, setLabel] = useState("");
   const [working, setWorking] = useState(false);
+  const [panelError, setPanelError] = useState<string | null>(null);
 
   const handleSnapshot = async () => {
     setWorking(true);
+    setPanelError(null);
     try {
       await snapshot({
         contractId: contract._id,
@@ -1862,7 +1913,9 @@ function VersionHistoryPanel({
       });
       setLabel("");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not save version.");
+      setPanelError(
+        err instanceof Error ? err.message : "Could not save version.",
+      );
     } finally {
       setWorking(false);
     }
@@ -1870,6 +1923,11 @@ function VersionHistoryPanel({
 
   return (
     <div>
+      {panelError ? (
+        <p className="mb-3 text-xs font-bold text-[#DC2626]" role="alert">
+          {panelError}
+        </p>
+      ) : null}
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium text-[#131315]">
           Saved versions
@@ -1926,23 +1984,22 @@ function VersionHistoryPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    if (confirm(`Restore ${version.label || `version ${version.versionNumber}`}?`)) {
-                      void (async () => {
-                        try {
-                          const restoredHtml = await restore({
-                            contractId: contract._id,
-                            versionId: version._id,
-                          });
-                          await onRestored?.(restoredHtml);
-                        } catch (error) {
-                          alert(
-                            error instanceof Error
-                              ? error.message
-                              : "Could not restore this version.",
-                          );
-                        }
-                      })();
-                    }
+                    void confirmDialog({
+                      title: "Restore version",
+                      description: `${version.label || `Version ${version.versionNumber}`} will replace current changes.`,
+                      confirmLabel: "Restore",
+                      action: async () => {
+                        const restoredHtml = await restore({
+                          contractId: contract._id,
+                          versionId: version._id,
+                        });
+                        await onRestored?.(restoredHtml);
+                      },
+                      errorMessage: (error) =>
+                        error instanceof Error
+                          ? error.message
+                          : "Could not restore this version.",
+                    });
                   }}
                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#D8D8DE] bg-white transition-colors hover:bg-[#F7F7F8]"
                   title="Restore this version"
@@ -1954,9 +2011,21 @@ function VersionHistoryPanel({
               {canEdit ? <button
                 type="button"
                 onClick={() => {
-                  if (confirm("Delete this saved version?")) {
-                    void remove({ contractId: contract._id, versionId: version._id });
-                  }
+                  void confirmDialog({
+                    title: "Delete version",
+                    description: "This saved version will be removed.",
+                    confirmLabel: "Delete",
+                    variant: "destructive",
+                    action: () =>
+                      remove({
+                        contractId: contract._id,
+                        versionId: version._id,
+                      }),
+                    errorMessage: (error) =>
+                      error instanceof Error
+                        ? error.message
+                        : "Could not delete this version.",
+                  });
                 }}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#D8434F] transition-colors hover:bg-[#FFF5F5]"
                 title="Delete this version"

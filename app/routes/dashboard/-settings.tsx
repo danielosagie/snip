@@ -43,6 +43,8 @@ import { useSettingsData } from "./-settings.data";
 import { prewarmTeam } from "./-team.data";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Id } from "@convex/_generated/dataModel";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 type Role = "admin" | "member" | "viewer";
 
@@ -92,6 +94,8 @@ export default function TeamSettingsPage() {
   const removeMember = useMutation(api.teams.removeMember);
   const updateRole = useMutation(api.teams.updateMemberRole);
   const revokeInvite = useMutation(api.teams.revokeInvite);
+  const confirmDialog = useConfirmDialog();
+  const toast = useToast();
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
@@ -163,7 +167,7 @@ export default function TeamSettingsPage() {
     }
   };
 
-  // window.confirm() can only return OK/Cancel — it cannot collect the
+  // The old native confirmation could only return OK or Cancel. It could not collect the
   // team name it was asking for, so the old second prompt was satisfied
   // by a second OK. Deleting every project, video and member needs a
   // real typed confirmation and a visible failure.
@@ -231,7 +235,7 @@ export default function TeamSettingsPage() {
     try {
       await updateRole({ teamId: team._id, membershipId, role });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't update role.");
+      toast.error(e instanceof Error ? e.message : "Couldn't update role.");
     }
   };
 
@@ -239,19 +243,22 @@ export default function TeamSettingsPage() {
     membershipId: Id<"teamMembers">,
     name: string,
   ) => {
-    if (!confirm(`Remove ${name} from ${team.name}?`)) return;
-    try {
-      await removeMember({ teamId: team._id, membershipId });
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't remove member.");
-    }
+    await confirmDialog({
+      title: "Remove member",
+      description: `${name} will lose access to ${team.name}.`,
+      confirmLabel: "Remove",
+      variant: "destructive",
+      action: () => removeMember({ teamId: team._id, membershipId }),
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Couldn't remove member.",
+    });
   };
 
   const handleRevoke = async (inviteId: Id<"teamInvites">) => {
     try {
       await revokeInvite({ teamId: team._id, inviteId });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't revoke invite.");
+      toast.error(e instanceof Error ? e.message : "Couldn't revoke invite.");
     }
   };
 

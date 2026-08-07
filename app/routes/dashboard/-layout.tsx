@@ -34,6 +34,7 @@ import { UploadActivityIndicator } from "@/components/UploadActivityIndicator";
 import { SidebarProvider } from "@/lib/sidebarContext";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 import { DesktopUninstallModal } from "@/components/desktop/DesktopUninstallModal";
+import { useToast } from "@/components/ui/toast";
 
 // The desktop shell hides the native title bar (titleBarStyle: hiddenInset),
 // so we reserve a short draggable strip at the very top for the traffic lights
@@ -57,6 +58,7 @@ function dragEventHasFiles(event: DragEvent) {
 }
 
 export default function DashboardLayout() {
+  const toast = useToast();
   const { isLoaded, userId } = useAuth();
   const location = useLocation();
   const { pathname, searchStr } = location;
@@ -136,7 +138,7 @@ export default function DashboardLayout() {
       }
 
       if (uploadTargets && uploadTargets.length === 0) {
-        window.alert("You do not have upload access to any projects.");
+        toast.error("You do not have upload access to any projects.");
         return;
       }
 
@@ -149,6 +151,7 @@ export default function DashboardLayout() {
       routeFolderId,
       uploadFilesToProject,
       uploadTargets,
+      toast,
     ],
   );
 

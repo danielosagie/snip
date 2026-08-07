@@ -11,6 +11,7 @@ import { SnipMark } from "@/components/SnipMark";
 import { cn } from "@/lib/utils";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { Check, X } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
 
 type SignData = NonNullable<FunctionReturnType<typeof api.contractsTable.getByToken>>;
 type SignFieldDoc = SignData["fields"][number];
@@ -76,6 +77,7 @@ async function postSign(
 
 function SignPage() {
   const { token } = useParams({ from: "/sign/$token" });
+  const toast = useToast();
   const data = useQuery(api.contractsTable.getByToken, { token });
 
   // Terminal state must name which outcome happened: a shared boolean
@@ -222,7 +224,7 @@ function SignPage() {
       setOutcome("signed");
     } catch (err) {
       console.error("sign failed", err);
-      alert(err instanceof Error ? err.message : "Failed to sign.");
+      toast.error(err instanceof Error ? err.message : "Failed to sign.");
     } finally {
       setSubmitting(false);
     }
@@ -239,7 +241,7 @@ function SignPage() {
       setOutcome("declined");
     } catch (err) {
       console.error("decline failed", err);
-      alert(err instanceof Error ? err.message : "Failed to decline.");
+      toast.error(err instanceof Error ? err.message : "Failed to decline.");
     }
   };
 

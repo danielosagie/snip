@@ -28,6 +28,7 @@ import { useDashboardIndexData } from "./-index.data";
 import { Id } from "@convex/_generated/dataModel";
 import { api } from "@convex/_generated/api";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export const Route = createFileRoute("/dashboard/")({
   component: DashboardPage,
@@ -100,6 +101,7 @@ export default function DashboardPage() {
   const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
   const seedDemoData = useMutation(api.demoSeed.seedDemoData);
   const clearDemoData = useMutation(api.demoSeed.clearDemoData);
+  const confirmDialog = useConfirmDialog();
   const [seeding, setSeeding] = useState(false);
   const [clearing, setClearing] = useState(false);
   // First-run onboarding. Opens once the user is confirmed team-less and stays
@@ -149,20 +151,24 @@ export default function DashboardPage() {
   };
 
   const handleClear = async () => {
-    if (
-      !confirm(
-        "Delete the Demo Studio workspace and everything inside it? Your real teams are untouched.",
-      )
-    )
-      return;
-    setClearing(true);
-    try {
-      await clearDemoData({});
-    } catch (e) {
-      console.error("clear failed", e);
-    } finally {
-      setClearing(false);
-    }
+    await confirmDialog({
+      title: "Clear demo",
+      description: "Demo Studio will be deleted. Your teams stay untouched.",
+      confirmLabel: "Clear",
+      variant: "destructive",
+      action: async () => {
+        setClearing(true);
+        try {
+          await clearDemoData({});
+        } catch (error) {
+          console.error("clear failed", error);
+          throw error;
+        } finally {
+          setClearing(false);
+        }
+      },
+      errorMessage: "Couldn't clear demo data.",
+    });
   };
 
   const handleNewProject = () => {

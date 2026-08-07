@@ -20,6 +20,8 @@ import {
   SNIP_VIDEO_DRAG_TYPE,
   readDraggedVideoIds,
 } from "@/lib/projectDrag";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 const SOFT_MENU_CONTENT =
   "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
@@ -84,6 +86,8 @@ export function FolderTile({
   const navigate = useNavigate();
   const renameFolder = useMutation(api.folders.rename);
   const removeFolder = useMutation(api.folders.remove);
+  const confirmDialog = useConfirmDialog();
+  const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(name);
   const [dropKind, setDropKind] = useState<"files" | "items" | null>(null);
@@ -126,24 +130,21 @@ export function FolderTile({
     try {
       await renameFolder({ folderId, name: trimmed });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Rename failed.");
+      toast.error(e instanceof Error ? e.message : "Rename failed.");
     } finally {
       setEditing(false);
     }
   };
 
   const handleDelete = async () => {
-    if (
-      !confirm(
-        `Delete folder "${name}" and all nested folders? Contained files will remain recoverable in Recently deleted.`,
-      )
-    )
-      return;
-    try {
-      await removeFolder({ folderId });
-    } catch (e) {
-      alert(friendlyError(e, "Delete failed."));
-    }
+    await confirmDialog({
+      title: "Delete folder",
+      description: "Nested folders will be deleted. Files remain recoverable.",
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: () => removeFolder({ folderId }),
+      errorMessage: (error) => friendlyError(error, "Delete failed."),
+    });
   };
 
   return (

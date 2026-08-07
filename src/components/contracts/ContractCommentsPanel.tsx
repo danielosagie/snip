@@ -9,6 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Check, RotateCcw, Trash2 } from "lucide-react";
 import { cn, formatRelativeTime, getInitials } from "@/lib/utils";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 /**
  * Side-panel UI for contract comments. Adds a new comment via the
@@ -27,6 +29,8 @@ export function ContractCommentsPanel({
   const resolveComment = useMutation(api.contractComments.resolve);
   const reopenComment = useMutation(api.contractComments.reopen);
   const removeComment = useMutation(api.contractComments.remove);
+  const confirmDialog = useConfirmDialog();
+  const toast = useToast();
 
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
@@ -40,7 +44,7 @@ export function ContractCommentsPanel({
       await createComment({ projectId, body });
       setDraft("");
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't post comment.");
+      toast.error(e instanceof Error ? e.message : "Couldn't post comment.");
     } finally {
       setPosting(false);
     }
@@ -48,6 +52,17 @@ export function ContractCommentsPanel({
 
   const active = (comments ?? []).filter((c) => !c.resolvedAt);
   const resolved = (comments ?? []).filter((c) => Boolean(c.resolvedAt));
+  const handleDelete = (commentId: Id<"contractComments">) => {
+    void confirmDialog({
+      title: "Delete comment",
+      description: "This comment will be removed.",
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: () => removeComment({ commentId }),
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Couldn't delete comment.",
+    });
+  };
 
   return (
     <div className="space-y-3">
@@ -90,10 +105,7 @@ export function ContractCommentsPanel({
               key={c._id}
               comment={c}
               onResolve={() => void resolveComment({ commentId: c._id })}
-              onDelete={() => {
-                if (!confirm("Delete this comment?")) return;
-                void removeComment({ commentId: c._id });
-              }}
+              onDelete={() => handleDelete(c._id)}
             />
           ))
         )}
@@ -114,10 +126,7 @@ export function ContractCommentsPanel({
                 key={c._id}
                 comment={c}
                 onResolve={() => void reopenComment({ commentId: c._id })}
-                onDelete={() => {
-                  if (!confirm("Delete this comment?")) return;
-                  void removeComment({ commentId: c._id });
-                }}
+                onDelete={() => handleDelete(c._id)}
                 resolved
               />
             ))}

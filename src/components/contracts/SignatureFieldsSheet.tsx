@@ -83,6 +83,7 @@ export function SignatureFieldsSheet({
   const [selectedRecipient, setSelectedRecipient] = useState<
     Id<"contractRecipients"> | ""
   >(recipients[0]?._id ?? "");
+  const [error, setError] = useState<string | null>(null);
 
   const colorFor = (recipientId: string) => {
     const idx = recipients.findIndex((r) => r._id === recipientId);
@@ -91,6 +92,7 @@ export function SignatureFieldsSheet({
 
   const handleAdd = async (type: FieldDoc["type"]) => {
     if (!selectedRecipient) return;
+    setError(null);
     try {
       // Land near the top-left so it's visible, then the user drags it.
       await addField({
@@ -103,7 +105,7 @@ export function SignatureFieldsSheet({
         height: 0.05,
       });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Couldn't add field.");
+      setError(err instanceof Error ? err.message : "Couldn't add field.");
     }
   };
 
@@ -194,6 +196,11 @@ export function SignatureFieldsSheet({
               ))}
             </div>
           </div>
+          {error ? (
+            <p className="text-xs font-bold text-[#DC2626]" role="alert">
+              {error}
+            </p>
+          ) : null}
         </div>
 
         {/* Document drag surface */}

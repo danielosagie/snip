@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import {
   Bold,
@@ -29,6 +29,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { NamePromptDialog } from "@/components/ui/name-prompt-dialog";
 
 /** Soft select replacement (native <select> can't be themed consistently). */
 function ToolbarSelect({
@@ -146,6 +147,8 @@ export function ContractToolbar({
 }) {
   // Tiptap mutates outside React; subscribe so active states stay live.
   const [, force] = useReducer((x: number) => x + 1, 0);
+  const [linkPromptOpen, setLinkPromptOpen] = useState(false);
+  const [linkInitialValue, setLinkInitialValue] = useState("https://");
   useEffect(() => {
     if (!editor) return;
     const update = () => force();
@@ -166,13 +169,8 @@ export function ContractToolbar({
   const setLink = () => {
     if (!editor) return;
     const prev = editor.getAttributes("link").href as string | undefined;
-    const url = window.prompt("Link URL", prev ?? "https://");
-    if (url === null) return;
-    if (url === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
-    }
-    editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+    setLinkInitialValue(prev ?? "https://");
+    setLinkPromptOpen(true);
   };
 
   return (
@@ -365,6 +363,29 @@ export function ContractToolbar({
           </button>
         </>
       ) : null}
+      <NamePromptDialog
+        open={linkPromptOpen}
+        onOpenChange={setLinkPromptOpen}
+        title="Edit link"
+        inputLabel="URL"
+        initialValue={linkInitialValue}
+        actionLabel="Apply"
+        allowEmpty
+        onSubmit={(url) => {
+          if (!editor) return;
+          if (url === "") {
+            editor.chain().focus().extendMarkRange("link").unsetLink().run();
+          } else {
+            editor
+              .chain()
+              .focus()
+              .extendMarkRange("link")
+              .setLink({ href: url })
+              .run();
+          }
+          setLinkPromptOpen(false);
+        }}
+      />
     </div>
   );
 }

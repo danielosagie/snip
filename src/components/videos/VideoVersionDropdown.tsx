@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { videoPath } from "@/lib/routes";
+import { useToast } from "@/components/ui/toast";
 
 /**
  * Google-Docs-style version picker that lives in the video page's top
@@ -43,6 +44,7 @@ export function VideoVersionDropdown({
   const createNextVersion = useMutation(api.videos.createNextVersion);
   const getUploadUrl = useAction(api.videoActions.getUploadUrl);
   const markUploadComplete = useAction(api.videoActions.markUploadComplete);
+  const toast = useToast();
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | "current" | "upload">(null);
@@ -113,7 +115,7 @@ export function VideoVersionDropdown({
       setOpen(false);
     } catch (e) {
       console.error("Upload-new-version failed", e);
-      alert(e instanceof Error ? e.message : "Upload failed.");
+      toast.error(e instanceof Error ? e.message : "Upload failed.");
     } finally {
       setBusy(null);
       setUploadProgress(null);

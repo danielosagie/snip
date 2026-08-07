@@ -38,6 +38,7 @@ import {
   type SharePaywallOptions,
   useShareCoverPicker,
 } from "@/components/ShareDialog";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const SECTION_LABEL_CLASS =
   "font-['Geist_Mono',ui-monospace,monospace] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]";
@@ -62,6 +63,7 @@ export function ShareFolderDialog({
   const createBundle = useMutation(api.shareBundles.createForFolder);
   const createShareLink = useMutation(api.shareLinks.create);
   const removeShareLink = useMutation(api.shareLinks.remove);
+  const confirmDialog = useConfirmDialog();
 
   const folderName = breadcrumbs?.length
     ? breadcrumbs[breadcrumbs.length - 1].name
@@ -152,14 +154,21 @@ export function ShareFolderDialog({
   };
 
   const handleRevoke = async (linkId: Id<"shareLinks">) => {
-    if (!confirm("Revoke this share link? Anyone holding it loses access.")) {
-      return;
-    }
-    try {
-      await removeShareLink({ linkId });
-    } catch (error) {
-      console.error("Failed to revoke share link:", error);
-    }
+    await confirmDialog({
+      title: "Revoke link",
+      description: "Anyone with this link will lose access.",
+      confirmLabel: "Revoke",
+      variant: "destructive",
+      action: async () => {
+        try {
+          await removeShareLink({ linkId });
+        } catch (error) {
+          console.error("Failed to revoke share link:", error);
+          throw error;
+        }
+      },
+      errorMessage: "Couldn't revoke link.",
+    });
   };
 
   const resetComposer = () => {

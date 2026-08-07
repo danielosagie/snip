@@ -19,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface Contract {
   signedAt?: number;
@@ -56,22 +57,20 @@ export function ContractTile({
   canDelete,
 }: Props) {
   const clearContract = useMutation(api.projects.clearContract);
+  const confirmDialog = useConfirmDialog();
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (
-      !confirm(
-        `Delete the contract for "${projectName}"? You'll be able to redraft it later.`,
-      )
-    ) {
-      return;
-    }
-    try {
-      await clearContract({ projectId });
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Couldn't delete contract.");
-    }
+    await confirmDialog({
+      title: "Delete contract",
+      description: `Delete ${projectName}'s contract? You can redraft it later.`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: () => clearContract({ projectId }),
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Couldn't delete contract.",
+    });
   };
 
   const status = contract?.signedAt

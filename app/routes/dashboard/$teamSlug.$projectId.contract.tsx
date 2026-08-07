@@ -48,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
 import { projectPath } from "@/lib/routes";
 import { useSidebarState } from "@/lib/sidebarContext";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export const Route = createFileRoute("/dashboard/$teamSlug/$projectId/contract")({
   head: () =>
@@ -88,6 +89,7 @@ function ContractFullPage() {
   // own top bar instead of DashboardHeader, so it has to surface the
   // collapse toggle itself for parity with the rest of the dashboard.
   const { collapsed, toggle: toggleSidebar } = useSidebarState();
+  const confirmDialog = useConfirmDialog();
 
   // ESC bails out of the contract editor back to the project page. Autosave
   // handles in-flight edits so dropping out mid-typing won't lose work.
@@ -336,9 +338,6 @@ function ContractFullPage() {
       }
     }, 1200);
     return () => window.clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- we
-    // intentionally watch `dirty` only; the captured state values
-    // are read at fire time via the latest closure each render.
   }, [dirty, isSigned, busy, project]);
 
   // Outline sections derived from the generated clause list. Must
@@ -582,20 +581,27 @@ function ContractFullPage() {
   };
 
   const handleClear = async () => {
-    if (!confirm("Clear the contract? You'll be able to re-draft it.")) return;
-    setError(null);
-    setBusy("clear");
-    try {
-      await clearContract({ projectId: projectId as Id<"projects"> });
-      // Wipe collab state (server + in-memory) too, otherwise the next
-      // draft starts populated with the cleared contract's old content.
-      await regenerateCollabDoc();
-      initRef.current = false;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Clear failed.");
-    } finally {
-      setBusy(null);
-    }
+    await confirmDialog({
+      title: "Clear contract",
+      description: "You can draft a new contract later.",
+      confirmLabel: "Clear",
+      variant: "destructive",
+      action: async () => {
+        setError(null);
+        setBusy("clear");
+        try {
+          await clearContract({ projectId: projectId as Id<"projects"> });
+          // Wipe collab state (server + in-memory) too, otherwise the next
+          // draft starts populated with the cleared contract's old content.
+          await regenerateCollabDoc();
+          initRef.current = false;
+        } finally {
+          setBusy(null);
+        }
+      },
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Clear failed.",
+    });
   };
 
   const onContentChange = (next: string) => {
@@ -825,18 +831,10 @@ function ContractFullPage() {
             )}
             onOpenAddSection={() => setAddSectionOpen(true)}
             onDeleteSection={async (clauseId) => {
-              try {
-                await removeClause({
-                  projectId: projectId as Id<"projects">,
-                  clauseId,
-                });
-              } catch (e) {
-                alert(
-                  e instanceof Error
-                    ? e.message
-                    : "Couldn't remove section.",
-                );
-              }
+              await removeClause({
+                projectId: projectId as Id<"projects">,
+                clauseId,
+              });
             }}
             onRunWizard={() => setWizardOpen(true)}
             runWizardLabel={

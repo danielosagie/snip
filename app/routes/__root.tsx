@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
 
 import { ConvexClientProvider } from "@/lib/convex";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { ThemeProvider } from "@/components/theme/ThemeToggle";
 import { NotFound } from "@/components/ui/NotFound";
 import appCss from "../app.css?url";
@@ -123,7 +125,11 @@ function RootDocument({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <ConvexClientProvider>
           <ThemeProvider>
-            <TooltipProvider>{children}</TooltipProvider>
+            <TooltipProvider>
+              <ToastProvider>
+                <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
+              </ToastProvider>
+            </TooltipProvider>
           </ThemeProvider>
         </ConvexClientProvider>
         <Scripts />

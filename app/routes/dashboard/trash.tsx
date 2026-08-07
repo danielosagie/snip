@@ -17,6 +17,8 @@ import {
   SoftPill,
   SoftRow,
 } from "@/components/soft";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 export const Route = createFileRoute("/dashboard/trash")({
   head: () =>
@@ -54,6 +56,8 @@ function TrashRoute() {
   const restoreDocumentItem = useMutation(api.contractsTable.restore);
   const purgeDocumentItem = useMutation(api.contractsTable.purge);
   const navigate = useNavigate();
+  const confirmDialog = useConfirmDialog();
+  const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
 
   const handleRestoreProject = async (
@@ -67,28 +71,29 @@ function TrashRoute() {
       // feels actionable rather than a list reshuffle.
       navigate({ to: projectPath(teamSlug, id) });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Restore failed.");
+      toast.error(e instanceof Error ? e.message : "Restore failed.");
     } finally {
       setBusy(null);
     }
   };
 
   const handlePurgeProject = async (id: Id<"projects">, name: string) => {
-    if (
-      !confirm(
-        `Permanently delete "${name}"? Every video, contract, and comment goes with it. This can't be undone.`,
-      )
-    ) {
-      return;
-    }
-    setBusy(id);
-    try {
-      await purgeProject({ projectId: id });
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Permanent delete failed.");
-    } finally {
-      setBusy(null);
-    }
+    await confirmDialog({
+      title: "Delete forever",
+      description: `${name} and everything inside it will be deleted.`,
+      confirmLabel: "Delete forever",
+      variant: "destructive",
+      action: async () => {
+        setBusy(id);
+        try {
+          await purgeProject({ projectId: id });
+        } finally {
+          setBusy(null);
+        }
+      },
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Permanent delete failed.",
+    });
   };
 
   const handleRestoreVideo = async (
@@ -101,28 +106,29 @@ function TrashRoute() {
       await restoreVideo({ videoId: id });
       navigate({ to: videoPath(teamSlug, projectId, id) });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Restore failed.");
+      toast.error(e instanceof Error ? e.message : "Restore failed.");
     } finally {
       setBusy(null);
     }
   };
 
   const handlePurgeVideo = async (id: Id<"videos">, title: string) => {
-    if (
-      !confirm(
-        `Permanently delete "${title}"? Every comment and share link goes with it. This can't be undone.`,
-      )
-    ) {
-      return;
-    }
-    setBusy(id);
-    try {
-      await purgeVideo({ videoId: id });
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Permanent delete failed.");
-    } finally {
-      setBusy(null);
-    }
+    await confirmDialog({
+      title: "Delete forever",
+      description: `${title}, its comments, and its links will be deleted.`,
+      confirmLabel: "Delete forever",
+      variant: "destructive",
+      action: async () => {
+        setBusy(id);
+        try {
+          await purgeVideo({ videoId: id });
+        } finally {
+          setBusy(null);
+        }
+      },
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Permanent delete failed.",
+    });
   };
 
   const handleRestoreContract = async (
@@ -139,7 +145,7 @@ function TrashRoute() {
         to: `/dashboard/${teamSlug}/${projectId}/contract`,
       });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Restore failed.");
+      toast.error(e instanceof Error ? e.message : "Restore failed.");
     } finally {
       setBusy(null);
     }
@@ -149,21 +155,22 @@ function TrashRoute() {
     id: Id<"trashedContracts">,
     projectName: string,
   ) => {
-    if (
-      !confirm(
-        `Permanently delete the contract for "${projectName}"? This can't be undone.`,
-      )
-    ) {
-      return;
-    }
-    setBusy(id);
-    try {
-      await purgeContract({ trashedContractId: id });
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Permanent delete failed.");
-    } finally {
-      setBusy(null);
-    }
+    await confirmDialog({
+      title: "Delete forever",
+      description: `${projectName}'s contract will be permanently deleted.`,
+      confirmLabel: "Delete forever",
+      variant: "destructive",
+      action: async () => {
+        setBusy(id);
+        try {
+          await purgeContract({ trashedContractId: id });
+        } finally {
+          setBusy(null);
+        }
+      },
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Permanent delete failed.",
+    });
   };
 
   const handleRestoreDocumentItem = async (item: {
@@ -182,7 +189,7 @@ function TrashRoute() {
             : contractPath(item.teamSlug, item.projectId, item.id),
       });
     } catch (error) {
-      alert(friendlyError(error, "Restore failed."));
+      toast.error(friendlyError(error, "Restore failed."));
     } finally {
       setBusy(null);
     }
@@ -192,15 +199,21 @@ function TrashRoute() {
     id: Id<"contracts">,
     title: string,
   ) => {
-    if (!confirm(`Permanently delete “${title}”? This can't be undone.`)) return;
-    setBusy(id);
-    try {
-      await purgeDocumentItem({ contractId: id });
-    } catch (error) {
-      alert(friendlyError(error, "Permanent delete failed."));
-    } finally {
-      setBusy(null);
-    }
+    await confirmDialog({
+      title: "Delete forever",
+      description: `${title} will be permanently deleted.`,
+      confirmLabel: "Delete forever",
+      variant: "destructive",
+      action: async () => {
+        setBusy(id);
+        try {
+          await purgeDocumentItem({ contractId: id });
+        } finally {
+          setBusy(null);
+        }
+      },
+      errorMessage: (error) => friendlyError(error, "Permanent delete failed."),
+    });
   };
 
   // Merge projects + videos + contracts into one chronological feed

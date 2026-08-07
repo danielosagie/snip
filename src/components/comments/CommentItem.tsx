@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 import { CommentInput } from "./CommentInput";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface Comment {
   _id: Id<"comments">;
@@ -47,6 +48,7 @@ export function CommentItem({
   const [isReplying, setIsReplying] = useState(false);
   const toggleResolved = useMutation(api.comments.toggleResolved);
   const deleteComment = useMutation(api.comments.remove);
+  const confirmDialog = useConfirmDialog();
 
   const handleToggleResolved = async () => {
     try {
@@ -57,12 +59,21 @@ export function CommentItem({
   };
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to delete this comment?")) return;
-    try {
-      await deleteComment({ commentId: comment._id });
-    } catch (error) {
-      console.error("Failed to delete comment:", error);
-    }
+    await confirmDialog({
+      title: "Delete comment",
+      description: "This comment will be removed.",
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: async () => {
+        try {
+          await deleteComment({ commentId: comment._id });
+        } catch (error) {
+          console.error("Failed to delete comment:", error);
+          throw error;
+        }
+      },
+      errorMessage: "Couldn't delete comment.",
+    });
   };
 
   return (

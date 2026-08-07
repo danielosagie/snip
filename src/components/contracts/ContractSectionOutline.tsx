@@ -11,6 +11,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 /**
  * Google-Docs-style outline panel for the contract editor.
@@ -78,6 +79,7 @@ export function ContractSectionOutline({
   runWizardLabel,
   inSheet = false,
 }: Props) {
+  const confirmDialog = useConfirmDialog();
   // Track which row is currently expanded. We expand at most one at
   // a time so the rail stays scannable; the parent's activeSectionId
   // doubles as the "expanded" marker.
@@ -150,15 +152,19 @@ export function ContractSectionOutline({
                   {!s.required && onDeleteSection ? (
                     <button
                       type="button"
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-                        if (
-                          !confirm(
-                            `Delete section "${s.title}"? The text inside will be removed.`,
-                          )
-                        )
-                          return;
-                        await onDeleteSection(s.id);
+                        void confirmDialog({
+                          title: "Delete section",
+                          description: `${s.title} and its text will be removed.`,
+                          confirmLabel: "Delete",
+                          variant: "destructive",
+                          action: () => onDeleteSection(s.id),
+                          errorMessage: (error) =>
+                            error instanceof Error
+                              ? error.message
+                              : "Couldn't delete section.",
+                        });
                       }}
                       className="flex-shrink-0 rounded-[8px] px-2 text-[#A0A0A5] opacity-0 transition-[color,background-color,opacity] hover:bg-[#F1F1F3] hover:text-[#D8434F] group-hover:opacity-100"
                       title="Delete section"

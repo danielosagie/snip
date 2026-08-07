@@ -1,6 +1,6 @@
 "use client";
 
-import { Link, useLocation, useParams } from "@tanstack/react-router";
+import { Link, useLocation, useParams, useSearch } from "@tanstack/react-router";
 import { UserButton, useUser, useAuth } from "@clerk/tanstack-react-start";
 import { useQuery, useAction, useConvex } from "convex/react";
 import {
@@ -13,9 +13,13 @@ import {
   Trash2,
   Users,
   Briefcase,
+  ChevronDown,
+  ChevronRight,
+  Folder,
   Unplug,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import { ThemeStyleToggle } from "@/components/theme/ThemeToggle";
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -78,6 +82,9 @@ export function DashboardSidebar() {
     typeof params.teamSlug === "string" ? params.teamSlug : undefined;
   const activeProjectId =
     typeof params.projectId === "string" ? params.projectId : undefined;
+  const search = useSearch({ strict: false }) as { folder?: unknown };
+  const activeFolderId =
+    typeof search.folder === "string" ? search.folder : undefined;
   const teams = useQuery(api.teams.listWithProjects, {});
   const convex = useConvex();
   const { user } = useUser();
@@ -219,14 +226,14 @@ export function DashboardSidebar() {
             </div>
           ) : (
             projects.map((p) => (
-              <SidebarLink
+              <ProjectRailItem
                 key={p._id}
-                to={projectPath(p.teamSlug, p._id)}
-                icon={<Briefcase className="h-4 w-4" />}
-                active={activeProjectId === p._id}
-              >
-                {p.name}
-              </SidebarLink>
+                projectId={p._id}
+                teamSlug={p.teamSlug}
+                name={p.name}
+                activeProjectId={activeProjectId}
+                activeFolderId={activeFolderId}
+              />
             ))
           )}
           <SidebarLink
@@ -337,6 +344,119 @@ export function DashboardSidebar() {
         onOpenChange={setCreateTeamOpen}
       />
     </>
+  );
+}
+
+function ProjectRailItem({
+  projectId,
+  teamSlug,
+  name,
+  activeProjectId,
+  activeFolderId,
+}: {
+  projectId: Id<"projects">;
+  teamSlug: string;
+  name: string;
+  activeProjectId: string | undefined;
+  activeFolderId: string | undefined;
+}) {
+  const folders = useQuery(api.folders.list, { projectId });
+  const [expandedPreference, setExpandedPreference] = useState<boolean | null>(
+    null,
+  );
+  const [preferenceLoaded, setPreferenceLoaded] = useState(false);
+  const storageKey = `snip:sidebar:folders:${projectId}`;
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      setExpandedPreference(
+        stored === "1" ? true : stored === "0" ? false : null,
+      );
+    } catch {
+      setExpandedPreference(null);
+    }
+    setPreferenceLoaded(true);
+  }, [storageKey]);
+
+  const hasFolders = folders !== undefined && folders.length > 0;
+  const expanded =
+    preferenceLoaded && folders !== undefined
+      ? (expandedPreference ?? folders.length <= 5)
+      : false;
+  const projectActive =
+    activeProjectId === projectId && activeFolderId === undefined;
+
+  const toggleFolders = () => {
+    const next = !expanded;
+    setExpandedPreference(next);
+    try {
+      window.localStorage.setItem(storageKey, next ? "1" : "0");
+    } catch {
+      // ignored
+    }
+  };
+
+  return (
+    <div>
+      <div
+        className={cn(
+          "flex items-center rounded-[10px] transition-colors",
+          projectActive
+            ? "bg-[#FFF0E6] text-[#D14E00]"
+            : "text-[#131315] hover:bg-[#F1F1F3]",
+        )}
+      >
+        <Link
+          to={projectPath(teamSlug, projectId)}
+          preload="intent"
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-[15px] font-medium leading-[22px]",
+            projectActive && "font-semibold",
+          )}
+        >
+          <Briefcase className="h-4 w-4 flex-shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{name}</span>
+        </Link>
+        {hasFolders ? (
+          <button
+            type="button"
+            onClick={toggleFolders}
+            className="mr-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] text-[#6E6E73] transition-colors hover:bg-white/70 hover:text-[#131315] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315]"
+            title={expanded ? "Hide folders" : "Show folders"}
+            aria-label={`${expanded ? "Hide" : "Show"} folders in ${name}`}
+            aria-expanded={expanded}
+          >
+            {expanded ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+          </button>
+        ) : null}
+      </div>
+      {hasFolders && expanded ? (
+        <div>
+          {folders.map((folder) => (
+            <Link
+              key={folder._id}
+              to={projectPath(teamSlug, projectId)}
+              search={{ folder: folder._id } as never}
+              preload="intent"
+              className={cn(
+                "ml-5 flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-[13px] font-medium leading-[22px] transition-colors",
+                activeProjectId === projectId && activeFolderId === folder._id
+                  ? "bg-[#FFF0E6] font-semibold text-[#D14E00]"
+                  : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
+              )}
+            >
+              <Folder className="h-4 w-4 flex-shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+            </Link>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

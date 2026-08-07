@@ -24,6 +24,7 @@ import {
 import { MultiCombobox } from "@/components/ui/multi-combobox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 /**
  * Per-section answer editor. Surfaces the wizard answers that fed a
@@ -115,6 +116,7 @@ function AnswerField({
   disabled: boolean;
 }) {
   const updateAnswer = useMutation(api.contractClauses.updateWizardAnswer);
+  const toast = useToast();
   const [local, setLocal] = useState<AnswerValue>(value ?? null);
   const [saving, setSaving] = useState(false);
 
@@ -123,7 +125,6 @@ function AnswerField({
   useEffect(() => {
     if (saving) return;
     setLocal(value ?? null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   const commit = async (next: AnswerValue) => {
@@ -136,7 +137,7 @@ function AnswerField({
       // Roll back the local optimism so the UI matches what's
       // actually persisted on the server.
       setLocal(value ?? null);
-      alert(e instanceof Error ? e.message : "Couldn't save change.");
+      toast.error(e instanceof Error ? e.message : "Couldn't save change.");
     } finally {
       setSaving(false);
     }

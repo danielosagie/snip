@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Camera, RotateCcw, Trash2 } from "lucide-react";
 import { formatRelativeTime } from "@/lib/utils";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 /**
  * Side-panel UI for contract version snapshots. Top row spins a new
@@ -33,6 +35,8 @@ export function ContractVersionsPanel({
   const snapshot = useMutation(api.contractVersions.snapshot);
   const restore = useMutation(api.contractVersions.restore);
   const remove = useMutation(api.contractVersions.remove);
+  const confirmDialog = useConfirmDialog();
+  const toast = useToast();
 
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,7 +48,7 @@ export function ContractVersionsPanel({
       await snapshot({ projectId, label: label.trim() || undefined });
       setLabel("");
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Snapshot failed.");
+      toast.error(e instanceof Error ? e.message : "Snapshot failed.");
     } finally {
       setBusy(false);
     }
@@ -54,23 +58,24 @@ export function ContractVersionsPanel({
     versionId: Id<"contractVersions">,
     name: string,
   ) => {
-    if (
-      !confirm(
-        `Restore ${name}? Your current contract will be overwritten (and lost unless you snapshot first).`,
-      )
-    )
-      return;
-    setBusy(true);
-    try {
-      await restore({ versionId });
-      // Rebuild the live editor from the restored body — without this the
-      // Y.Doc keeps the pre-restore content and the restore looks like a no-op.
-      onRestored?.();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Restore failed.");
-    } finally {
-      setBusy(false);
-    }
+    await confirmDialog({
+      title: "Restore version",
+      description: `Restore ${name} and overwrite current changes?`,
+      confirmLabel: "Restore",
+      action: async () => {
+        setBusy(true);
+        try {
+          await restore({ versionId });
+          // Rebuild the live editor from the restored body so the Y.Doc
+          // does not retain the pre-restore content.
+          onRestored?.();
+        } finally {
+          setBusy(false);
+        }
+      },
+      errorMessage: (error) =>
+        error instanceof Error ? error.message : "Restore failed.",
+    });
   };
 
   return (
@@ -142,8 +147,17 @@ export function ContractVersionsPanel({
                   <button
                     type="button"
                     onClick={() => {
-                      if (!confirm(`Delete v${v.versionNumber}?`)) return;
-                      void remove({ versionId: v._id });
+                      void confirmDialog({
+                        title: "Delete version",
+                        description: `Version ${v.versionNumber} will be removed.`,
+                        confirmLabel: "Delete",
+                        variant: "destructive",
+                        action: () => remove({ versionId: v._id }),
+                        errorMessage: (error) =>
+                          error instanceof Error
+                            ? error.message
+                            : "Couldn't delete version.",
+                      });
                     }}
                     className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#D8434F] transition-colors hover:bg-[#FFF5F5]"
                     title="Delete"

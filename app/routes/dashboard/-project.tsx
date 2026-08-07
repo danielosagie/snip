@@ -60,6 +60,8 @@ import { ShareFolderDialog } from "@/components/ShareFolderDialog";
 import { MoveToFolderDialog } from "@/components/MoveToFolderDialog";
 import { ProjectFileActivity } from "@/components/presence";
 import { friendlyError } from "@/lib/friendlyError";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
@@ -156,6 +158,8 @@ export default function ProjectPage({
   const getDownloadUrl = useAction(api.videoActions.getDownloadUrl);
   const getProxyDownloadUrl = useAction(api.videoActions.getProxyDownloadUrl);
   const requestProxies = useAction(api.videoActions.requestProxies);
+  const confirmDialog = useConfirmDialog();
+  const toast = useToast();
   const contractDocuments = useQuery(
     api.contractsTable.list,
     resolvedProjectId ? { projectId: resolvedProjectId } : "skip",
@@ -271,12 +275,21 @@ export default function ProjectPage({
   };
 
   const handleDeleteVideo = async (videoId: Id<"videos">) => {
-    if (!confirm("Are you sure you want to delete this video?")) return;
-    try {
-      await deleteVideo({ videoId });
-    } catch (error) {
-      console.error("Failed to delete video:", error);
-    }
+    await confirmDialog({
+      title: "Delete video",
+      description: "This video will move to Recently deleted.",
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: async () => {
+        try {
+          await deleteVideo({ videoId });
+        } catch (error) {
+          console.error("Failed to delete video:", error);
+          throw error;
+        }
+      },
+      errorMessage: "Couldn't delete video.",
+    });
   };
 
   const handleDownloadVideo = useCallback(
@@ -302,10 +315,12 @@ export default function ProjectPage({
           triggerDownload(result.url, result.filename ?? `${title}.mp4`);
         }
       } catch (error) {
-        alert(error instanceof Error ? error.message : "Proxy download failed.");
+        toast.error(
+          error instanceof Error ? error.message : "Proxy download failed.",
+        );
       }
     },
-    [getProxyDownloadUrl],
+    [getProxyDownloadUrl, toast],
   );
 
   // Kick off proxy generation (costs a Mux re-encode). Default single 720p.
@@ -313,12 +328,16 @@ export default function ProjectPage({
     async (videoId: Id<"videos">) => {
       try {
         await requestProxies({ videoId });
-        alert("Generating a 720p proxy. It will appear here once Mux finishes.");
+        toast.success("Generating a 720p proxy. It will appear here soon.");
       } catch (error) {
-        alert(error instanceof Error ? error.message : "Couldn't start proxy generation.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Couldn't start proxy generation.",
+        );
       }
     },
-    [requestProxies],
+    [requestProxies, toast],
   );
 
   const handleMoveVideo = useCallback(
@@ -329,10 +348,10 @@ export default function ProjectPage({
           folderId: folderId ?? undefined,
         });
       } catch (e) {
-        alert(e instanceof Error ? e.message : "Move failed.");
+        toast.error(e instanceof Error ? e.message : "Move failed.");
       }
     },
-    [moveVideoToFolder],
+    [moveVideoToFolder, toast],
   );
 
   const handleMoveFolder = useCallback(
@@ -343,10 +362,10 @@ export default function ProjectPage({
           parentFolderId: parentFolderId ?? undefined,
         });
       } catch (e) {
-        alert(e instanceof Error ? e.message : "Move failed.");
+        toast.error(e instanceof Error ? e.message : "Move failed.");
       }
     },
-    [moveFolder],
+    [moveFolder, toast],
   );
 
   // ─── Finder-style create + combine ─────────────────────────────────────
@@ -380,9 +399,15 @@ export default function ProjectPage({
       });
       setRenameFolderId(newId);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't create folder.");
+      toast.error(e instanceof Error ? e.message : "Couldn't create folder.");
     }
-  }, [createFolder, resolvedProjectId, currentFolderId, uniqueNewFolderName]);
+  }, [
+    createFolder,
+    resolvedProjectId,
+    currentFolderId,
+    uniqueNewFolderName,
+    toast,
+  ]);
 
   // Background "New document" / "New contract" — mirrors ProjectAddButton's
   // handleAdd: create the draft, then navigate into its editor.
@@ -405,10 +430,12 @@ export default function ProjectPage({
               : contractPath(resolvedTeamSlug, resolvedProjectId, contractId),
         });
       } catch (e) {
-        alert(e instanceof Error ? e.message : `Couldn't create ${label}.`);
+        toast.error(
+          e instanceof Error ? e.message : `Couldn't create ${label}.`,
+        );
       }
     },
-    [createContract, navigate, resolvedProjectId, resolvedTeamSlug],
+    [createContract, navigate, resolvedProjectId, resolvedTeamSlug, toast],
   );
 
   // Drag-combine: dropping `draggedVideoId` onto `targetVideoId` creates a new
@@ -425,7 +452,9 @@ export default function ProjectPage({
         });
         setRenameFolderId(newId);
       } catch (e) {
-        alert(e instanceof Error ? e.message : "Couldn't combine into a folder.");
+        toast.error(
+          e instanceof Error ? e.message : "Couldn't combine into a folder.",
+        );
       }
     },
     [
@@ -433,6 +462,7 @@ export default function ProjectPage({
       resolvedProjectId,
       currentFolderId,
       uniqueNewFolderName,
+      toast,
     ],
   );
 
@@ -452,28 +482,30 @@ export default function ProjectPage({
       return;
     const total =
       ids.length + folderIds.length + contractIds.length;
-    if (
-      !confirm(
+    await confirmDialog({
+      title: "Delete items",
+      description:
         folderIds.length > 0 || contractIds.length > 0
-          ? `Delete ${total} selected item${total === 1 ? "" : "s"}? Nested folders will be removed; contained files, contracts, and documents remain recoverable in Recently deleted.`
-          : `Move ${ids.length} item${ids.length === 1 ? "" : "s"} to the trash?`,
-      )
-    )
-      return;
-    setBulkBusy("delete");
-    try {
-      await removeSelection({
-        projectId: project._id,
-        videoIds: ids,
-        folderIds,
-        contractIds,
-      });
-      clearSelection();
-    } catch (e) {
-      alert(friendlyError(e, "Delete failed."));
-    } finally {
-      setBulkBusy(null);
-    }
+          ? `${total} selected item${total === 1 ? "" : "s"} will move to Recently deleted.`
+          : `${ids.length} item${ids.length === 1 ? "" : "s"} will move to Recently deleted.`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+      action: async () => {
+        setBulkBusy("delete");
+        try {
+          await removeSelection({
+            projectId: project._id,
+            videoIds: ids,
+            folderIds,
+            contractIds,
+          });
+          clearSelection();
+        } finally {
+          setBulkBusy(null);
+        }
+      },
+      errorMessage: (error) => friendlyError(error, "Delete failed."),
+    });
   };
 
   const handleBulkDownload = async () => {
@@ -505,7 +537,7 @@ export default function ProjectPage({
       }
       clearSelection();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Duplicate failed.");
+      toast.error(e instanceof Error ? e.message : "Duplicate failed.");
     } finally {
       setBulkBusy(null);
     }

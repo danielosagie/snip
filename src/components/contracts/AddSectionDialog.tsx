@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 
 /**
  * Modal for adding a custom section to a contract. Replaces the
- * old `prompt()` call so the UX matches the rest of the app and we
+ * old native name request so the UX matches the rest of the app and we
  * can show validation inline.
  */
 interface Props {
