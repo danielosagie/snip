@@ -16,6 +16,7 @@ import {
   isTimelinePresencePayload,
   normalizeTimelinePresencePayload,
 } from "../src/components/presence/model";
+import { isFeatureEnabled } from "./featureFlags";
 
 const http = httpRouter();
 
@@ -781,6 +782,67 @@ const ingestExternalTimelineRef = makeFunctionReference<
   ExternalTimelineIngestHttpResult
 >("timelineDocs:ingestExternalTimeline");
 
+type PreparedStaticRenditionSource = {
+  projectId: Id<"projects">;
+  renditionName: string;
+  destinationKey: string;
+  expectedBytes?: number;
+  contentType: string;
+  r2Key?: string;
+  claimToken?: string;
+  sourceUrl?: string;
+  sourceExpiresAt?: number;
+};
+
+const prepareStaticRenditionSourceRef = makeFunctionReference<
+  "action",
+  {
+    teamId: Id<"teams">;
+    videoId: Id<"videos">;
+    renditionName: string;
+  },
+  PreparedStaticRenditionSource
+>("staticRenditionMirrorActions:prepareClaim");
+
+type StaticRenditionClaimHttpResult =
+  | { status: "already_mirrored"; r2Key: string }
+  | { status: "busy"; retryAfterMs: number }
+  | {
+      status: "claimed";
+      jobId: Id<"staticRenditionMirrorJobs">;
+      claimToken: string;
+      leaseExpiresAt: number;
+      destinationKey: string;
+    };
+
+const claimStaticRenditionRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    videoId: Id<"videos">;
+    renditionName: string;
+    workerId: string;
+    claimToken: string;
+  },
+  StaticRenditionClaimHttpResult
+>("staticRenditionMirrorJobs:claim");
+
+const completeStaticRenditionRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    jobId: Id<"staticRenditionMirrorJobs">;
+    workerId: string;
+    claimToken: string;
+    outcome: "completed" | "failed";
+    r2Key?: string;
+    outputBytes?: number;
+    error?: string;
+  },
+  | { status: "completed"; r2Key: string }
+  | { status: "failed"; error: string }
+>("staticRenditionMirrorJobs:complete");
+
 const listNleSnapshotsRef = makeFunctionReference<
   "query",
   { projectId: Id<"projects">; teamId: Id<"teams"> }
@@ -945,6 +1007,151 @@ http.route({
           ok: false,
           error:
             error instanceof Error ? error.message : "Timeline ingest rejected.",
+        },
+        400,
+      );
+    }
+  }),
+});
+
+http.route({
+  path: "/desktop/renditions/mirror/claim",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    if (!isFeatureEnabled("usingR2") || !isFeatureEnabled("muxSignedPlayback")) {
+      return nleJson(
+        {
+          ok: false,
+          error: "Signed Mux playback and R2 storage must be configured.",
+        },
+        503,
+      );
+    }
+    const body = (await request.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    if (
+      !body ||
+      typeof body.videoId !== "string" ||
+      typeof body.renditionName !== "string" ||
+      typeof body.workerId !== "string"
+    ) {
+      return nleJson(
+        { ok: false, error: "videoId, renditionName, and workerId are required." },
+        400,
+      );
+    }
+
+    try {
+      const bucket = process.env.R2_BUCKET_NAME?.trim();
+      const endpoint = process.env.R2_ENDPOINT?.trim();
+      if (!bucket || !endpoint) {
+        throw new Error("R2 destination is not configured.");
+      }
+      const videoId = body.videoId as Id<"videos">;
+      const context = await ctx.runAction(prepareStaticRenditionSourceRef, {
+        teamId: team._id,
+        videoId,
+        renditionName: body.renditionName,
+      });
+      if (context.r2Key) {
+        return nleJson({
+          ok: true,
+          status: "already_mirrored",
+          r2Key: context.r2Key,
+        });
+      }
+      if (!context.claimToken || !context.sourceUrl || !context.sourceExpiresAt) {
+        throw new Error("Signed rendition source could not be prepared.");
+      }
+      const claim = await ctx.runMutation(claimStaticRenditionRef, {
+        teamId: team._id,
+        videoId,
+        renditionName: context.renditionName,
+        workerId: body.workerId,
+        claimToken: context.claimToken,
+      });
+      if (claim.status !== "claimed") return nleJson({ ok: true, ...claim });
+      return nleJson({
+        ok: true,
+        status: "claimed",
+        jobId: claim.jobId,
+        claimToken: claim.claimToken,
+        leaseExpiresAt: claim.leaseExpiresAt,
+        source: {
+          url: context.sourceUrl,
+          expiresAt: context.sourceExpiresAt,
+          expectedBytes: context.expectedBytes,
+        },
+        destination: {
+          provider: "r2",
+          bucket,
+          endpoint,
+          region: process.env.R2_REGION?.trim() || "auto",
+          key: claim.destinationKey,
+          contentType: context.contentType,
+        },
+      });
+    } catch (error) {
+      return nleJson(
+        {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Mirror claim rejected.",
+        },
+        400,
+      );
+    }
+  }),
+});
+
+http.route({
+  path: "/desktop/renditions/mirror/complete",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = (await request.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    if (
+      !body ||
+      typeof body.jobId !== "string" ||
+      typeof body.workerId !== "string" ||
+      typeof body.claimToken !== "string" ||
+      (body.outcome !== "completed" && body.outcome !== "failed")
+    ) {
+      return nleJson(
+        {
+          ok: false,
+          error: "jobId, workerId, claimToken, and a valid outcome are required.",
+        },
+        400,
+      );
+    }
+    try {
+      const result = await ctx.runMutation(completeStaticRenditionRef, {
+        teamId: team._id,
+        jobId: body.jobId as Id<"staticRenditionMirrorJobs">,
+        workerId: body.workerId,
+        claimToken: body.claimToken,
+        outcome: body.outcome,
+        r2Key: typeof body.r2Key === "string" ? body.r2Key : undefined,
+        outputBytes:
+          typeof body.outputBytes === "number" ? body.outputBytes : undefined,
+        error: typeof body.error === "string" ? body.error : undefined,
+      });
+      return nleJson({ ok: true, ...result });
+    } catch (error) {
+      return nleJson(
+        {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Mirror completion rejected.",
         },
         400,
       );

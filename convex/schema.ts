@@ -352,6 +352,15 @@ export default defineSchema({
           // projects/<teamSlug>/<projectId>/proxies/<videoId>/<name>. Absent =
           // download-only (served from Mux); present = also on the drive.
           r2Key: v.optional(v.string()),
+          mirrorStatus: v.optional(
+            v.union(
+              v.literal("claimed"),
+              v.literal("ready"),
+              v.literal("errored"),
+            ),
+          ),
+          mirrorError: v.optional(v.string()),
+          mirrorUpdatedAt: v.optional(v.number()),
         }),
       ),
     ),
@@ -985,6 +994,36 @@ export default defineSchema({
     .index("by_project", ["projectId"])
     .index("by_team_status", ["teamId", "status"])
     .index("by_lease", ["status", "leaseExpiresAt"]),
+
+  // Leased handoff for renditions too large to buffer through a Convex action.
+  // The desktop or worker streams the signed Mux source directly into the
+  // server-derived R2 project key, then completes with the same worker/token.
+  staticRenditionMirrorJobs: defineTable({
+    teamId: v.id("teams"),
+    projectId: v.id("projects"),
+    videoId: v.id("videos"),
+    renditionName: v.string(),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("claimed"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    destinationKey: v.string(),
+    queuedAt: v.number(),
+    claimedAt: v.optional(v.number()),
+    claimedBy: v.optional(v.string()),
+    claimToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    failedAt: v.optional(v.number()),
+    outputBytes: v.optional(v.number()),
+    error: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_video_rendition", ["videoId", "renditionName"])
+    .index("by_team_status_time", ["teamId", "status", "queuedAt"])
+    .index("by_status_lease", ["status", "leaseExpiresAt"]),
 
   /**
    * Account-level subscription. One per Clerk user (the `ownerClerkId`).
