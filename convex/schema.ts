@@ -1462,6 +1462,36 @@ export default defineSchema({
     .index("by_project", ["projectId"])
     .index("by_team", ["teamId"]),
 
+  /**
+   * Durable desktop watcher activity. Unlike desktopFileLocks, these rows are
+   * an append-only activity log rather than ephemeral presence. A daily
+   * retention job should delete rows older than 30 days in bounded batches;
+   * project views normally read only their most recent activity window.
+   */
+  desktopWatcherEvents: defineTable({
+    projectId: v.id("projects"),
+    teamId: v.id("teams"),
+    clientId: v.string(),
+    userClerkId: v.string(),
+    userName: v.optional(v.string()),
+    kind: v.union(v.literal("open"), v.literal("save")),
+    file: v.string(),
+    root: v.string(),
+    mtime: v.number(),
+    observedAt: v.number(),
+    hash: v.string(),
+    parseStatus: v.union(
+      v.literal("pending"),
+      v.literal("parsed"),
+      v.literal("saved_timeline_not_parsed"),
+      v.literal("not_requested"),
+    ),
+    parseError: v.optional(v.string()),
+  })
+    .index("by_project_time", ["projectId", "observedAt"])
+    .index("by_team_time", ["teamId", "observedAt"])
+    .index("by_client_time", ["clientId", "observedAt"]),
+
   projectVersions: defineTable({
     projectId: v.id("projects"),
     teamId: v.id("teams"),
