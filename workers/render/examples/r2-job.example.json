@@ -1,0 +1,40 @@
+{
+  "id": "render-demo-1",
+  "spec": {
+    "segments": [
+      {
+        "sourceKey": "projects/example/originals/camera-a.mp4",
+        "sourceContentId": "sha256:replace-with-an-immutable-content-checksum",
+        "inSeconds": 12.25,
+        "outSeconds": 18.5
+      },
+      {
+        "sourceKey": "projects/example/originals/camera-b.mp4",
+        "sourceContentId": "sha256:replace-with-an-immutable-content-checksum",
+        "inSeconds": 3,
+        "outSeconds": 9.25,
+        "effects": {
+          "brightness": 0,
+          "contrast": 1,
+          "saturation": 0.95,
+          "volume": 1,
+          "muted": false
+        }
+      }
+    ],
+    "target": {
+      "codec": "h264",
+      "container": "mp4",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "crf": 20,
+      "preset": "fast",
+      "audioBitrateKbps": 192,
+      "audioSampleRate": 48000,
+      "audioChannels": 2
+    },
+    "outputKey": "renders/example/export.mp4",
+    "manifestKey": "renders/example/export.manifest.json"
+  }
+}
