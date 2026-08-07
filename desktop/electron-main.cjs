@@ -8,6 +8,12 @@ const fssync = require("node:fs");
 const { spawn, execSync, execFile } = require("node:child_process");
 const crypto = require("node:crypto");
 const zlib = require("node:zlib");
+const {
+  DEFAULT_PROJECT_EXTENSIONS,
+  ProjectFileWatcher,
+  uniqueRoots,
+} = require("./lib/project-watcher.cjs");
+const { createConvexPresenceTransport } = require("./lib/watcher-transport.cjs");
 
 // The desktop is a thin native shell around the WEB app — it loads
 // snipfilm.vercel.app directly (real https origin, so Clerk + Convex behave
@@ -28,6 +34,13 @@ const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 // in from the Settings → Features panel.
 const DEFAULT_FEATURES = {
   presence: { enabled: false },
+  // Structured NLE file activity. Disabled until the user opts in because
+  // local project directories can contain sensitive client filenames.
+  watcher: {
+    enabled: false,
+    directories: [],
+    extensions: DEFAULT_PROJECT_EXTENSIONS,
+  },
   // Prefetch defaults ON: with a cloud-backed mount the cold path is too slow
   // for scrubbing unless rclone's VFS cache already holds the first chunk of
   // every clip in the bin. The watcher warms the media referenced by a
@@ -492,6 +505,80 @@ function stopPresenceLoop() {
   void convexCall("mutation", "desktopPresence:clearLocks", {
     clientId: getClientId(),
   }).catch(() => {});
+}
+
+// ---- Feature loop: structured project-file activity ------------------------
+//
+// This watcher is deliberately separate from the prefetch loop below. It
+// emits a small editor-agnostic contract (open/save, file, user, mtime, hash)
+// through WatcherTransport. Wave 2 can swap the transport for versioning and
+// timeline ingest without coupling those network paths to fs.watch.
+
+const projectWatcherState = {
+  watcher: null,
+  transport: null,
+  signature: "",
+};
+
+function watcherRoots(settings) {
+  const configured = Array.isArray(settings.features?.watcher?.directories)
+    ? settings.features.watcher.directories
+    : [];
+  const mounted =
+    mountState.status === "mounted" && mountState.mountPath
+      ? [mountState.mountPath]
+      : [];
+  return uniqueRoots([...mounted, ...configured]);
+}
+
+function stopProjectWatcher() {
+  projectWatcherState.watcher?.close();
+  projectWatcherState.transport?.close();
+  projectWatcherState.watcher = null;
+  projectWatcherState.transport = null;
+  projectWatcherState.signature = "";
+}
+
+async function reconcileProjectWatcher(settings) {
+  const config = settings.features?.watcher;
+  if (!config?.enabled) {
+    stopProjectWatcher();
+    return;
+  }
+  const roots = watcherRoots(settings);
+  const extensions = Array.isArray(config.extensions) ? config.extensions : [];
+  const signature = JSON.stringify({ roots, extensions: [...extensions].sort() });
+  if (projectWatcherState.watcher && projectWatcherState.signature === signature) return;
+  stopProjectWatcher();
+  if (roots.length === 0) {
+    pushLog("watcher: enabled, waiting for a mount or configured project directory");
+    return;
+  }
+
+  const transport = createConvexPresenceTransport({
+    convexCall,
+    onLog: pushLog,
+    getContext: async () => {
+      const current = await loadSettings();
+      return {
+        clientId: getClientId(),
+        projectId: current.activeProjectId || undefined,
+        teamId: current.activeTeamId || undefined,
+        mountPath: mountState.mountPath || roots[0],
+      };
+    },
+  });
+  const watcher = new ProjectFileWatcher({
+    roots,
+    extensions,
+    user: getClientId,
+    transport,
+    listOpenFiles: listOpenFilesUnderMount,
+    onLog: pushLog,
+  }).start();
+  projectWatcherState.watcher = watcher;
+  projectWatcherState.transport = transport;
+  projectWatcherState.signature = signature;
 }
 
 // ---- Feature loop: predictive prefetch ---------------------------------------
@@ -1116,6 +1203,8 @@ async function reconcileFeatures() {
 
   if (flags.prefetch?.enabled) startPrefetchWatcher();
   else stopPrefetchWatcher();
+
+  await reconcileProjectWatcher(settings);
 
   if (flags.lanCache?.enabled) await startLanCacheServer();
   else stopLanCacheServer();
@@ -2684,6 +2773,7 @@ app.on("before-quit", async (event) => {
   // this client's lock row in Convex so the next "who's online" read
   // doesn't show a stale phantom.
   stopPresenceLoop();
+  stopProjectWatcher();
   stopPrefetchWatcher();
   stopLanCacheServer();
   if (mountChild) {

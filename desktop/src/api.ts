@@ -13,6 +13,8 @@
 export interface DesktopFeatureFlags {
   /** File-level presence + soft locks ("Alex has X open in Premiere"). */
   presence: { enabled: boolean };
+  /** Structured NLE project open/save activity published through presence. */
+  watcher: { enabled: boolean; directories: string[]; extensions: string[] };
   /** Predictive prefetch on `.prproj` open — warms rclone's VFS cache. */
   prefetch: { enabled: boolean };
   /** LAN-shared cache (mDNS-discovered peers serve cached files). */
@@ -41,6 +43,8 @@ export interface DesktopSettings {
   rootDir: string;
   /** Which project the Resolve snapshot/restore actions push to / pull from. */
   activeProjectId?: string;
+  /** Optional team context used by desktop watcher presence. */
+  activeTeamId?: string;
   features: DesktopFeatureFlags;
 }
 
