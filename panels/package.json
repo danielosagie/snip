@@ -1,0 +1,16 @@
+{
+  "name": "@snip/panels",
+  "private": true,
+  "packageManager": "bun@1.3.6",
+  "workspaces": [
+    "resolve",
+    "premiere"
+  ],
+  "scripts": {
+    "build": "bun run --cwd resolve build",
+    "lint": "bun run --cwd resolve lint",
+    "start": "bun run --cwd resolve start",
+    "test": "bun run --cwd resolve test",
+    "typecheck": "bun run --cwd resolve typecheck"
+  }
+}

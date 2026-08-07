@@ -1,0 +1,16 @@
+{
+  "name": "@snip/resolve-panel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Snip timeline presence and sequence exchange for DaVinci Resolve Studio",
+  "packageManager": "bun@1.3.6",
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.mjs",
+    "install:local": "bun run build && bun scripts/install-local.mjs",
+    "lint": "eslint src tests --max-warnings=0",
+    "start": "bun run build && bun scripts/preview.mjs",
+    "test": "bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

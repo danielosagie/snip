@@ -1,0 +1,7 @@
+{
+  "name": "snip-resolve-panel",
+  "version": "0.1.0",
+  "description": "Snip timeline presence and sequence exchange",
+  "main": "main.js",
+  "private": true
+}

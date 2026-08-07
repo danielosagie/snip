@@ -1,9 +1,21 @@
 import { registerRoutes } from "@convex-dev/stripe";
-import { httpRouter } from "convex/server";
-import { httpAction } from "./_generated/server";
+import { Presence } from "@convex-dev/presence";
+import { httpRouter, makeFunctionReference } from "convex/server";
+import { v } from "convex/values";
+import {
+  httpAction,
+  internalMutation,
+  internalQuery,
+  type ActionCtx,
+} from "./_generated/server";
 import type Stripe from "stripe";
 import { components, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import type { TimelinePresencePayload } from "../src/lib/timeline/types";
+import {
+  isTimelinePresencePayload,
+  normalizeTimelinePresencePayload,
+} from "../src/components/presence/model";
 
 const http = httpRouter();
 
@@ -451,6 +463,435 @@ http.route({
       return signJson({ ok: true });
     } catch (e) {
       return signJson({ ok: false, error: e instanceof Error ? e.message : "Failed to decline." }, 400);
+    }
+  }),
+});
+
+// -----------------------------------------------------------------------------
+// Agent E review: thin plugin-token HTTP surface for native NLE panels.
+//
+// These functions intentionally live beside their HTTP routes so Agent A can
+// move them into the timeline hub once timelineDocs.ts and the OTIO importer
+// land. They do not change the existing snapshot POST route.
+// -----------------------------------------------------------------------------
+
+const nlePresence = new Presence(components.presence);
+const NLE_PRESENCE_INTERVAL_MS = 5_000;
+
+const nleTimelineTimeValidator = v.object({
+  value: v.number(),
+  rate: v.number(),
+});
+
+const nleTimelineRangeValidator = v.object({
+  start: nleTimelineTimeValidator,
+  duration: nleTimelineTimeValidator,
+});
+
+const nleTimelinePresenceValidator = v.object({
+  playheadPosition: nleTimelineTimeValidator,
+  selectedClipIds: v.array(v.string()),
+  viewportRange: nleTimelineRangeValidator,
+  softLocks: v.array(
+    v.object({
+      target: v.union(
+        v.object({ kind: v.literal("sequence"), sequenceId: v.string() }),
+        v.object({ kind: v.literal("file"), path: v.string() }),
+      ),
+      holder: v.string(),
+      claimedAt: v.number(),
+    }),
+  ),
+});
+
+const nleSurfaceValidator = v.union(
+  v.literal("browser"),
+  v.literal("desktop"),
+  v.literal("premiere"),
+  v.literal("resolve"),
+);
+
+type NleSurface = "browser" | "desktop" | "premiere" | "resolve";
+
+type NlePresenceData = {
+  actorId: string;
+  displayName: string;
+  avatarUrl?: string;
+  updatedAt: number;
+  payload: TimelinePresencePayload;
+  sessionId?: string;
+  surface?: NleSurface;
+  sourceProjectId?: string;
+  sourceTimelineId?: string;
+  timelineName?: string;
+};
+
+type NlePresenceListItem = {
+  id: string;
+  actorId: string;
+  sessionId?: string;
+  displayName: string;
+  avatarUrl?: string;
+  surface: NleSurface;
+  sourceTimelineId?: string;
+  timelineName?: string;
+  payload: TimelinePresencePayload;
+  updatedAt: number;
+};
+
+type PluginTeam = { _id: Id<"teams">; name: string; slug: string };
+
+function isNlePresenceData(value: unknown): value is NlePresenceData {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Partial<NlePresenceData>;
+  return (
+    typeof data.actorId === "string" &&
+    typeof data.displayName === "string" &&
+    typeof data.updatedAt === "number" &&
+    Number.isFinite(data.updatedAt) &&
+    isTimelinePresencePayload(data.payload)
+  );
+}
+
+async function authenticateNlePlugin(
+  ctx: ActionCtx,
+  request: Request,
+): Promise<PluginTeam | Response> {
+  const auth = request.headers.get("authorization");
+  if (!auth?.toLowerCase().startsWith("bearer ")) {
+    return new Response("Missing bearer token", { status: 401 });
+  }
+  const token = auth.slice(7).trim();
+  const team = (await ctx.runQuery(internal.timelines.findTeamByPluginToken, {
+    token,
+  })) as PluginTeam | null;
+  return team ?? new Response("Invalid plugin token", { status: 401 });
+}
+
+function nleJson(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+export const agentEHeartbeatNlePresence = internalMutation({
+  args: {
+    timelineDocId: v.id("timelineDocs"),
+    sessionId: v.string(),
+    displayName: v.string(),
+    surface: nleSurfaceValidator,
+    sourceProjectId: v.string(),
+    sourceTimelineId: v.string(),
+    timelineName: v.string(),
+    payload: nleTimelinePresenceValidator,
+  },
+  returns: v.object({ roomToken: v.string() }),
+  handler: async (ctx, args) => {
+    const roomId = `timeline-doc:${args.timelineDocId}`;
+    const userId = `nle:${args.surface}:${args.sessionId}`;
+    const now = Date.now();
+    const payload = normalizeTimelinePresencePayload(args.payload, userId, now);
+    if (!payload) throw new Error("Invalid timeline presence.");
+    const result = await nlePresence.heartbeat(
+      ctx,
+      roomId,
+      userId,
+      args.sessionId,
+      NLE_PRESENCE_INTERVAL_MS,
+    );
+    await nlePresence.updateRoomUser(ctx, roomId, userId, {
+      actorId: userId,
+      sessionId: args.sessionId,
+      displayName: args.displayName,
+      surface: args.surface,
+      sourceProjectId: args.sourceProjectId,
+      sourceTimelineId: args.sourceTimelineId,
+      timelineName: args.timelineName,
+      payload,
+      updatedAt: now,
+    } satisfies NlePresenceData);
+    return { roomToken: result.roomToken };
+  },
+});
+
+export const agentEListNlePresence = internalQuery({
+  args: { roomToken: v.string() },
+  returns: v.array(
+    v.object({
+      id: v.string(),
+      actorId: v.string(),
+      sessionId: v.optional(v.string()),
+      displayName: v.string(),
+      avatarUrl: v.optional(v.string()),
+      surface: nleSurfaceValidator,
+      sourceTimelineId: v.optional(v.string()),
+      timelineName: v.optional(v.string()),
+      payload: nleTimelinePresenceValidator,
+      updatedAt: v.number(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const entries = await nlePresence.list(ctx, args.roomToken);
+    return entries
+      .filter((entry) => entry.online && isNlePresenceData(entry.data))
+      .map((entry) => {
+        const data = entry.data as NlePresenceData;
+        return {
+          id: entry.userId,
+          actorId: data.actorId,
+          sessionId: data.sessionId,
+          displayName: data.displayName,
+          avatarUrl: data.avatarUrl,
+          surface: data.surface ?? "browser",
+          sourceTimelineId: data.sourceTimelineId,
+          timelineName: data.timelineName,
+          payload: data.payload,
+          updatedAt: data.updatedAt,
+        };
+      });
+  },
+});
+
+export const agentEFindNleTimelineDoc = internalQuery({
+  args: {
+    projectId: v.id("projects"),
+    teamId: v.id("teams"),
+    branch: v.string(),
+  },
+  returns: v.union(
+    v.object({ id: v.id("timelineDocs"), branch: v.string() }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.teamId !== args.teamId) return null;
+    const timelineDoc = await ctx.db
+      .query("timelineDocs")
+      .withIndex("by_project_branch", (q) =>
+        q.eq("projectId", args.projectId).eq("branch", args.branch),
+      )
+      .order("desc")
+      .first();
+    return timelineDoc ? { id: timelineDoc._id, branch: timelineDoc.branch } : null;
+  },
+});
+
+export const agentEListNleSnapshots = internalQuery({
+  args: {
+    projectId: v.id("projects"),
+    teamId: v.id("teams"),
+  },
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.teamId !== args.teamId) {
+      throw new Error("Project not found for this team.");
+    }
+    const snapshots = await ctx.db
+      .query("timelineSnapshots")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .order("desc")
+      .take(50);
+    return snapshots.map((snapshot) => ({
+      id: snapshot._id,
+      branch: snapshot.branch,
+      message: snapshot.message,
+      createdAt: snapshot._creationTime,
+      createdByName: snapshot.createdByName,
+      source: snapshot.source,
+      sourceProjectId: snapshot.sourceProjectId,
+      sourceTimelineId: snapshot.sourceTimelineId,
+    }));
+  },
+});
+
+export const agentEGetNleSnapshot = internalQuery({
+  args: {
+    projectId: v.id("projects"),
+    snapshotId: v.id("timelineSnapshots"),
+    teamId: v.id("teams"),
+  },
+  handler: async (ctx, args) => {
+    const snapshot = await ctx.db.get(args.snapshotId);
+    if (
+      !snapshot ||
+      snapshot.projectId !== args.projectId ||
+      snapshot.teamId !== args.teamId
+    ) {
+      return null;
+    }
+    return {
+      id: snapshot._id,
+      branch: snapshot.branch,
+      message: snapshot.message,
+      createdAt: snapshot._creationTime,
+      createdByName: snapshot.createdByName,
+      source: snapshot.source,
+      sourceProjectId: snapshot.sourceProjectId,
+      sourceTimelineId: snapshot.sourceTimelineId,
+      fcpxml: snapshot.fcpxml ?? null,
+    };
+  },
+});
+
+const heartbeatNlePresenceRef = makeFunctionReference<
+  "mutation",
+  {
+    timelineDocId: Id<"timelineDocs">;
+    sessionId: string;
+    displayName: string;
+    surface: NleSurface;
+    sourceProjectId: string;
+    sourceTimelineId: string;
+    timelineName: string;
+    payload: TimelinePresencePayload;
+  },
+  { roomToken: string }
+>("http:agentEHeartbeatNlePresence");
+
+const listNlePresenceRef = makeFunctionReference<
+  "query",
+  { roomToken: string },
+  NlePresenceListItem[]
+>("http:agentEListNlePresence");
+
+const findNleTimelineDocRef = makeFunctionReference<
+  "query",
+  { projectId: Id<"projects">; teamId: Id<"teams">; branch: string },
+  { id: Id<"timelineDocs">; branch: string } | null
+>("http:agentEFindNleTimelineDoc");
+
+const listNleSnapshotsRef = makeFunctionReference<
+  "query",
+  { projectId: Id<"projects">; teamId: Id<"teams"> }
+>("http:agentEListNleSnapshots");
+
+const getNleSnapshotRef = makeFunctionReference<
+  "query",
+  {
+    projectId: Id<"projects">;
+    snapshotId: Id<"timelineSnapshots">;
+    teamId: Id<"teams">;
+  }
+>("http:agentEGetNleSnapshot");
+
+http.route({
+  path: "/timelines/presence",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+
+    const stringFields = [
+      "projectId",
+      "branch",
+      "sessionId",
+      "displayName",
+      "surface",
+      "sourceProjectId",
+      "sourceTimelineId",
+      "timelineName",
+    ];
+    if (stringFields.some((field) => typeof body[field] !== "string")) {
+      return nleJson({ ok: false, error: "Presence fields are invalid." }, 400);
+    }
+    if (body.surface !== "resolve" && body.surface !== "premiere") {
+      return nleJson({ ok: false, error: "NLE surface is invalid." }, 400);
+    }
+    if (
+      !(body.sessionId as string).trim() ||
+      (body.sessionId as string).length > 128 ||
+      !(body.branch as string).trim() ||
+      (body.branch as string).length > 100 ||
+      (body.displayName as string).trim().length > 80 ||
+      !(body.displayName as string).trim() ||
+      [body.sourceProjectId, body.sourceTimelineId, body.timelineName].some(
+        (value) => !(value as string).trim() || (value as string).length > 256,
+      ) ||
+      !body.payload ||
+      typeof body.payload !== "object"
+    ) {
+      return nleJson({ ok: false, error: "Presence identity is invalid." }, 400);
+    }
+
+    const projectId = body.projectId as Id<"projects">;
+    try {
+      const timelineDoc = await ctx.runQuery(findNleTimelineDocRef, {
+        projectId,
+        teamId: team._id,
+        branch: (body.branch as string).trim(),
+      });
+      if (!timelineDoc) {
+        return nleJson(
+          { ok: false, error: "Timeline document is not ready for this branch." },
+          409,
+        );
+      }
+      const { roomToken } = await ctx.runMutation(heartbeatNlePresenceRef, {
+        timelineDocId: timelineDoc.id,
+        sessionId: body.sessionId as string,
+        displayName: (body.displayName as string).trim(),
+        surface: body.surface,
+        sourceProjectId: body.sourceProjectId as string,
+        sourceTimelineId: body.sourceTimelineId as string,
+        timelineName: body.timelineName as string,
+        payload: body.payload as TimelinePresencePayload,
+      });
+      const teammates = await ctx.runQuery(listNlePresenceRef, { roomToken });
+      return nleJson({ ok: true, timelineDocId: timelineDoc.id, teammates });
+    } catch (error) {
+      return nleJson({ ok: false, error: error instanceof Error ? error.message : "Presence rejected." }, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/timelines/snapshots",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const projectId = new URL(request.url).searchParams.get("projectId");
+    if (!projectId) return nleJson({ ok: false, error: "Project ID is required." }, 400);
+    try {
+      const snapshots = await ctx.runQuery(listNleSnapshotsRef, {
+        projectId: projectId as Id<"projects">,
+        teamId: team._id,
+      });
+      return nleJson({ ok: true, snapshots });
+    } catch (error) {
+      return nleJson({ ok: false, error: error instanceof Error ? error.message : "Snapshots rejected." }, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/timelines/snapshot",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const params = new URL(request.url).searchParams;
+    const projectId = params.get("projectId");
+    const snapshotId = params.get("snapshotId");
+    if (!projectId || !snapshotId) {
+      return nleJson({ ok: false, error: "Project ID and snapshot ID are required." }, 400);
+    }
+    try {
+      const snapshot = await ctx.runQuery(getNleSnapshotRef, {
+        projectId: projectId as Id<"projects">,
+        snapshotId: snapshotId as Id<"timelineSnapshots">,
+        teamId: team._id,
+      });
+      if (!snapshot) return nleJson({ ok: false, error: "Snapshot not found." }, 404);
+      if (!snapshot.fcpxml) {
+        return nleJson({ ok: false, error: "Snapshot has no FCPXML." }, 409);
+      }
+      return nleJson({ ok: true, snapshot });
+    } catch (error) {
+      return nleJson({ ok: false, error: error instanceof Error ? error.message : "Snapshot rejected." }, 400);
     }
   }),
 });

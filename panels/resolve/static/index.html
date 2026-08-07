@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Snip Resolve</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="renderer.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Snip</p>
+          <h1>Resolve</h1>
+        </div>
+        <div class="status-pill" aria-live="polite">
+          <span id="status-dot" class="status-dot status-connecting"></span>
+          <span id="status-label">Connecting</span>
+        </div>
+      </header>
+
+      <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+      <section class="surface current-card" aria-labelledby="timeline-heading">
+        <div class="section-heading">
+          <h2 id="timeline-heading">Timeline</h2>
+          <span id="last-push">Not yet</span>
+        </div>
+        <div id="timeline-name" class="timeline-name">No timeline</div>
+        <div class="playhead-row">
+          <span>Playhead</span>
+          <strong id="timecode">00:00:00:00</strong>
+        </div>
+      </section>
+
+      <section class="surface" aria-labelledby="team-heading">
+        <div class="section-heading">
+          <h2 id="team-heading">Team</h2>
+          <span id="team-count" class="count-badge">0</span>
+        </div>
+        <div id="team-list" class="team-list" aria-live="polite"></div>
+      </section>
+
+      <section class="surface" aria-labelledby="pull-heading">
+        <div class="section-heading">
+          <h2 id="pull-heading">Pull Copy</h2>
+          <button id="refresh-button" class="text-button" type="button">Refresh</button>
+        </div>
+        <label for="branch-select">Branch</label>
+        <select id="branch-select"></select>
+        <label for="snapshot-select">Snapshot</label>
+        <select id="snapshot-select"></select>
+        <button id="pull-button" class="primary-button" type="button">Pull Copy</button>
+      </section>
+
+      <div class="action-row">
+        <button id="push-button" class="secondary-button" type="button">Push Now</button>
+        <button id="config-button" class="secondary-button" type="button">Config</button>
+      </div>
+    </main>
+
+    <section id="settings" class="settings-overlay" aria-labelledby="settings-heading" hidden>
+      <form id="settings-form" class="settings-card">
+        <div class="section-heading">
+          <h2 id="settings-heading">Panel Setup</h2>
+        </div>
+        <label for="server-input">Server</label>
+        <input id="server-input" type="url" required autocomplete="url" />
+        <label for="project-input">Project ID</label>
+        <input id="project-input" required autocomplete="off" />
+        <label for="name-input">Your Name</label>
+        <input id="name-input" required autocomplete="name" />
+        <label for="token-input">Token</label>
+        <input id="token-input" type="password" autocomplete="off" />
+        <label for="push-branch-input">Push Branch</label>
+        <input id="push-branch-input" value="main" required autocomplete="off" />
+        <div class="action-row">
+          <button id="cancel-button" class="secondary-button" type="button">Cancel</button>
+          <button class="primary-button" type="submit">Save</button>
+        </div>
+      </form>
+    </section>
+  </body>
+</html>

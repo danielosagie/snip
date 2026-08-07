@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest
+  Version="11.0"
+  ExtensionBundleId="com.snip.premiere.panel"
+  ExtensionBundleVersion="0.0.0"
+  ExtensionBundleName="Snip Premiere"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+>
+  <ExtensionList>
+    <Extension Id="com.snip.premiere.panel.main" Version="0.0.0" />
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <Host Name="PPRO" Version="[14.0,99.9]" />
+    </HostList>
+    <LocaleList>
+      <Locale Code="All" />
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="11.0" />
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.snip.premiere.panel.main">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>Snip</Menu>
+          <Geometry>
+            <Size>
+              <Height>640</Height>
+              <Width>340</Width>
+            </Size>
+            <MinSize>
+              <Height>420</Height>
+              <Width>280</Width>
+            </MinSize>
+          </Geometry>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>
