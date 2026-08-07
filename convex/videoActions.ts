@@ -2035,7 +2035,11 @@ export const getSharedPaywalledPlayback = action({
     if (!resolved) throw new Error("Share grant invalid or expired.");
     const { video, shareLink, grant } = resolved;
 
-    if (video.status !== "ready" || !video.muxPlaybackId) {
+    // Only the full-res paths need muxPlaybackId, and each one checks for it
+    // itself. Requiring it here used to break the preview path for a video
+    // whose main Mux asset errored: the watermarked preview was ready and is
+    // exactly what an unpaid viewer should get, but the share threw instead.
+    if (video.status !== "ready") {
       throw new Error("Video is not ready yet.");
     }
 
@@ -2089,6 +2093,9 @@ export const getSharedPaywalledPlayback = action({
 
     // No paywall → behave like the existing public flow.
     if (!shareLink.paywall) {
+      if (!video.muxPlaybackId) {
+        throw new Error("Video is not ready yet.");
+      }
       const playbackId = await ensurePublicPlaybackId(ctx, {
         videoId: video._id,
         muxAssetId: video.muxAssetId,
@@ -2119,6 +2126,9 @@ export const getSharedPaywalledPlayback = action({
         );
       }
       const playbackId = video.muxPlaybackId;
+      if (!playbackId) {
+        throw new Error("Video is not ready yet.");
+      }
       return {
         mode: paid ? ("full" as const) : ("preview" as const),
         url: buildMuxPlaybackUrl(playbackId),
@@ -2141,7 +2151,14 @@ export const getSharedPaywalledPlayback = action({
         });
       }
       if (!fullSignedId) {
-        throw new Error("Could not provision signed full-res playback.");
+        // No signed id and no source asset to mint one from. The usual cause
+        // is that Mux errored on the original upload, so name that instead of
+        // a bare "could not provision".
+        throw new Error(
+          video.muxAssetId
+            ? "Could not provision signed full-res playback."
+            : "The original never finished encoding, so full-res playback is unavailable. Re-upload this file.",
+        );
       }
       const videoToken = await signPlaybackToken(fullSignedId, `${TTL_SECONDS}s`);
       const thumbToken = await signThumbnailToken(fullSignedId, `${TTL_SECONDS}s`);
