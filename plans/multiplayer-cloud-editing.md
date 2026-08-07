@@ -41,7 +41,14 @@ What already exists and must be built on, not duplicated:
    section. Cross-boundary needs go through the owning agent's exported
    API/types, never by editing another agent's files. `convex/schema.ts` is
    Agent A's — schema changes from others arrive as a request in the PR
-   description, A lands them.
+   description, A lands them. Two shared surfaces get explicit rules so no
+   file has two owners:
+   - `convex/http.ts` **route registration is Agent A's.** D and E implement
+     their HTTP handlers in agent-owned modules (`convex/ingestDesktop.ts`,
+     `convex/ingestPanels.ts`) and A lands the one-line route registrations.
+   - **`renderJobs` rows are written only by Agent F.** B (and anyone else)
+     creates/reads jobs through F's exported API (`renderJobs.enqueue`,
+     `renderJobs.get`), never by inserting rows directly.
 3. **One branch per agent** (`agent/<letter>-<slug>`), rebased on the
    integration branch daily. Small PRs, each leaving `bun run typecheck`,
    `typecheck:convex`, and `lint` green.
@@ -67,12 +74,31 @@ conversion).
    media. Last-writer-wins per property (Figma-style), no full CRDT.
    Mutations are small ops (`setClipRange`, `moveClip`, `addClip`, …) so
    Convex reactivity gives every client live updates for free.
+   **Compound-edit semantics** (ripple, split, reorder, undo touch many
+   properties): every edit is an *op batch* — `{opId, baseRevision, ops[]}`
+   applied in one Convex mutation, so batches are atomic (Convex mutations
+   are transactional) and collaborators never observe a partial ripple.
+   The doc carries a monotonically increasing `revision`; a batch whose
+   `baseRevision` is stale is rebased property-wise (LWW, ties broken
+   deterministically by `(revision, opId)`) or rejected for the client to
+   retry. Undo is the *conditional* inverse of your own batch: it applies
+   only to properties still at the value your batch wrote — it never
+   overwrites a newer remote change.
 2. **Branches + snapshots.** A doc lives on a branch; "commit" freezes the
    doc into the existing `timelines.ts` snapshot log (same
    branch/parentSnapshotId semantics). Restore = load snapshot into a doc.
 3. **OTIO in/out.** `src/lib/timeline/otio.ts`: doc ⇄ OTIO JSON, plus
    FCPXML → OTIO import (the Resolve endpoint already receives FCPXML).
-   This is the hub every NLE adapter converges on.
+   This is the hub every NLE adapter converges on. Three flows, kept
+   explicitly separate:
+   - **Import**: FCPXML → OTIO → materialize/update a `timelineDocs` doc
+     (not just stored fields alongside a snapshot, as the current endpoint
+     does).
+   - **Commit**: serialize doc → snapshot via `recordSnapshot`, which is
+     reserved for explicit commits only.
+   - **Live ops**: an authenticated op-batch API (the same mutations the
+     browser uses) exposed over HTTP for panels/desktop — live updates
+     never go through the append-only snapshot path.
 4. **Contracts PR (Phase 0, week 1):** TypeScript types for the doc, ops,
    presence payloads (playhead, selection, lock claims), and `renderJobs`
    schema. Land before B–F write feature code.
@@ -133,17 +159,26 @@ playhead.
 Works with ANY editor because it's the file layer.
 
 **Owns:** `desktop/` (except panel code, E's), `convex/desktopPresence.ts`,
-watcher ingest endpoints in `convex/http.ts` (coordinated with A).
+`convex/ingestDesktop.ts` (handlers; A registers the routes in `http.ts`).
 
 1. **File watcher.** Watch the mount/local project dirs; publish open/save
    events as presence + lock claims (C's channels, D's transport).
-2. **Auto-versioning.** Snapshot every project-file save, content-addressed,
-   into the project's version history (`itemVersions`/`projectVersions`
-   pattern). Browsable "their version vs mine" history in the desktop app.
-3. **Project-file parsing.** `.prproj` = gunzip → XML; `.fcpxml` = XML.
-   Parse to OTIO, POST to A's ingest endpoint (same auth pattern as the
-   existing Resolve plugin token). Every native save becomes a timeline
-   snapshot on the hub.
+2. **Auto-versioning.** Persist every project-file save as a
+   content-addressed file version first (dedup by content hash — identical
+   saves are no-ops), into the project's version history
+   (`itemVersions`/`projectVersions` pattern). Browsable "their version vs
+   mine" history in the desktop app. Versioning is unconditional — it never
+   depends on parsing.
+3. **Project-file parsing.** After the version is persisted: `.prproj` =
+   gunzip → XML; `.fcpxml` = XML. Parse to OTIO and POST to A's import
+   flow, recording a per-version import status (`parsed` / `failed` /
+   `unsupported`, with the error). A timeline snapshot is created only on
+   `parsed`; a failed parse still leaves the file version safe.
+   **Auth**: a device/user-scoped, revocable desktop credential (extend the
+   existing desktop pairing/`desktopAuth` machinery) — not the team-wide
+   Resolve plugin token. The server enforces project scope and derives the
+   actor's identity from the credential; it never trusts a client-supplied
+   `createdByName`.
 4. **Proxy/full-res toggle** — close out `plans/proxies-unified.md` step 6:
    mount resolves `proxies/` by default, full-res on demand, cached after
    first touch. Plus the streaming R2 mirror for GB-scale renditions
@@ -158,7 +193,7 @@ plugins installed.
 Per-NLE adapters on the vendors' extension surfaces (the Frame.io route).
 
 **Owns:** new `panels/` workspace (`panels/resolve/`, `panels/premiere/`),
-the plugin-facing HTTP surface additions (coordinated with A).
+`convex/ingestPanels.ts` (handlers; A registers the routes in `http.ts`).
 
 1. **Resolve first** — scripting API already half-integrated (the snapshot
    endpoint exists). Panel: presence out (open timeline, playhead), presence
@@ -186,12 +221,22 @@ in billing.
 
 1. **Conform worker.** Pulls originals from R2 (free egress), renders a doc
    snapshot to MP4/HLS, uploads to R2, marks the job. Spot/interruptible
-   compute; queue + heartbeat via a `renderJobs` table (schema from A's
-   contracts PR).
-2. **Smart render.** Content-addressed segment cache: hash (source, in/out,
-   effect params) per GOP-aligned segment; stream-copy cache hits, encode
-   only misses. v2 of a cut re-encodes seconds, not minutes. This is the
-   moat — instrument cache-hit rate from day 1.
+   compute, so the `renderJobs` state machine (schema from A's contracts
+   PR) must survive worker death: jobs are *leased* (`leaseOwner`,
+   `leaseExpiresAt`, renewed by heartbeat; expiry requeues the job with
+   `attempt + 1`), output keys are deterministic
+   (`renders/<jobId>/<attempt>/…`) so R2 uploads are idempotent, and
+   completion is a single atomic compare-and-set on `(jobId, leaseOwner)` —
+   a restarted worker whose lease lapsed can't double-complete a job.
+2. **Smart render.** Content-addressed segment cache per GOP-aligned
+   segment, keyed by *everything that affects output bytes*: source media
+   content hash (not IDs), in/out, effect params, output codec + container
+   + profile/level, dimensions, frame rate, audio settings, color
+   management, worker/FFmpeg version, and a cache-schema version —
+   changing export settings or upgrading the encoder can never serve stale
+   segments. Stream-copy cache hits, encode only misses. v2 of a cut
+   re-encodes seconds, not minutes. This is the moat — instrument
+   cache-hit rate from day 1.
 3. **Mux replacement path.** The same worker writes HLS ladders into R2
    behind a flag — new uploads can bypass Mux per-minute pricing when the
    flag is on. Keep Mux as the default until parity is proven.
@@ -200,7 +245,7 @@ in billing.
    (~2× R2 cost) and export minutes. Free viewer/commenter seats stay free.
 
 **Done when:** browser export works end-to-end; an unchanged re-export is
->90% stream-copied; a team's bill reflects metered storage.
+more than 90% stream-copied; a team's bill reflects metered storage.
 
 ---
 
