@@ -43,8 +43,14 @@ const FIELD_LABELS: Record<FieldDoc["type"], string> = {
   text: "Text",
   checkbox: "Checkbox",
 };
-// Distinct chip colors per recipient (cycled by order).
-const RECIPIENT_COLORS = ["#C2410C", "#2563eb", "#16a34a", "#9333ea", "#0891b2"];
+// Distinct soft-token accents per recipient (cycled by order).
+const RECIPIENT_COLORS = [
+  { accent: "#D14E00", tint: "#FFF0E6" },
+  { accent: "#225B36", tint: "#F2FBF5" },
+  { accent: "#74521D", tint: "#FFF9EC" },
+  { accent: "#8A2B34", tint: "#FFF5F5" },
+  { accent: "#6E6E73", tint: "#F1F1F3" },
+];
 
 interface Props {
   open: boolean;
@@ -125,24 +131,24 @@ export function SignatureFieldsSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-3xl flex flex-col">
+      <SheetContent className="surface-soft flex w-full flex-col sm:max-w-3xl">
         <SheetHeader>
           <SheetTitle>Place signature fields</SheetTitle>
           <SheetDescription>
             {isDraft
               ? "Pick a signer, drop fields, and drag them onto the document."
-              : "This contract is no longer a draft — fields are read-only."}
+              : "This contract is no longer a draft. Fields are read-only."}
           </SheetDescription>
         </SheetHeader>
 
         {/* Recipient picker + field palette */}
-        <div className="space-y-3 border-y-2 border-[#1a1a1a] py-3">
+        <div className="space-y-3 border-y border-[#F1F1F3] py-3">
           <div>
-            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1.5">
+            <div className="mb-1.5 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Signer
             </div>
             {recipients.length === 0 ? (
-              <p className="text-xs text-[#888] italic">
+              <p className="text-xs italic text-[#6E6E73]">
                 Add a signer in the Recipients panel first.
               </p>
             ) : (
@@ -153,23 +159,15 @@ export function SignatureFieldsSheet({
                     type="button"
                     onClick={() => setSelectedRecipient(r._id)}
                     className={cn(
-                      "inline-flex items-center gap-1.5 border-2 px-2.5 h-8 text-xs font-bold",
+                      "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
                       r._id === selectedRecipient
-                        ? "text-[#f0f0e8]"
-                        : "bg-[#f0f0e8] text-[#1a1a1a]",
+                        ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                        : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
                     )}
-                    style={
-                      r._id === selectedRecipient
-                        ? {
-                            backgroundColor: colorFor(r._id),
-                            borderColor: colorFor(r._id),
-                          }
-                        : { borderColor: colorFor(r._id) }
-                    }
                   >
                     <span
                       className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: colorFor(r._id) }}
+                      style={{ backgroundColor: colorFor(r._id).accent }}
                     />
                     {r.name}
                   </button>
@@ -178,7 +176,7 @@ export function SignatureFieldsSheet({
             )}
           </div>
           <div>
-            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1.5">
+            <div className="mb-1.5 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Add field
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -188,7 +186,7 @@ export function SignatureFieldsSheet({
                   type="button"
                   disabled={!isDraft || !selectedRecipient}
                   onClick={() => void handleAdd(t)}
-                  className="inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2.5 h-8 text-xs font-bold uppercase tracking-wider hover:bg-[#FFEDD5] disabled:opacity-40"
+                  className="inline-flex h-8 items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-3 text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] disabled:opacity-40"
                 >
                   <Plus className="h-3 w-3" />
                   {FIELD_LABELS[t]}
@@ -199,13 +197,13 @@ export function SignatureFieldsSheet({
         </div>
 
         {/* Document drag surface */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-[#e8e8e0] p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[#FAFAFA] p-4">
           <div
             ref={surfaceRef}
             onPointerMove={onPointerMove}
             onPointerUp={() => void onPointerUp()}
             onPointerLeave={() => void onPointerUp()}
-            className="relative mx-auto w-full max-w-[640px] border-2 border-[#1a1a1a] bg-[#f0f0e8] p-8"
+            className="relative mx-auto w-full max-w-[640px] rounded-[14px] border border-[#E8E8EC] bg-white p-8"
             style={{ touchAction: dragId ? "none" : undefined }}
           >
             {/* Read-only contract body. The author edits text in the main
@@ -227,19 +225,19 @@ export function SignatureFieldsSheet({
                     setDragId(f._id);
                   }}
                   className={cn(
-                    "absolute flex items-center justify-between gap-1 border-2 px-1.5 py-1 text-[10px] font-bold uppercase tracking-wide select-none",
+                    "absolute flex items-center justify-between gap-1 rounded-full border px-2 py-1 text-[10px] font-medium select-none",
                     isDraft ? "cursor-move" : "cursor-default",
                   )}
                   style={{
                     left: `${pos.x * 100}%`,
                     top: `${pos.y * 100}%`,
                     width: `${Math.max(0.12, f.width) * 100}%`,
-                    borderColor: color,
-                    backgroundColor: `${color}22`,
-                    color: "#1a1a1a",
+                    borderColor: color.accent,
+                    backgroundColor: color.tint,
+                    color: "#131315",
                     zIndex: dragId === f._id ? 30 : 10,
                   }}
-                  title={`${FIELD_LABELS[f.type]} · drag to place`}
+                  title={`${FIELD_LABELS[f.type]}, drag to place`}
                 >
                   <span className="truncate">{FIELD_LABELS[f.type]}</span>
                   {isDraft && (
@@ -247,7 +245,7 @@ export function SignatureFieldsSheet({
                       type="button"
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={() => void removeField({ fieldId: f._id })}
-                      className="shrink-0 text-[#1a1a1a] hover:text-[#dc2626]"
+                      className="shrink-0 rounded-full text-[#6E6E73] hover:bg-[#FFF5F5] hover:text-[#D8434F]"
                       aria-label="Remove field"
                     >
                       <X className="h-3 w-3" />

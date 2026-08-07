@@ -101,11 +101,11 @@ export function ShareHeader({
   };
 
   return (
-    <section className="border-2 border-[#1a1a1a]">
+    <section className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
       {/* Banner */}
       <div className="relative">
         {coverUrl ? (
-          <div className="relative h-44 md:h-56 w-full overflow-hidden bg-[#1a1a1a]">
+          <div className="relative h-44 w-full overflow-hidden bg-[#0A0A0B] md:h-56">
             <img
               src={coverUrl}
               alt=""
@@ -114,7 +114,7 @@ export function ShareHeader({
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
             <div className="absolute bottom-0 left-0 right-0 p-5">
-              <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white">
+              <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white md:text-4xl">
                 {displayTitle}
               </h1>
               {headerDescription ? (
@@ -125,12 +125,12 @@ export function ShareHeader({
             </div>
           </div>
         ) : (
-          <div className="bg-[#1a1a1a] p-6">
-            <h1 className="text-3xl md:text-4xl font-black tracking-tight text-[#f0f0e8]">
+          <div className="bg-white px-6 py-5">
+            <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[#131315]">
               {displayTitle}
             </h1>
             {headerDescription ? (
-              <p className="mt-1 max-w-2xl text-sm text-[#f0f0e8]/80">
+              <p className="mt-1 max-w-2xl text-sm leading-5 text-[#6E6E73]">
                 {headerDescription}
               </p>
             ) : null}
@@ -157,9 +157,9 @@ export function ShareHeader({
 
       {/* Owner editor */}
       {isOwner && editing ? (
-        <div className="space-y-3 border-t-2 border-[#1a1a1a] bg-[#e8e8e0] p-4">
+        <div className="space-y-3 border-t border-[#E8E8EC] bg-[#FAFAFA] p-4">
           <div className="space-y-1">
-            <label className="text-xs font-bold uppercase tracking-widest text-[#888]">
+            <label className="text-[13px] font-medium text-[#6E6E73]">
               Title
             </label>
             <Input
@@ -169,7 +169,7 @@ export function ShareHeader({
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-bold uppercase tracking-widest text-[#888]">
+            <label className="text-[13px] font-medium text-[#6E6E73]">
               Description
             </label>
             <Textarea
@@ -229,7 +229,7 @@ export function ShareHeader({
             </div>
           </div>
 
-          {error ? <p className="text-xs text-[#dc2626]">{error}</p> : null}
+          {error ? <p className="text-xs text-[#8A2B34]">{error}</p> : null}
         </div>
       ) : null}
     </section>

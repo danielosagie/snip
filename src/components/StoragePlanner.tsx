@@ -74,40 +74,40 @@ export function StoragePlanner({
   };
 
   return (
-    <section className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-6">
+    <section className="rounded-[14px] border border-[#E8E8EC] bg-white p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="ui-card-title text-lg font-bold">How much room do you need?</h2>
-        <p className="font-mono text-xs text-[#666]">
+        <h2 className="ui-card-title text-base font-semibold text-[#131315]">How much room do you need?</h2>
+        <p className="text-xs text-[#6E6E73]">
           Using {formatBytes(usedBytes)}
         </p>
       </div>
 
       <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
         <div className="flex items-baseline gap-3">
-          <span className="text-4xl font-black tracking-tight">
+          <span className="text-4xl font-semibold tracking-tight text-[#131315]">
             {formatStorage(target.gb)}
           </span>
-          <span className="font-mono text-sm text-[#666]">
+          <span className="text-sm text-[#6E6E73]">
             {formatCentsPerGb(target)}
           </span>
         </div>
         <div className="text-right">
-          <div className="text-3xl font-black tracking-tight">
+          <div className="text-3xl font-semibold tracking-tight text-[#131315]">
             {formatUsd(target.monthlyCents)}
-            <span className="ml-1 text-base font-normal text-[#666]">/ mo</span>
+            <span className="ml-1 text-base font-normal text-[#6E6E73]">/ mo</span>
           </div>
           {change.direction !== "same" ? (
             <div
               className={cn(
-                "font-mono text-xs",
-                change.direction === "upgrade" ? "text-[#C2410C]" : "text-[#2BB673]",
+                "text-xs",
+                change.direction === "upgrade" ? "text-[#D14E00]" : "text-[#225B36]",
               )}
             >
               {change.deltaCents > 0 ? "+" : "−"}
               {formatUsd(Math.abs(change.deltaCents))} / mo
             </div>
           ) : (
-            <div className="font-mono text-xs text-[#666]">Current plan</div>
+            <div className="text-xs text-[#6E6E73]">Current plan</div>
           )}
         </div>
       </div>
@@ -124,7 +124,7 @@ export function StoragePlanner({
           setNeedGb("");
           setOverLargest(false);
         }}
-        className="mt-5 w-full accent-[#C2410C]"
+        className="mt-5 w-full accent-[#FF6600]"
       />
 
       <div className="mt-2 flex justify-between">
@@ -138,8 +138,10 @@ export function StoragePlanner({
               setOverLargest(false);
             }}
             className={cn(
-              "font-mono text-xs",
-              i === index ? "font-bold text-[#1a1a1a]" : "text-[#888]",
+              "rounded-full px-2 py-1 text-xs transition-colors",
+              i === index
+                ? "bg-[#FFF0E6] font-medium text-[#D14E00]"
+                : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
             )}
           >
             {formatStorage(stop.gb)}
@@ -147,7 +149,7 @@ export function StoragePlanner({
         ))}
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center gap-3 border-t-2 border-[#1a1a1a] pt-5">
+      <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-[#E8E8EC] pt-5">
         <label htmlFor="need-gb" className="text-sm">
           Know your number?
         </label>
@@ -155,20 +157,20 @@ export function StoragePlanner({
           id="need-gb"
           inputMode="decimal"
           value={needGb}
-          placeholder="e.g. 750"
+          placeholder="750"
           onChange={(event) => applyNeed(event.target.value)}
-          className="w-28 border-2 border-[#1a1a1a] bg-white px-3 py-1.5 text-sm"
+          className="w-28 rounded-[11px] border border-[#D8D8DE] bg-white px-3 py-1.5 text-sm text-[#131315] outline-none placeholder:text-[#A0A0A5] focus:border-[#FF6600] focus:ring-2 focus:ring-[#FF6600]/10"
         />
-        <span className="text-sm text-[#666]">GB</span>
+        <span className="text-sm text-[#6E6E73]">GB</span>
         {needGb && !overLargest ? (
-          <span className="font-mono text-xs text-[#666]">
+          <span className="text-xs text-[#6E6E73]">
             {formatStorage(target.gb)} is the smallest that fits
           </span>
         ) : null}
       </div>
 
       {overLargest ? (
-        <p className="mt-4 border-2 border-[#1a1a1a] bg-[#FFEDD5] px-4 py-3 text-sm">
+        <p className="mt-4 rounded-[11px] bg-[#FFF9EC] px-4 py-3 text-sm text-[#74521D]">
           That's past our largest plan. Enterprise bills by usage at 5¢ per
           GB-month.{" "}
           {onContactSales ? (
@@ -184,7 +186,7 @@ export function StoragePlanner({
       ) : null}
 
       {overflows ? (
-        <p className="mt-4 border-2 border-[#1a1a1a] bg-[#FFEDD5] px-4 py-3 text-sm">
+        <p className="mt-4 rounded-[11px] bg-[#FFF9EC] px-4 py-3 text-sm text-[#74521D]">
           You're storing {formatBytes(usedBytes)}. Delete something or pick a
           bigger size before moving to {formatStorage(target.gb)}.
         </p>
@@ -206,12 +208,12 @@ export function StoragePlanner({
               : `Switch to ${target.label}`}
         </Button>
         {target.plan === "free" && !isCurrent ? (
-          <span className="text-sm text-[#666]">
-            Cancel your plan to drop to Free.
+          <span className="text-sm text-[#6E6E73]">
+            Cancel to choose Free.
           </span>
         ) : (
-          <span className="text-sm text-[#666]">
-            Payment happens on Stripe. Nothing changes until it clears.
+          <span className="text-sm text-[#6E6E73]">
+            Stripe checkout
           </span>
         )}
       </div>

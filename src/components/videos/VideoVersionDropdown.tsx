@@ -137,44 +137,41 @@ export function VideoVersionDropdown({
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          // Match the rest of the top-bar boxed buttons (h-9, 2px
-          // border, brutalist drop-shadow). When open we invert the
-          // surface but keep the shadow so it doesn't shift the row.
-          "inline-flex items-center gap-1.5 h-9 px-3 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-all shadow-[4px_4px_0px_0px_var(--shadow-color)] active:translate-y-[2px] active:translate-x-[2px]",
+          "inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors",
           open
-            ? "bg-[#1a1a1a] text-[#f0f0e8]"
-            : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)]",
+            ? "border-[#D8D8DE] bg-[#FFF0E6] text-[#D14E00]"
+            : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
         )}
         title="Switch between versions of this video"
       >
         <History className="h-3.5 w-3.5" />
-        <span className="normal-case font-mono">
+        <span>
           v{me?.versionNumber ?? 1}
         </span>
         {onCurrent ? (
           <span
             className={cn(
-              "text-[9px] font-bold uppercase tracking-wider px-1 py-0.5",
-              open ? "bg-[#f0f0e8] text-[#1a1a1a]" : "bg-[#FF6600] text-[#f0f0e8]",
+              "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+              open ? "bg-white text-[#D14E00]" : "bg-[#FFF0E6] text-[#D14E00]",
             )}
           >
-            current
+            Current
           </span>
         ) : null}
-        <span className="text-[#888]">·</span>
-        <span className="text-[11px] font-mono">
+        <span className="text-[#A0A0A5]">·</span>
+        <span className="text-[11px] text-[#6E6E73]">
           {versions.length} version{versions.length === 1 ? "" : "s"}
         </span>
         <ChevronDown className="h-3.5 w-3.5" />
       </button>
 
       {open ? (
-        <div className="absolute right-0 mt-1 z-40 min-w-[360px] max-w-[460px] bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)]">
-          <header className="bg-[#1a1a1a] text-[#f0f0e8] px-3 py-2 flex items-center justify-between">
-            <div className="text-xs font-black uppercase tracking-wider">
+        <div className="absolute right-0 z-40 mt-2 min-w-[360px] max-w-[460px] overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
+          <header className="flex items-center justify-between border-b border-[#E8E8EC] px-3 py-2.5 text-[#131315]">
+            <div className="text-[13px] font-semibold">
               Versions
             </div>
-            <div className="text-[10px] font-mono opacity-60">
+            <div className="font-mono text-[11px] text-[#A0A0A5]">
               {versions.length} total
             </div>
           </header>
@@ -187,39 +184,39 @@ export function VideoVersionDropdown({
                 <li
                   key={v._id}
                   className={cn(
-                    "px-3 py-2.5 border-b border-[#ccc] last:border-b-0 cursor-pointer hover:bg-[#e8e8e0]",
-                    isMe ? "bg-[#e8e8e0]" : "",
+                    "cursor-pointer border-b border-[#F1F1F3] px-3 py-2.5 last:border-b-0 hover:bg-[#FAFAFA]",
+                    isMe ? "bg-[#FFF0E6]" : "",
                   )}
                   onClick={() => handleSwitch(v._id as Id<"videos">)}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-bold text-[#1a1a1a]">
+                    <span className="text-sm font-semibold text-[#131315]">
                       v{v.versionNumber}
                     </span>
                     {isCurrent ? (
-                      <span className="text-[9px] font-bold uppercase tracking-wider bg-[#FF6600] text-[#f0f0e8] px-1 py-0.5 inline-flex items-center gap-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[#FFF0E6] px-1.5 py-0.5 text-[10px] font-medium text-[#D14E00]">
                         <Star className="h-2.5 w-2.5 fill-current" />
-                        current
+                        Current
                       </span>
                     ) : null}
                     {isMe ? (
-                      <span className="text-[9px] font-bold uppercase tracking-wider bg-[#1a1a1a] text-[#f0f0e8] px-1 py-0.5">
-                        viewing
+                      <span className="rounded-full bg-[#F1F1F3] px-1.5 py-0.5 text-[10px] font-medium text-[#6E6E73]">
+                        Viewing
                       </span>
                     ) : null}
                     {v.status !== "ready" ? (
-                      <span className="text-[9px] font-mono uppercase text-[#b45309]">
+                      <span className="rounded-full bg-[#FFF9EC] px-1.5 py-0.5 text-[10px] font-medium capitalize text-[#74521D]">
                         {v.status}
                       </span>
                     ) : null}
-                    <span className="ml-auto text-[10px] font-mono text-[#888]">
+                    <span className="ml-auto font-mono text-[11px] text-[#A0A0A5]">
                       {formatRelativeTime(v._creationTime)}
                     </span>
                   </div>
-                  <div className="text-xs text-[#1a1a1a] truncate mt-0.5">
+                  <div className="mt-0.5 truncate text-xs text-[#131315]">
                     {v.versionLabel || v.title}
                   </div>
-                  <div className="text-[10px] text-[#888] truncate mt-0.5">
+                  <div className="mt-0.5 truncate text-[11px] text-[#6E6E73]">
                     by {v.uploaderName}
                   </div>
                 </li>
@@ -228,25 +225,25 @@ export function VideoVersionDropdown({
           </ul>
 
           {canEdit ? (
-            <footer className="px-3 py-2 border-t-2 border-[#1a1a1a] bg-[#e8e8e0] flex flex-col gap-1.5">
+            <footer className="flex flex-col gap-1.5 border-t border-[#E8E8EC] bg-[#FAFAFA] px-3 py-2.5">
               {!onCurrent ? (
                 <button
                   type="button"
                   onClick={() => void handleMarkCurrent()}
                   disabled={busy !== null}
-                  className="inline-flex items-center justify-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] bg-[#FF6600] text-[#f0f0e8] text-[10px] font-bold uppercase tracking-wider hover:bg-[#FF7A1F]"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-full bg-[#131315] px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                   <Check className="h-3 w-3" />
                   {busy === "current"
                     ? "Marking…"
-                    : `Make v${me?.versionNumber} the current version`}
+                    : `Make v${me?.versionNumber} current`}
                 </button>
               ) : null}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={busy !== null}
-                className="inline-flex items-center justify-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-[10px] font-bold uppercase tracking-wider hover:bg-[#1a1a1a] hover:text-[#f0f0e8]"
+                className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3 py-2 text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] disabled:opacity-50"
               >
                 {busy === "upload" ? (
                   <>
@@ -256,7 +253,7 @@ export function VideoVersionDropdown({
                 ) : (
                   <>
                     <Plus className="h-3 w-3" />
-                    Upload new version
+                    New version
                   </>
                 )}
               </button>

@@ -3,7 +3,10 @@ import { internalMutation, internalQuery, mutation, query, MutationCtx, QueryCtx
 import { getUser, identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { Doc, Id } from "./_generated/dataModel";
 import { generateUniqueToken } from "./security";
-import { resolveActiveShareGrant } from "./shareAccess";
+import {
+  isShareVideoUnlocked,
+  resolveActiveShareGrant,
+} from "./shareAccess";
 import { resolveBundleVideos, resolveBundleFolders } from "./shareBundles";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
 import { recordItemVersion } from "./itemVersions";
@@ -542,6 +545,11 @@ export const getByShareGrant = query({
     if (!video || video.deletedAt || video.status !== "ready") {
       return null;
     }
+    const unlocked = isShareVideoUnlocked(
+      resolved.grant,
+      resolved.shareLink,
+      video._id,
+    );
 
     return {
       video: {
@@ -560,7 +568,9 @@ export const getByShareGrant = query({
       // Paywall context so callers serving full-res playback can fail-closed:
       // a paywalled share must NEVER come back through an ungated public path.
       paywall: resolved.shareLink.paywall ?? null,
-      grantPaidAt: resolved.grant.paidAt ?? null,
+      grantPaidAt: unlocked
+        ? (resolved.grant.paidAt ?? resolved.grant.createdAt)
+        : null,
     };
   },
 });
@@ -584,11 +594,18 @@ export const getByShareGrantForDownload = query({
     if (!video || video.deletedAt) {
       return null;
     }
+    const unlocked = isShareVideoUnlocked(
+      resolved.grant,
+      resolved.shareLink,
+      video._id,
+    );
 
     return {
       allowDownload: resolved.shareLink.allowDownload,
       grantExpiresAt: resolved.grant.expiresAt,
-      grantPaidAt: resolved.grant.paidAt ?? null,
+      grantPaidAt: unlocked
+        ? (resolved.grant.paidAt ?? resolved.grant.createdAt)
+        : null,
       paywall: resolved.shareLink.paywall ?? null,
       video: {
         _id: video._id,
@@ -2353,15 +2370,23 @@ export const getByShareGrantWithPaywall = query({
       args.itemVideoId,
     );
     if (!video) return null;
+    const unlocked = isShareVideoUnlocked(
+      resolved.grant,
+      resolved.shareLink,
+      video._id,
+    );
     return {
       grant: {
         _id: resolved.grant._id,
-        paidAt: resolved.grant.paidAt ?? null,
+        paidAt: unlocked
+          ? (resolved.grant.paidAt ?? resolved.grant.createdAt)
+          : null,
         expiresAt: resolved.grant.expiresAt,
       },
       shareLink: {
         _id: resolved.shareLink._id,
         paywall: resolved.shareLink.paywall ?? null,
+        itemPrices: resolved.shareLink.itemPrices ?? null,
         clientEmail: resolved.shareLink.clientEmail ?? null,
         clientLabel: resolved.shareLink.clientLabel ?? null,
         allowDownload: resolved.shareLink.allowDownload,
@@ -2427,6 +2452,8 @@ export const getShareSummaryByGrant = query({
         allowDownload: resolved.shareLink.allowDownload,
         grantExpiresAt: resolved.grant.expiresAt,
         grantPaidAt: resolved.grant.paidAt ?? null,
+        unlockedVideoIds: resolved.grant.unlockedVideoIds ?? [],
+        itemPrices: resolved.shareLink.itemPrices ?? null,
       };
     }
 
@@ -2506,6 +2533,8 @@ export const getShareSummaryByGrant = query({
         allowDownload: resolved.shareLink.allowDownload,
         grantExpiresAt: resolved.grant.expiresAt,
         grantPaidAt: resolved.grant.paidAt ?? null,
+        unlockedVideoIds: resolved.grant.unlockedVideoIds ?? [],
+        itemPrices: resolved.shareLink.itemPrices ?? null,
       };
     }
 

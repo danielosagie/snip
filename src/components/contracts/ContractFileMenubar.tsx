@@ -58,7 +58,7 @@ export function ContractFileMenubar(props: Actions) {
 
 function renderMenubar(props: Actions) {
   return (
-    <div className="flex items-center gap-0 px-4 sm:px-6 py-1 border-b-2 border-[#1a1a1a] bg-[#f0f0e8]">
+    <div className="flex items-center gap-0 border-b border-[#E8E8EC] bg-white px-4 py-1 sm:px-6">
       <FileMenuButton label="File">
         <Item onClick={props.onUploadDocx} disabled={props.readOnly}>
           Upload .docx…
@@ -273,7 +273,7 @@ function FileMenuButton({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center px-2.5 py-1 text-[13px] font-mono text-[#1a1a1a] hover:bg-[#e8e8e0] data-[state=open]:bg-[#1a1a1a] data-[state=open]:text-[#f0f0e8]"
+          className="inline-flex items-center rounded-full px-2.5 py-1 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] data-[state=open]:bg-[#FFF0E6] data-[state=open]:text-[#D14E00]"
         >
           {label}
         </button>
@@ -307,12 +307,12 @@ function Item({
       disabled={disabled}
       className={cn(
         "flex items-center justify-between gap-3",
-        danger ? "text-[#dc2626] focus:text-[#dc2626]" : "",
+        danger ? "text-[#D8434F] focus:text-[#D8434F]" : "",
       )}
     >
       <span>{children}</span>
       {shortcut ? (
-        <span className="text-[10px] font-mono text-[#888]">{shortcut}</span>
+        <span className="text-[10px] text-[#A0A0A5]">{shortcut}</span>
       ) : null}
     </DropdownMenuItem>
   );

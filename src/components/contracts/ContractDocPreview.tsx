@@ -119,14 +119,14 @@ export function ContractDocPreview({
   }, [editor, onEditorReady]);
 
   return (
-    <div className="min-h-full px-0 py-3 sm:px-10 sm:py-8 flex flex-col items-center bg-[#e8e8e0]">
+    <div className="flex min-h-full flex-col items-center bg-[#FAFAFA] px-0 py-3 sm:px-10 sm:py-8">
       {/* Paper page — sized to ~A4 / Letter ratio with generous
           margins. The shadow + 2px border gives it the brutalist
           page-on-desk look without abandoning the rest of the
           palette. */}
       <article
         className={cn(
-          "w-full max-w-[816px] bg-[#fffefa] text-[#1a1a1a] border-y-2 border-[#1a1a1a] shadow-none sm:border-2 sm:shadow-[6px_6px_0px_0px_var(--shadow-color)]",
+          "w-full max-w-[816px] rounded-[14px] border border-[#E8E8EC] bg-white text-[#131315]",
           // Page padding (1 inch = 96px) — visible on top + bottom
           // so the user can see when content fills the page.
           "px-5 py-8 sm:px-[96px] sm:py-[96px]",
@@ -136,7 +136,7 @@ export function ContractDocPreview({
         // long-form doc.
         style={{
           fontFamily:
-            'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+            '"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
           lineHeight: 1.6,
           fontSize: "14px",
         }}
@@ -145,7 +145,7 @@ export function ContractDocPreview({
           .snip-contract-doc h1, .snip-contract-doc h2, .snip-contract-doc h3 {
             font-weight: 700;
             letter-spacing: -0.01em;
-            color: #1a1a1a;
+            color: #131315;
             margin-top: 1.4em;
             margin-bottom: 0.4em;
           }
@@ -162,7 +162,7 @@ export function ContractDocPreview({
           .snip-contract-doc strong { font-weight: 700; }
           .snip-contract-doc em { font-style: italic; }
           .snip-contract-doc .is-empty:first-child::before {
-            color: #8a8a82;
+            color: #A0A0A5;
             content: attr(data-placeholder);
             float: left;
             height: 0;

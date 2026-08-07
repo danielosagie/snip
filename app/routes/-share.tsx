@@ -615,7 +615,7 @@ export default function SharePage() {
         ok: "",
         disabled: "Payments aren't configured on this deployment.",
         noPaywall: "This link is not paywalled.",
-        alreadyPaid: "Already unlocked — reloading…",
+        alreadyPaid: "Already unlocked. Reloading…",
         teamNotConnected: "The agency hasn't connected Stripe yet.",
         invalidGrant: "Session expired. Please reload.",
       };
@@ -795,9 +795,9 @@ export default function SharePage() {
 
   if (isBootstrappingShare) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA]">
         <DelayedAppear>
-          <div className="text-[#888]">Opening…</div>
+          <div className="text-[#6E6E73]">Opening…</div>
         </DelayedAppear>
       </div>
     );
@@ -805,16 +805,16 @@ export default function SharePage() {
 
   if (shareInfo.status === "missing" || shareInfo.status === "expired") {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
-              <AlertCircle className="h-6 w-6 text-[#dc2626]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
+              <AlertCircle className="h-6 w-6 text-[#8A2B34]" />
             </div>
             <CardTitle>Link expired or invalid</CardTitle>
             <CardDescription>
               This link is no longer valid. Ask whoever sent it to share a fresh
-              one — it only takes them a second.
+              one. It only takes them a second.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -834,15 +834,15 @@ export default function SharePage() {
   // automatically the moment Mux finishes — no reload needed.
   if (shareInfo.status === "processing") {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#888]/40 border-t-[#1a1a1a]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#E8E8EC] border-t-[#131315]" />
             </div>
             <CardTitle>Still processing</CardTitle>
             <CardDescription>
-              This video is still being prepared. The link works — it'll start
+              This video is still being prepared. The link works, and it&apos;ll start
               playing here automatically as soon as it's ready.
             </CardDescription>
           </CardHeader>
@@ -853,11 +853,11 @@ export default function SharePage() {
 
   if (shareInfo.status === "requiresPassword" && !grantToken) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <Lock className="h-6 w-6 text-[#888]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <Lock className="h-6 w-6 text-[#6E6E73]" />
             </div>
             <CardTitle>Password required</CardTitle>
             <CardDescription>
@@ -880,7 +880,7 @@ export default function SharePage() {
                 autoFocus
               />
               {passwordError && (
-                <p className="text-sm text-[#dc2626]">Incorrect password</p>
+                <p className="text-sm text-[#8A2B34]">Incorrect password</p>
               )}
               <Button type="submit" className="w-full" disabled={!passwordInput || isRequestingGrant}>
                 {isRequestingGrant ? "Verifying…" : "View video"}
@@ -897,11 +897,11 @@ export default function SharePage() {
   // reactively once they sign in, so a match flips this away automatically.
   if (shareInfo.status === "requiresAccess" && !grantToken) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <Lock className="h-6 w-6 text-[#888]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <Lock className="h-6 w-6 text-[#6E6E73]" />
             </div>
             <CardTitle>Access required</CardTitle>
             <CardDescription>
@@ -930,16 +930,16 @@ export default function SharePage() {
   // state if there are no ready items.
   if (!isBundle && !videoData?.video) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <Video className="h-6 w-6 text-[#888]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <Video className="h-6 w-6 text-[#6E6E73]" />
             </div>
             <CardTitle>Video not available</CardTitle>
             <CardDescription>
               This video isn't available right now. If the link is brand new it
-              may still be processing — try again in a minute.
+              may still be processing. Try again in a minute.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -982,11 +982,11 @@ export default function SharePage() {
 
   if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
-              <ShieldCheck className="h-6 w-6 text-[#dc2626]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
+              <ShieldCheck className="h-6 w-6 text-[#8A2B34]" />
             </div>
             <CardTitle>Automation blocked</CardTitle>
             <CardDescription>
@@ -1000,13 +1000,13 @@ export default function SharePage() {
   }
 
   return (
-    <div className="surface-client min-h-screen bg-[#f0f0e8]">
-      <header className="bg-[#f0f0e8] border-b-2 border-[#1a1a1a] px-6 py-4">
+    <div className="min-h-screen bg-[#FAFAFA] text-[#131315]">
+      <header className="border-b border-[#E8E8EC] bg-white px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <Link
             preload="intent"
             to="/"
-            className="text-[#888] hover:text-[#1a1a1a] text-sm flex items-center gap-2 font-bold"
+            className="flex items-center gap-2 text-sm font-semibold text-[#6E6E73] transition-colors hover:text-[#131315]"
           >
             snip
           </Link>
@@ -1021,13 +1021,13 @@ export default function SharePage() {
             disabled={!grantToken || sheetItems.length === 0}
             title={
               paywall && !isPaid
-                ? "Preview free — pay once to unlock downloads"
+                ? "Preview free. Pay once to unlock downloads."
                 : undefined
             }
           >
             <Download className="h-4 w-4" />
             {paywall && !isPaid
-              ? `Download — ${formatPrice(paywall.priceCents, paywall.currency)}`
+              ? `Download ${formatPrice(paywall.priceCents, paywall.currency)}`
               : "Download"}
           </Button>
         </div>
@@ -1037,7 +1037,7 @@ export default function SharePage() {
         {downloadError || checkoutError ? (
           <div
             role="alert"
-            className="border-2 border-[#dc2626] bg-[#dc2626]/10 px-4 py-3 text-sm text-[#7f1d1d]"
+            className="rounded-[11px] bg-[#FFF5F5] px-4 py-3 text-sm text-[#8A2B34]"
           >
             {downloadError ?? checkoutError}
           </div>
@@ -1054,9 +1054,9 @@ export default function SharePage() {
               isOwner={isOwner}
               onCoverChanged={() => setCoverReload((n) => n + 1)}
             />
-            <div className="flex items-center gap-4 text-sm text-[#888]">
+            <div className="flex items-center gap-4 text-sm text-[#6E6E73]">
               {video?.title ? (
-                <span className="font-mono text-[#1a1a1a]">{video.title}</span>
+                <span className="text-[#131315]">{video.title}</span>
               ) : null}
               {comments && <span>{comments.length} threads</span>}
               <VideoWatchers watchers={watchers} className="ml-auto" />
@@ -1064,13 +1064,13 @@ export default function SharePage() {
           </div>
         ) : (
           <div>
-            <h1 className="text-2xl font-black text-[#1a1a1a]">{headerTitle}</h1>
+            <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[#131315]">{headerTitle}</h1>
             {headerDescription ? (
-              <p className="text-[#888] mt-1">{headerDescription}</p>
+              <p className="mt-1 text-[#6E6E73]">{headerDescription}</p>
             ) : null}
-            <div className="flex items-center gap-4 mt-2 text-sm text-[#888]">
+            <div className="mt-2 flex items-center gap-4 text-sm text-[#6E6E73]">
               {video?.duration ? (
-                <span className="font-mono">{formatDuration(video.duration)}</span>
+                <span>{formatDuration(video.duration)}</span>
               ) : null}
               {comments && <span>{comments.length} threads</span>}
               <VideoWatchers watchers={watchers} className="ml-auto" />
@@ -1079,13 +1079,13 @@ export default function SharePage() {
         )}
 
         {paywall && isOwner && isVideoPlayback ? (
-          <section className="border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-5 flex flex-col gap-3">
+          <section className="flex flex-col gap-3 rounded-[14px] border border-[#26262A] bg-[#161618] p-5 text-white">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="text-xs font-mono uppercase tracking-widest opacity-80">
-                  Owner preview — payment not required
+                <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
+                  Owner preview, payment not required
                 </div>
-                <div className="font-black text-xl tracking-tight">
+                <div className="text-xl font-semibold tracking-[-0.02em]">
                   {isPreviewMode
                     ? "Watermarked preview ready"
                     : isPreviewPending
@@ -1097,19 +1097,19 @@ export default function SharePage() {
                           : "Loading"}
                 </div>
                 {isPreviewUnavailable && playbackSession?.previewError ? (
-                  <div className="text-xs font-mono opacity-80 mt-1">
+                  <div className="mt-1 text-xs text-[#A0A0A5]">
                     {playbackSession.previewError}
                   </div>
                 ) : null}
               </div>
-              <div className="flex items-center gap-0 border-2 border-[#f0f0e8] self-start">
+              <div className="flex items-center self-start rounded-full border border-[#26262A] bg-[#0A0A0B] p-0.5">
                 <button
                   type="button"
                   onClick={() => setViewAs("client")}
-                  className={`px-3 py-2 text-xs font-bold uppercase tracking-widest ${
+                  className={`rounded-full px-3 py-2 text-xs font-medium transition-colors ${
                     viewAs === "client"
-                      ? "bg-[#f0f0e8] text-[#1a1a1a]"
-                      : "text-[#f0f0e8] hover:bg-[#333]"
+                      ? "bg-white text-[#131315]"
+                      : "text-[#A0A0A5] hover:bg-[#26262A] hover:text-white"
                   }`}
                 >
                   Client (watermarked)
@@ -1117,10 +1117,10 @@ export default function SharePage() {
                 <button
                   type="button"
                   onClick={() => setViewAs("owner")}
-                  className={`px-3 py-2 text-xs font-bold uppercase tracking-widest border-l-2 border-[#f0f0e8] ${
+                  className={`rounded-full px-3 py-2 text-xs font-medium transition-colors ${
                     viewAs === "owner"
-                      ? "bg-[#f0f0e8] text-[#1a1a1a]"
-                      : "text-[#f0f0e8] hover:bg-[#333]"
+                      ? "bg-white text-[#131315]"
+                      : "text-[#A0A0A5] hover:bg-[#26262A] hover:text-white"
                   }`}
                 >
                   Full-res
@@ -1135,15 +1135,15 @@ export default function SharePage() {
                   size="sm"
                   onClick={() => void handleRetryPreview()}
                   disabled={isRetryingPreview || !grantToken}
-                  className="border-[#f0f0e8] text-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
+                  className="border-[#26262A] bg-[#161618] text-white hover:bg-[#26262A] hover:text-white"
                 >
                   {isRetryingPreview ? "Retrying…" : "Retry preview generation"}
                 </Button>
                 {retryError ? (
-                  <span className="text-[#ffd1d1]">{retryError}</span>
+                  <span className="text-[#D8434F]">{retryError}</span>
                 ) : (
-                  <span className="opacity-70">
-                    Re-runs the watermark + Mux ingest pipeline for this link.
+                  <span className="text-[#A0A0A5]">
+                    Runs the watermark and Mux ingest pipeline again.
                   </span>
                 )}
               </div>
@@ -1157,9 +1157,9 @@ export default function SharePage() {
             export, Canva-style. */}
 
         {paywall && isPaid ? (
-          <section className="border-2 border-[#1a1a1a] bg-[#FFB380] text-[#1a1a1a] px-5 py-3 flex items-center gap-2 font-bold">
+          <section className="flex items-center gap-2 rounded-[11px] bg-[#F2FBF5] px-5 py-3 font-medium text-[#225B36]">
             <ShieldCheck className="h-4 w-4" />
-            Paid — full-resolution unlocked
+            Paid, full-resolution unlocked
           </section>
         ) : null}
 
@@ -1167,7 +1167,7 @@ export default function SharePage() {
           ref={playerSectionRef}
           className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 lg:items-start"
         >
-        <div className="relative border-2 border-[#1a1a1a] overflow-hidden">
+        <div className="relative overflow-hidden rounded-[14px] border border-[#26262A] bg-[#0A0A0B]">
           {playbackSession?.url && playbackSession.kind === "video" ? (
             <>
               <VideoPlayer
@@ -1195,7 +1195,7 @@ export default function SharePage() {
               ) : null}
             </>
           ) : playbackSession?.url && playbackSession.kind === "image" ? (
-            <div className="relative bg-[#1a1a1a]">
+            <div className="relative bg-[#0A0A0B]">
               <img
                 src={playbackSession.url}
                 alt={video?.title ?? "Shared image"}
@@ -1225,7 +1225,7 @@ export default function SharePage() {
                 className="w-full h-[80vh] bg-white"
               />
             ) : playbackSession.fileKind === "audio" && playbackSession.url ? (
-              <div className="bg-[#1a1a1a] p-8 flex items-center justify-center">
+              <div className="flex items-center justify-center bg-[#0A0A0B] p-8">
                 <audio
                   controls
                   src={playbackSession.url}
@@ -1234,23 +1234,23 @@ export default function SharePage() {
                 />
               </div>
             ) : (
-              <div className="bg-[#e8e8e0] p-10 flex flex-col items-center justify-center gap-4 text-center">
-                <div className="text-xs font-mono font-bold uppercase tracking-widest text-[#888]">
+              <div className="flex flex-col items-center justify-center gap-4 bg-[#FAFAFA] p-10 text-center">
+                <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
                   {playbackSession.fileKind === "pdf"
                     ? "PDF"
                     : playbackSession.fileKind === "text"
                       ? "Text"
                       : "File"}
                 </div>
-                <div className="text-lg font-black text-[#1a1a1a]">
+                <div className="text-lg font-semibold text-[#131315]">
                   {playbackSession.fileName ?? video?.title ?? "Shared file"}
                 </div>
-                <div className="text-xs text-[#888] font-mono">
+                <div className="text-xs text-[#6E6E73]">
                   {playbackSession.contentType ?? "application/octet-stream"}
                 </div>
                 {playbackSession.mode === "locked" ? (
-                  <p className="text-sm text-[#1a1a1a] max-w-md">
-                    This file is locked until paid — use the Download button
+                  <p className="max-w-md text-sm text-[#131315]">
+                    This file is locked until paid. Use the Download button
                     in the header to pay and unlock it.
                   </p>
                 ) : downloadAllowed ? (
@@ -1259,14 +1259,14 @@ export default function SharePage() {
                     Download
                   </Button>
                 ) : (
-                  <p className="text-sm text-[#888] max-w-md">
+                  <p className="max-w-md text-sm text-[#6E6E73]">
                     The owner disabled downloads on this share link.
                   </p>
                 )}
               </div>
             )
           ) : (
-            <div className="relative aspect-video overflow-hidden rounded-xl border border-zinc-800/80 bg-black shadow-[0_10px_40px_rgba(0,0,0,0.45)]">
+            <div className="relative aspect-video overflow-hidden rounded-[14px] border border-[#26262A] bg-[#0A0A0B]">
               {(playbackSession?.posterUrl || video?.thumbnailUrl?.startsWith("http")) ? (
                 <img
                   src={playbackSession?.posterUrl ?? video?.thumbnailUrl ?? ""}
@@ -1284,14 +1284,14 @@ export default function SharePage() {
                       delivery.
                     </p>
                     {isOwner && playbackSession?.previewError ? (
-                      <p className="text-xs font-mono text-white/70 max-w-sm break-all">
+                      <p className="max-w-sm break-all text-xs text-white/70">
                         {playbackSession.previewError}
                       </p>
                     ) : null}
                     {paywall && !isPaid ? (
                       <p className="text-xs text-white/60 max-w-sm">
-                        You can still pay above — the full-resolution video
-                        unlocks immediately and doesn’t depend on the preview.
+                        You can still pay above. The full-resolution video
+                        unlocks immediately and doesn&apos;t depend on the preview.
                       </p>
                     ) : (
                       <p className="text-xs text-white/60 max-w-sm">
@@ -1306,8 +1306,8 @@ export default function SharePage() {
                     <p className="text-sm font-medium text-white/85">
                       {isPreviewPending
                         ? previewTakingLong
-                          ? "Still preparing the watermarked preview — this one’s taking longer than usual."
-                          : "Preparing watermarked preview… this usually takes 30–90 seconds."
+                          ? "Still preparing the watermarked preview. This one is taking longer than usual."
+                          : "Preparing watermarked preview… this usually takes 30 to 90 seconds."
                         : playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
                     </p>
                     {isPreviewPending && paywall && !isPaid ? (
@@ -1323,16 +1323,16 @@ export default function SharePage() {
           )}
         </div>
 
-        <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-4 space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
+        <section className="space-y-4 rounded-[14px] border border-[#E8E8EC] bg-white p-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
           <div className="flex items-center justify-between">
-            <div className="flex items-center border-2 border-[#1a1a1a]">
+            <div className="flex items-center rounded-full border border-[#D8D8DE] bg-white p-0.5">
               <button
                 type="button"
                 onClick={() => setRightTab("comments")}
-                className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                   rightTab === "comments"
-                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]"
+                    ? "bg-[#FFF0E6] text-[#D14E00]"
+                    : "text-[#6E6E73] hover:bg-[#FAFAFA] hover:text-[#131315]"
                 }`}
               >
                 Comments
@@ -1340,16 +1340,16 @@ export default function SharePage() {
               <button
                 type="button"
                 onClick={() => setRightTab("info")}
-                className={`px-3 py-1 text-xs font-bold uppercase tracking-widest border-l-2 border-[#1a1a1a] ${
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                   rightTab === "info"
-                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]"
+                    ? "bg-[#FFF0E6] text-[#D14E00]"
+                    : "text-[#6E6E73] hover:bg-[#FAFAFA] hover:text-[#131315]"
                 }`}
               >
                 Info
               </button>
             </div>
-            <span className="text-xs text-[#888] font-mono">{formatTimestamp(currentTime)}</span>
+            <span className="text-xs text-[#6E6E73]">{formatTimestamp(currentTime)}</span>
           </div>
 
           {rightTab === "info" ? (
@@ -1368,7 +1368,7 @@ export default function SharePage() {
             </a>
           ) : canComment ? (
             <form onSubmit={handleSubmitComment} className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-[#666]">
+              <div className="flex items-center gap-2 text-xs text-[#6E6E73]">
                 <Clock className="h-3.5 w-3.5" />
                 Comment at {formatTimestamp(currentTime)}
               </div>
@@ -1378,26 +1378,26 @@ export default function SharePage() {
                 placeholder="Leave a comment…"
                 className="min-h-[90px]"
               />
-              {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
+              {commentError ? <p className="text-xs text-[#8A2B34]">{commentError}</p> : null}
               <Button type="submit" disabled={!commentText.trim() || isSubmittingComment}>
                 <MessageSquare className="mr-1.5 h-4 w-4" />
                 {isSubmittingComment ? "Posting…" : "Post comment"}
               </Button>
             </form>
           ) : (
-            <p className="text-xs text-[#888] border-2 border-dashed border-[#ccc] px-3 py-2">
-              You have view-only access — commenting is disabled for this link.
+            <p className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] px-3 py-2 text-xs text-[#6E6E73]">
+              You have view-only access. Commenting is disabled for this link.
             </p>
           )}
 
           {comments === undefined ? (
             <DelayedAppear>
-              <p className="text-sm text-[#888]">Loading comments…</p>
+              <p className="text-sm text-[#6E6E73]">Loading comments…</p>
             </DelayedAppear>
           ) : comments.length === 0 ? (
-            <p className="text-sm text-[#888]">
+            <p className="text-sm text-[#6E6E73]">
               {canComment && isUserLoaded && user
-                ? "No comments yet — yours will pin to the exact frame you're watching."
+                ? "No comments yet. Yours will pin to the exact frame you're watching."
                 : "No comments yet."}
             </p>
           ) : (
@@ -1411,8 +1411,8 @@ export default function SharePage() {
                     key={comment._id}
                     id={`share-comment-${comment._id}`}
                     className={cn(
-                      "border-2 bg-[#f0f0e8] p-3 transition-colors",
-                      threadActive ? "border-[#C2410C] bg-[#FFEDD5]" : "border-[#1a1a1a]",
+                      "rounded-[11px] border border-[#E8E8EC] bg-white p-3 transition-colors",
+                      threadActive && "bg-[#FFF0E6]",
                     )}
                   >
                     <div
@@ -1428,10 +1428,10 @@ export default function SharePage() {
                       }}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
+                        <div className="text-sm font-semibold text-[#131315]">{comment.userName}</div>
                         <button
                           type="button"
-                          className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                          className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                           onClick={(e) => {
                             e.stopPropagation();
                             focusComment(comment._id, comment.timestampSeconds, { play: true });
@@ -1440,12 +1440,12 @@ export default function SharePage() {
                           {formatTimestamp(comment.timestampSeconds)}
                         </button>
                       </div>
-                      <p className="text-sm text-[#1a1a1a] mt-1 whitespace-pre-wrap">{comment.text}</p>
-                      <p className="text-[11px] text-[#888] mt-1">{formatRelativeTime(comment._creationTime)}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-[#131315]">{comment.text}</p>
+                      <p className="mt-1 text-[11px] text-[#6E6E73]">{formatRelativeTime(comment._creationTime)}</p>
                     </div>
 
                     {comment.replies.length > 0 ? (
-                      <div className="mt-3 ml-4 border-l-2 border-[#1a1a1a] pl-3 space-y-2">
+                      <div className="ml-4 mt-3 space-y-2 border-l border-[#F1F1F3] pl-3">
                         {comment.replies.map((reply) => {
                           const replyActive = activeCommentId === reply._id;
                           return (
@@ -1456,7 +1456,7 @@ export default function SharePage() {
                               tabIndex={0}
                               className={cn(
                                 "text-sm cursor-pointer -ml-1 pl-1 transition-colors",
-                                replyActive && "bg-[#FFEDD5]",
+                                replyActive && "rounded-[10px] bg-[#FFF0E6]",
                               )}
                               onClick={() => focusComment(reply._id, reply.timestampSeconds)}
                               onKeyDown={(e) => {
@@ -1467,10 +1467,10 @@ export default function SharePage() {
                               }}
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
+                                <span className="font-semibold text-[#131315]">{reply.userName}</span>
                                 <button
                                   type="button"
-                                  className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                                  className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     focusComment(reply._id, reply.timestampSeconds, { play: true });
@@ -1479,7 +1479,7 @@ export default function SharePage() {
                                   {formatTimestamp(reply.timestampSeconds)}
                                 </button>
                               </div>
-                              <p className="text-[#1a1a1a] whitespace-pre-wrap">{reply.text}</p>
+                              <p className="whitespace-pre-wrap text-[#131315]">{reply.text}</p>
                             </div>
                           );
                         })}
@@ -1504,7 +1504,7 @@ export default function SharePage() {
                             autoFocus
                           />
                           {replyError ? (
-                            <p className="text-xs text-[#dc2626]">{replyError}</p>
+                            <p className="text-xs text-[#8A2B34]">{replyError}</p>
                           ) : null}
                           <div className="flex items-center gap-2">
                             <Button
@@ -1531,7 +1531,7 @@ export default function SharePage() {
                       ) : (
                         <button
                           type="button"
-                          className="mt-2 text-xs font-bold text-[#888] hover:text-[#C2410C]"
+                          className="mt-2 text-xs font-medium text-[#6E6E73] transition-colors hover:text-[#D14E00]"
                           onClick={() => {
                             setReplyingToId(comment._id);
                             setReplyText("");
@@ -1565,10 +1565,10 @@ export default function SharePage() {
         ) : null}
       </main>
 
-      <footer className="border-t-2 border-[#1a1a1a] px-6 py-4 mt-8">
-        <div className="max-w-6xl mx-auto text-center text-sm text-[#888]">
+      <footer className="mt-8 border-t border-[#E8E8EC] bg-white px-6 py-4">
+        <div className="mx-auto max-w-6xl text-center text-sm text-[#6E6E73]">
           Shared via{" "}
-          <Link to="/" preload="intent" className="text-[#1a1a1a] hover:text-[#FF6600] font-bold">
+          <Link to="/" preload="intent" className="font-semibold text-[#131315] transition-colors hover:text-[#D14E00]">
             snip
           </Link>
         </div>

@@ -55,7 +55,7 @@ export function TimelineHistory({ projectId, canEdit }: Props) {
 
   if (snapshots === undefined || branches === undefined) {
     return (
-      <div className="text-sm text-[#888] py-3">Loading timeline history…</div>
+      <div className="py-3 text-sm text-[#6E6E73]">Loading timeline history…</div>
     );
   }
 
@@ -65,34 +65,29 @@ export function TimelineHistory({ projectId, canEdit }: Props) {
 
   if (snapshots.length === 0) {
     return (
-      <div className="border-2 border-[#1a1a1a] p-6 bg-[#e8e8e0]">
+      <div className="rounded-[14px] border border-[#E8E8EC] bg-white p-6">
         <div className="flex items-start gap-3">
-          <Film className="h-5 w-5 mt-0.5 text-[#888]" />
+          <Film className="mt-0.5 h-5 w-5 text-[#A0A0A5]" />
           <div className="flex-1">
-            <div className="font-black text-sm">No timeline snapshots yet</div>
-            <div className="text-xs text-[#666] mt-1">
-              Install the DaVinci Resolve plugin (
-              <code>plugins/resolve/install.sh</code>) and push a snapshot from
-              <strong> Workspace → Workflow Integrations → snip-vit</strong>.
-              Each push captures the timeline as domain-split JSON (cuts /
-              color / audio / effects / markers) so editors and colorists can
-              branch + merge without stepping on each other.
+            <div className="text-sm font-semibold text-[#131315]">No timeline snapshots yet</div>
+            <div className="mt-1 text-xs text-[#6E6E73]">
+              Push a snapshot from the Resolve plugin, or tag a milestone below.
             </div>
           </div>
         </div>
         {canEdit ? (
-          <div className="mt-4 pt-3 border-t-2 border-[#1a1a1a] flex gap-2">
+          <div className="mt-4 flex gap-2 border-t border-[#E8E8EC] pt-3">
             <input
               value={tagMessage}
               onChange={(e) => setTagMessage(e.target.value)}
               placeholder="Or tag a manual milestone…"
-              className="flex-1 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-sm"
+              className="flex-1 rounded-[11px] border border-[#D8D8DE] bg-white px-3 py-2 text-sm text-[#131315] outline-none placeholder:text-[#A0A0A5] focus:border-[#FF6600] focus:ring-2 focus:ring-[#FF6600]/10"
             />
             <button
               type="button"
               onClick={() => void handleTag()}
               disabled={!tagMessage.trim() || tagging}
-              className="px-3 py-1 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] text-xs font-bold uppercase tracking-wider disabled:opacity-40"
+              className="rounded-full bg-[#131315] px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               {tagging ? "Tagging…" : "Tag"}
             </button>
@@ -103,14 +98,14 @@ export function TimelineHistory({ projectId, canEdit }: Props) {
   }
 
   return (
-    <div className="border-2 border-[#1a1a1a]">
+    <div className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
       <header
-        className="px-3 py-2 border-b-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] flex items-center justify-between gap-2"
+        className="flex items-center justify-between gap-2 border-b border-[#E8E8EC] bg-white px-3 py-2.5"
       >
-        <div className="flex items-center gap-2 font-black text-xs uppercase tracking-wider">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-[#131315]">
           <Film className="h-3.5 w-3.5" />
           Timeline history
-          <span className="font-mono font-normal opacity-60">
+          <span className="text-xs font-normal text-[#A0A0A5]">
             {snapshots.length} snapshot{snapshots.length === 1 ? "" : "s"}
           </span>
         </div>
@@ -121,33 +116,33 @@ export function TimelineHistory({ projectId, canEdit }: Props) {
         />
       </header>
 
-      <ul className="divide-y divide-[#ccc] max-h-[480px] overflow-y-auto">
+      <ul className="max-h-[480px] divide-y divide-[#F1F1F3] overflow-y-auto">
         {filtered.map((s, i) => (
           <li
             key={s._id}
-            className="px-3 py-2.5 hover:bg-[#e8e8e0] transition-colors flex items-start gap-3"
+            className="flex items-start gap-3 px-3 py-2.5 transition-colors hover:bg-[#FAFAFA]"
           >
             <div className="flex-shrink-0 mt-0.5">
               {s.source === "resolve" ? (
                 <Film className="h-4 w-4 text-[#FF6600]" />
               ) : s.source === "premiere" ? (
-                <Box className="h-4 w-4 text-[#b45309]" />
+                <Box className="h-4 w-4 text-[#74521D]" />
               ) : (
-                <Sparkles className="h-4 w-4 text-[#888]" />
+                <Sparkles className="h-4 w-4 text-[#A0A0A5]" />
               )}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-bold text-sm text-[#1a1a1a] truncate">
+                <span className="truncate text-sm font-medium text-[#131315]">
                   {s.message}
                 </span>
                 {i === 0 ? (
-                  <span className="text-[9px] font-mono font-bold uppercase bg-[#FF6600] text-[#f0f0e8] px-1.5 py-0.5">
-                    HEAD
+                  <span className="rounded-full bg-[#FFF0E6] px-1.5 py-0.5 text-[10px] font-medium text-[#D14E00]">
+                    Head
                   </span>
                 ) : null}
               </div>
-              <div className="flex items-center gap-2 mt-0.5 text-[10px] font-mono text-[#666]">
+              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[#6E6E73]">
                 <span className="inline-flex items-center gap-1">
                   <GitBranch className="h-3 w-3" />
                   {s.branch}
@@ -170,7 +165,7 @@ export function TimelineHistory({ projectId, canEdit }: Props) {
                 ) : null}
               </div>
             </div>
-            <div className="text-[10px] font-mono text-[#888] uppercase tracking-wider flex-shrink-0">
+            <div className="flex-shrink-0 text-[11px] text-[#A0A0A5]">
               {s.source}
             </div>
           </li>
@@ -178,18 +173,18 @@ export function TimelineHistory({ projectId, canEdit }: Props) {
       </ul>
 
       {canEdit ? (
-        <div className="px-3 py-2 border-t-2 border-[#1a1a1a] bg-[#e8e8e0] flex gap-2">
+        <div className="flex gap-2 border-t border-[#E8E8EC] bg-[#FAFAFA] px-3 py-2.5">
           <input
             value={tagMessage}
             onChange={(e) => setTagMessage(e.target.value)}
-            placeholder="Tag a milestone (e.g. 'final delivery v3 approved')"
-            className="flex-1 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-xs"
+            placeholder="Tag a milestone"
+            className="flex-1 rounded-[11px] border border-[#D8D8DE] bg-white px-3 py-2 text-xs text-[#131315] outline-none placeholder:text-[#A0A0A5] focus:border-[#FF6600] focus:ring-2 focus:ring-[#FF6600]/10"
           />
           <button
             type="button"
             onClick={() => void handleTag()}
             disabled={!tagMessage.trim() || tagging}
-            className="px-3 py-1 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] text-[10px] font-bold uppercase tracking-wider disabled:opacity-40"
+            className="rounded-full bg-[#131315] px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             {tagging ? "Tagging…" : "Tag"}
           </button>
@@ -214,25 +209,25 @@ function BranchPicker({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1 px-2 py-1 bg-[#f0f0e8] text-[#1a1a1a] text-[10px] font-bold uppercase tracking-wider"
+        className="inline-flex items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-2.5 py-1 text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
       >
         <GitBranch className="h-3 w-3" />
-        {selected ?? "all branches"}
+        {selected ?? "All branches"}
         <ChevronDown className="h-3 w-3" />
       </button>
       {open ? (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 min-w-[180px] z-40 bg-[#f0f0e8] border-2 border-[#1a1a1a]">
+          <div className="absolute right-0 z-40 mt-2 min-w-[180px] overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-white p-1">
             <button
               type="button"
               onClick={() => {
                 onSelect(null);
                 setOpen(false);
               }}
-              className="w-full text-left px-3 py-1.5 hover:bg-[#e8e8e0] text-xs font-bold"
+              className="w-full rounded-[8px] px-3 py-1.5 text-left text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
             >
-              all branches
+              All branches
             </button>
             {branches.map((b) => (
               <button
@@ -242,10 +237,10 @@ function BranchPicker({
                   onSelect(b.branch);
                   setOpen(false);
                 }}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#e8e8e0] text-xs font-mono flex items-center justify-between"
+                className="flex w-full items-center justify-between rounded-[8px] px-3 py-1.5 text-left text-xs text-[#131315] transition-colors hover:bg-[#F1F1F3]"
               >
                 <span>{b.branch}</span>
-                <span className="text-[#888]">{b.count}</span>
+                <span className="text-[#A0A0A5]">{b.count}</span>
               </button>
             ))}
           </div>

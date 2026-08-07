@@ -25,7 +25,7 @@ const ROLE_OPTIONS: { value: ShareRole; label: string }[] = [
 ];
 
 const SELECT_CLASS =
-  "h-8 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-xs font-bold text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#C2410C]";
+  "h-9 rounded-full border border-[#D8D8DE] bg-white px-3 text-[13px] font-medium text-[#131315] focus:border-[#D14E00] focus:outline-none focus:ring-2 focus:ring-[#FFF0E6]";
 
 function Toggle({
   on,
@@ -42,11 +42,13 @@ function Toggle({
       onClick={onClick}
       disabled={disabled}
       aria-pressed={on}
-      className={`px-3 py-1 border-2 border-[#1a1a1a] font-bold text-xs disabled:opacity-50 ${
-        on ? "bg-[#FF6600] text-[#f0f0e8]" : "bg-[#e8e8e0] text-[#1a1a1a]"
+      className={`min-w-12 rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+        on
+          ? "border-transparent bg-[#FFF0E6] text-[#D14E00]"
+          : "border-[#D8D8DE] bg-white text-[#6E6E73] hover:bg-[#FAFAFA]"
       }`}
     >
-      {on ? "ON" : "OFF"}
+      {on ? "On" : "Off"}
     </button>
   );
 }
@@ -89,10 +91,10 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
   const [error, setError] = useState<string | null>(null);
 
   if (config === undefined) {
-    return <p className="text-xs text-[#888] px-1 py-2">Loading access…</p>;
+    return <p className="px-1 py-2 text-xs text-[#6E6E73]">Loading access…</p>;
   }
   if (config === null) {
-    return <p className="text-xs text-[#888] px-1 py-2">Link not found.</p>;
+    return <p className="px-1 py-2 text-xs text-[#6E6E73]">Link not found.</p>;
   }
 
   const isInvite = config.generalAccess === "invite";
@@ -113,11 +115,11 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
   };
 
   return (
-    <div className="space-y-4 border-t-2 border-[#1a1a1a] bg-[#e8e8e0] p-3">
+    <div className="space-y-4 border-t border-[#E8E8EC] bg-[#FAFAFA] p-4">
       {accessError ? (
         <div
           role="status"
-          className="rounded-xl border border-[#E8B9BD] bg-[#FFF5F5] px-3 py-2 text-sm text-[#8A2B34]"
+          className="rounded-[11px] border border-[#E8E8EC] bg-[#FFF5F5] px-3 py-2 text-sm text-[#8A2B34]"
         >
           {accessError}
         </div>
@@ -125,7 +127,7 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
 
       {/* General access */}
       <div className="space-y-1.5">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#888]">
+        <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
           General access
         </div>
         <div className="flex items-center gap-2">
@@ -145,12 +147,12 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
             <option value="invite">Invite only</option>
           </select>
           {isInvite ? (
-            <span className="flex items-center gap-1 text-xs text-[#888]">
+            <span className="flex items-center gap-1 text-xs text-[#6E6E73]">
               <Lock className="h-3.5 w-3.5" /> Restricted
             </span>
           ) : (
             <>
-              <span className="flex items-center gap-1 text-xs text-[#888]">
+              <span className="flex items-center gap-1 text-xs text-[#6E6E73]">
                 <Globe className="h-3.5 w-3.5" /> as
               </span>
               <select
@@ -174,10 +176,10 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
           )}
         </div>
         {isInvite ? (
-          <div className="flex items-center justify-between border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
+          <div className="flex items-center justify-between rounded-[11px] border border-[#E8E8EC] bg-white px-3 py-2">
             <div className="min-w-0 pr-2">
-              <div className="text-sm font-bold">Anyone in this workspace</div>
-              <div className="text-[11px] text-[#888]">
+              <div className="text-sm font-semibold text-[#131315]">Anyone in this workspace</div>
+              <div className="text-[11px] text-[#6E6E73]">
                 Teammates can open this link without an invite, as{" "}
                 {config.defaultRole}.
               </div>
@@ -197,7 +199,7 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
 
       {/* People */}
       <div className="space-y-2">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#888]">
+        <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
           People with access
         </div>
         <div className="flex items-center gap-2">
@@ -236,22 +238,22 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
             Add
           </Button>
         </div>
-        {error ? <p className="text-xs text-[#dc2626]">{error}</p> : null}
+        {error ? <p className="text-xs text-[#8A2B34]">{error}</p> : null}
 
         {config.invites.length === 0 ? (
-          <p className="text-xs text-[#888]">
+          <p className="text-xs text-[#6E6E73]">
             {isInvite
-              ? "No one's been invited yet — add people above so they can open this link."
-              : "Add people to give specific addresses a fixed role (also used if you switch to Invite only)."}
+              ? "No one has been invited. Add people above to give them access."
+              : "Add people to give specific addresses a fixed role, including if you switch to invite only."}
           </p>
         ) : (
-          <div className="divide-y-2 divide-[#1a1a1a] border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+          <div className="overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-white divide-y divide-[#F1F1F3]">
             {config.invites.map((invite) => (
               <div
                 key={invite._id}
                 className="flex items-center gap-2 px-3 py-2"
               >
-                <span className="min-w-0 flex-1 truncate text-sm text-[#1a1a1a]">
+                <span className="min-w-0 flex-1 truncate text-sm text-[#131315]">
                   {invite.email}
                 </span>
                 <select
@@ -274,7 +276,7 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-[#dc2626] hover:text-[#dc2626]"
+                  className="text-[#D8434F] hover:bg-[#FFF5F5] hover:text-[#D8434F]"
                   onClick={() => void removeInvite({ inviteId: invite._id })}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -287,12 +289,12 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
 
       {/* Permissions */}
       <div className="space-y-2">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#888]">
+        <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
           Permissions
         </div>
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
-            <span className="text-sm font-bold">Comments</span>
+          <div className="flex items-center justify-between rounded-[11px] border border-[#E8E8EC] bg-white px-3 py-2">
+            <span className="text-sm font-semibold text-[#131315]">Comments</span>
             <Toggle
               on={config.commentsEnabled}
               onClick={() =>
@@ -300,8 +302,8 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
               }
             />
           </div>
-          <div className="flex items-center justify-between border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
-            <span className="text-sm font-bold">Downloads</span>
+          <div className="flex items-center justify-between rounded-[11px] border border-[#E8E8EC] bg-white px-3 py-2">
+            <span className="text-sm font-semibold text-[#131315]">Downloads</span>
             <Toggle
               on={config.allowDownload}
               onClick={() =>
@@ -309,8 +311,8 @@ export function ShareAccessPanel({ linkId }: { linkId: Id<"shareLinks"> }) {
               }
             />
           </div>
-          <div className="flex items-center justify-between border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
-            <span className="text-sm font-bold">Show all versions</span>
+          <div className="flex items-center justify-between rounded-[11px] border border-[#E8E8EC] bg-white px-3 py-2">
+            <span className="text-sm font-semibold text-[#131315]">Show all versions</span>
             <Toggle
               on={config.showAllVersions}
               onClick={() =>

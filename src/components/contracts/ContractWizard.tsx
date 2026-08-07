@@ -106,7 +106,7 @@ export function ContractWizard({ projectId, open, onOpenChange, onComplete }: Pr
         onOpenChange(o);
       }}
     >
-      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="surface-soft max-h-[92vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileSignature className="h-5 w-5" />
@@ -134,7 +134,7 @@ export function ContractWizard({ projectId, open, onOpenChange, onComplete }: Pr
           />
         ) : step === "specific" ? (
           specificQuestions.length === 0 ? (
-            <div className="text-sm text-[#888] py-4">
+            <div className="py-4 text-sm text-[#6E6E73]">
               This project type doesn't have any extra questions. Click Next to
               review your contract.
             </div>
@@ -153,12 +153,12 @@ export function ContractWizard({ projectId, open, onOpenChange, onComplete }: Pr
         )}
 
         {error ? (
-          <div className="text-sm text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
+          <div className="rounded-[11px] bg-[#FFF5F5] p-3 text-sm text-[#8A2B34]">
             {error}
           </div>
         ) : null}
 
-        <div className="flex items-center justify-between pt-3 border-t-2 border-[#1a1a1a]">
+        <div className="flex items-center justify-between border-t border-[#F1F1F3] pt-3">
           <Button
             variant="outline"
             disabled={step === "type" || submitting}
@@ -176,7 +176,6 @@ export function ContractWizard({ projectId, open, onOpenChange, onComplete }: Pr
             <Button
               onClick={() => void handleSubmit()}
               disabled={submitting}
-              className="bg-[#FF6600] hover:bg-[#FF7A1F]"
             >
               <Check className="mr-1.5 h-4 w-4" />
               {submitting ? "Generating…" : "Generate contract"}
@@ -222,24 +221,24 @@ function Stepper({ step, hasType }: { step: Step; hasType: boolean }) {
           <div key={s.id} className="flex items-center gap-2 flex-1">
             <div
               className={
-                "flex items-center justify-center w-6 h-6 text-[10px] font-bold border-2 border-[var(--border)] " +
+                "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-medium " +
                 (isPast
-                  ? "bg-[#FF6600] text-[#f0f0e8]"
+                  ? "bg-[#FFF0E6] text-[#D14E00]"
                   : isCurrent
-                    ? "bg-[var(--foreground)] text-[var(--background)]"
+                    ? "bg-[#FFF0E6] text-[#D14E00]"
                     : reachable
-                      ? "bg-[var(--background)] text-[var(--foreground)]"
-                      : "bg-[var(--surface-alt)] text-[var(--foreground-muted)]")
+                      ? "bg-[#F1F1F3] text-[#6E6E73]"
+                      : "bg-[#F1F1F3] text-[#A0A0A5]")
               }
             >
               {isPast ? <Check className="h-3 w-3" /> : i + 1}
             </div>
             <div
               className={
-                "text-[10px] font-bold uppercase tracking-wider truncate " +
+                "truncate text-xs font-medium " +
                 (isCurrent
-                  ? "text-[var(--foreground)]"
-                  : "text-[var(--foreground-muted)]")
+                  ? "text-[#D14E00]"
+                  : "text-[#6E6E73]")
               }
             >
               {s.label}
@@ -248,7 +247,12 @@ function Stepper({ step, hasType }: { step: Step; hasType: boolean }) {
               // Track sits on whatever theme background the Dialog uses;
               // use the foreground token at 30% so it stays visible against
               // both cream and dark surfaces.
-              <div className="flex-1 h-[2px] bg-[var(--foreground)]/30" />
+              <div
+                className={
+                  "h-1 flex-1 rounded-full " +
+                  (isPast || isCurrent ? "bg-[#FF6600]" : "bg-[#E8E8EC]")
+                }
+              />
             ) : null}
           </div>
         );
@@ -266,7 +270,7 @@ function TypePicker({
 }) {
   return (
     <div>
-      <p className="text-sm text-[#1a1a1a] mb-3">
+      <p className="mb-3 text-sm text-[#131315]">
         What kind of project is this? Different types ask different questions
         and generate the relevant clauses.
       </p>
@@ -279,19 +283,18 @@ function TypePicker({
               key={t.type}
               onClick={() => onSelect(t.type)}
               className={
-                "flex items-start gap-3 p-3 border-2 border-[#1a1a1a] text-left transition-colors " +
+                "flex items-start gap-3 rounded-[14px] border p-4 text-left transition-colors " +
                 (isSelected
-                  ? "bg-[#FF6600] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]")
+                  ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                  : "border-[#E8E8EC] bg-white text-[#131315] hover:bg-[#FAFAFA]")
               }
             >
-              <div className="text-2xl flex-shrink-0">{t.emoji}</div>
               <div className="min-w-0">
-                <div className="font-black text-sm">{t.label}</div>
+                <div className="text-sm font-semibold">{t.label}</div>
                 <div
                   className={
                     "text-xs mt-0.5 " +
-                    (isSelected ? "opacity-80" : "text-[#666]")
+                    (isSelected ? "text-[#D14E00]" : "text-[#6E6E73]")
                   }
                 >
                   {t.description}
@@ -340,14 +343,14 @@ function QuestionField({
   const id = `q_${question.id}`;
   return (
     <label htmlFor={id} className="block">
-      <div className="text-[11px] uppercase tracking-[0.12em] font-bold text-[#888] mb-1">
+      <div className="mb-1 text-[13px] font-medium text-[#6E6E73]">
         {question.prompt}
         {question.required ? (
-          <span className="ml-1 text-[#dc2626]">*</span>
+          <span className="ml-1 text-[#D8434F]">*</span>
         ) : null}
       </div>
       {question.help ? (
-        <div className="text-xs text-[#666] mb-1.5">{question.help}</div>
+        <div className="mb-1.5 text-xs text-[#6E6E73]">{question.help}</div>
       ) : null}
       {question.kind === "textarea" ? (
         <Textarea
@@ -362,7 +365,7 @@ function QuestionField({
           id={id}
           value={(value as string) ?? ""}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full px-2 py-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-sm"
+          className="w-full rounded-[10px] border border-[#D8D8DE] bg-white px-2 py-1.5 text-sm text-[#131315]"
         >
           <option value="" disabled>
             Select…
@@ -379,8 +382,10 @@ function QuestionField({
             type="button"
             onClick={() => onChange(true)}
             className={
-              "px-3 py-1 border-2 border-[#1a1a1a] text-sm font-bold " +
-              (value === true ? "bg-[#FF6600] text-[#f0f0e8]" : "bg-[#f0f0e8]")
+              "rounded-full border px-3.5 py-1.5 text-sm font-medium " +
+              (value === true
+                ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]")
             }
           >
             Yes
@@ -389,8 +394,10 @@ function QuestionField({
             type="button"
             onClick={() => onChange(false)}
             className={
-              "px-3 py-1 border-2 border-[#1a1a1a] text-sm font-bold " +
-              (value === false ? "bg-[#FF6600] text-[#f0f0e8]" : "bg-[#f0f0e8]")
+              "rounded-full border px-3.5 py-1.5 text-sm font-medium " +
+              (value === false
+                ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]")
             }
           >
             No
@@ -453,28 +460,28 @@ function ReviewStep({
   ];
   return (
     <div className="space-y-3">
-      <div className="bg-[#e8e8e0] border-2 border-[#1a1a1a] p-3">
-        <div className="font-bold text-sm">
-          {template.emoji} {template.label}
+      <div className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-3">
+        <div className="text-sm font-semibold text-[#131315]">
+          {template.label}
         </div>
-        <div className="text-xs text-[#666] mt-0.5">{template.description}</div>
+        <div className="mt-0.5 text-xs text-[#6E6E73]">{template.description}</div>
       </div>
-      <div className="text-sm text-[#1a1a1a]">
-        Here's what you entered — clicking <strong>Generate contract</strong>{" "}
+      <div className="text-sm text-[#131315]">
+        Here's what you entered. Clicking <strong>Generate contract</strong>{" "}
         will build the full document with all the standard clauses (payment,
         IP transfer, kill fee, dispute resolution, etc.) plus the
         type-specific sections.
       </div>
-      <div className="border-2 border-[#1a1a1a] divide-y divide-[#ccc]">
+      <div className="divide-y divide-[#F1F1F3] overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-white">
         {allQuestions.map((q) => {
           const v = answers[q.id];
           if (v === undefined || v === null || String(v).trim() === "") return null;
           return (
             <div key={q.id} className="flex gap-3 p-2 text-xs">
-              <div className="w-44 flex-shrink-0 font-mono text-[#888] uppercase tracking-wider">
+              <div className="w-44 flex-shrink-0 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
                 {q.prompt}
               </div>
-              <div className="flex-1 text-[#1a1a1a] break-words">{String(v)}</div>
+              <div className="flex-1 break-words text-[#131315]">{String(v)}</div>
             </div>
           );
         })}

@@ -1715,6 +1715,7 @@ export const getSharedFileAccess = action({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
       v.null(),
     ),
@@ -1729,7 +1730,12 @@ export const getSharedFileAccess = action({
     contentType: string | null;
     fileName: string | null;
     tokenExpiresAt: number | null;
-    paywall: { priceCents: number; currency: string; description?: string } | null;
+    paywall: {
+      priceCents: number;
+      currency: string;
+      description?: string;
+      mode?: "all" | "per_item";
+    } | null;
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
       grantToken: args.grantToken,
@@ -1837,6 +1843,7 @@ export const getSharedImagePreview = action({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
       v.null(),
     ),
@@ -1849,7 +1856,12 @@ export const getSharedImagePreview = action({
     url: string;
     contentType: string | null;
     tokenExpiresAt: number | null;
-    paywall: { priceCents: number; currency: string; description?: string } | null;
+    paywall: {
+      priceCents: number;
+      currency: string;
+      description?: string;
+      mode?: "all" | "per_item";
+    } | null;
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
       grantToken: args.grantToken,
@@ -1994,6 +2006,7 @@ export const getSharedPaywalledPlayback = action({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
       v.null(),
     ),
@@ -2007,7 +2020,12 @@ export const getSharedPaywalledPlayback = action({
     url: string;
     posterUrl: string;
     tokenExpiresAt: number | null;
-    paywall: { priceCents: number; currency: string; description?: string } | null;
+    paywall: {
+      priceCents: number;
+      currency: string;
+      description?: string;
+      mode?: "all" | "per_item";
+    } | null;
     previewError: string | null;
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {

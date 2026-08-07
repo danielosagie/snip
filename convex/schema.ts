@@ -556,14 +556,25 @@ export default defineSchema({
     failedAccessAttempts: v.optional(v.number()),
     lockedUntil: v.optional(v.number()),
     viewCount: v.number(),
-    // Paywall — if set, viewers see the watermarked preview asset until they
-    // pay, then their grant gets paidAt set and the full asset is unlocked.
+    // Paywall — all mode sets grant.paidAt; per-item mode records individual
+    // ids in the grant's unlockedVideoIds array.
     paywall: v.optional(
       v.object({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        // Missing is the legacy all-or-nothing paywall.
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       })
+    ),
+    // Server-authoritative prices for paywall.mode === "per_item".
+    itemPrices: v.optional(
+      v.array(
+        v.object({
+          videoId: v.id("videos"),
+          priceCents: v.number(),
+        }),
+      ),
     ),
     // Optional hint for who this link is for. Used in the watermark on the
     // preview asset and prefilled in Stripe Checkout. NOT a security boundary.
@@ -623,11 +634,13 @@ export default defineSchema({
     token: v.string(),
     expiresAt: v.number(),
     createdAt: v.number(),
-    // Paywall unlock state. paidAt is the source of truth for "this grant has
-    // paid and may stream the full-res asset / download." paymentId points to
-    // the payments row so refunds can revoke access by clearing paidAt.
+    // Full-share unlock state. paymentId points to the payment row so refunds
+    // can revoke legacy/all access by clearing paidAt.
     paidAt: v.optional(v.number()),
     paymentId: v.optional(v.id("payments")),
+    // Missing preserves the legacy meaning of paidAt: every item is unlocked.
+    // Per-item purchases store a de-duplicated subset here without setting paidAt.
+    unlockedVideoIds: v.optional(v.array(v.id("videos"))),
     // Forensic capture for leak attribution. Set on grant issuance from the
     // signed-in identity + request headers proxied by the share page. None of
     // these are required (anonymous viewer with privacy extensions still gets
@@ -655,16 +668,66 @@ export default defineSchema({
     .index("by_share_link", ["shareLinkId"])
     .index("by_viewer_email", ["viewerEmail"]),
 
+  invoices: defineTable({
+    teamId: v.id("teams"),
+    projectId: v.optional(v.id("projects")),
+    shareLinkId: v.optional(v.id("shareLinks")),
+    createdByClerkId: v.string(),
+    createdByName: v.string(),
+    clientEmail: v.string(),
+    clientLabel: v.optional(v.string()),
+    title: v.string(),
+    currency: v.string(),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("sent"),
+      v.literal("partially_paid"),
+      v.literal("paid"),
+      v.literal("void"),
+    ),
+    milestones: v.array(
+      v.object({
+        id: v.string(),
+        label: v.string(),
+        amountCents: v.number(),
+        dueAt: v.optional(v.number()),
+        paidAt: v.optional(v.number()),
+        stripeCheckoutSessionId: v.optional(v.string()),
+        stripePaymentIntentId: v.optional(v.string()),
+      }),
+    ),
+    sentAt: v.optional(v.number()),
+    voidedAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+  })
+    .index("by_team", ["teamId"])
+    .index("by_share_link", ["shareLinkId"])
+    .index("by_client_email", ["teamId", "clientEmail"]),
+
   // Per-transaction payment records. One row per Stripe Checkout Session.
-  // Either shareLinkId (share-link paywall) OR videoId-only (Canva-style
-  // per-video paywall) is set. videoId is always set so we can look up
-  // "has anyone with this email paid for this video?" regardless of path.
+  // shareLinkId/videoId identify delivery purchases; invoiceId/milestoneId
+  // identify invoice payments. Optional kind fields preserve legacy rows.
   payments: defineTable({
     shareLinkId: v.optional(v.id("shareLinks")),
     grantId: v.optional(v.id("shareAccessGrants")),
     teamId: v.id("teams"),
-    videoId: v.id("videos"),
+    // Invoice milestones may not reference a video. Existing rows always have it.
+    videoId: v.optional(v.id("videos")),
+    invoiceId: v.optional(v.id("invoices")),
+    milestoneId: v.optional(v.string()),
+    itemVideoIds: v.optional(v.array(v.id("videos"))),
+    kind: v.optional(
+      v.union(
+        v.literal("share_all"),
+        v.literal("share_item"),
+        v.literal("video"),
+        v.literal("invoice_milestone"),
+      ),
+    ),
     clientEmail: v.optional(v.string()),
+    // New buyer-paid-fee rows store total charged in amountCents and listed
+    // creator price in subtotalCents. Missing means the legacy deducted model.
+    subtotalCents: v.optional(v.number()),
     amountCents: v.number(),
     currency: v.string(),
     stripeCheckoutSessionId: v.string(),

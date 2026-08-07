@@ -173,7 +173,7 @@ export function ShareDownloadSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="surface-client">
+      <SheetContent className="bg-white text-[#131315]">
         <SheetHeader>
           <SheetTitle>Download</SheetTitle>
           <SheetDescription>
@@ -189,7 +189,7 @@ export function ShareDownloadSheet({
           <div className="flex items-center gap-2 px-4 pt-3">
             <label
               htmlFor="download-quality"
-              className="text-xs font-bold uppercase tracking-widest text-[#888]"
+              className="text-[13px] font-medium text-[#6E6E73]"
             >
               Quality
             </label>
@@ -199,7 +199,7 @@ export function ShareDownloadSheet({
                   type="button"
                   id="download-quality"
                   disabled={downloadsDisabled || locked || downloading}
-                  className="inline-flex items-center justify-between gap-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1 text-sm font-bold text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50 min-w-[140px]"
+                  className="inline-flex min-h-9 min-w-[140px] items-center justify-between gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3.5 py-1.5 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#FAFAFA] disabled:opacity-50"
                 >
                   <span className="truncate">{quality}</span>
                   <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />
@@ -214,7 +214,7 @@ export function ShareDownloadSheet({
                   >
                     {q.label}
                     {q.label === quality ? (
-                      <Check className="h-3.5 w-3.5 text-[#C2410C]" />
+                      <Check className="h-3.5 w-3.5 text-[#D14E00]" />
                     ) : null}
                   </DropdownMenuItem>
                 ))}
@@ -225,16 +225,16 @@ export function ShareDownloadSheet({
 
         {/* Paywall / disabled banners */}
         {locked ? (
-          <div className="m-4 border-2 border-[#1a1a1a] bg-[#FF6600] p-4 text-[#f0f0e8]">
-            <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-widest">
+          <div className="m-4 rounded-[14px] border border-[#E8E8EC] bg-[#FFF0E6] p-4 text-[#D14E00]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#FF6600] px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-widest text-white">
               <Lock className="h-3.5 w-3.5" />
               Locked
             </div>
-            <p className="mt-1 text-sm">
+            <p className="mt-2 text-sm leading-5">
               Pay once to unlock downloads for everything in this share.
             </p>
             <Button
-              className="mt-3 w-full bg-[#f0f0e8] text-[#1a1a1a] hover:bg-white"
+              className="mt-3 w-full"
               onClick={() => onPay?.()}
               disabled={isPaying || !onPay}
             >
@@ -246,7 +246,7 @@ export function ShareDownloadSheet({
             </Button>
           </div>
         ) : downloadsDisabled ? (
-          <div className="m-4 border-2 border-dashed border-[#ccc] p-4 text-sm text-[#888]">
+          <div className="m-4 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-4 text-sm text-[#6E6E73]">
             Downloads are disabled for this link.
           </div>
         ) : null}
@@ -254,16 +254,16 @@ export function ShareDownloadSheet({
         {/* Item list */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {items.length === 0 ? (
-            <p className="p-4 text-sm text-[#888]">Nothing to download yet.</p>
+            <p className="p-4 text-sm text-[#6E6E73]">Nothing to download yet.</p>
           ) : (
-            <div className="divide-y-2 divide-[#1a1a1a] border-y-2 border-[#1a1a1a]">
-              <label className="flex items-center gap-3 bg-[#e8e8e0] px-4 py-2 text-xs font-bold uppercase tracking-widest text-[#888]">
+            <div className="divide-y divide-[#F1F1F3] border-y border-[#E8E8EC]">
+              <label className="flex items-center gap-3 bg-[#FAFAFA] px-4 py-2 text-[13px] font-medium text-[#6E6E73]">
                 <input
                   type="checkbox"
                   checked={allSelected}
                   onChange={toggleAll}
                   disabled={downloadsDisabled || locked}
-                  className="h-4 w-4 accent-[#C2410C]"
+                  className="h-4 w-4 accent-[#D14E00]"
                 />
                 Select all
               </label>
@@ -274,15 +274,15 @@ export function ShareDownloadSheet({
                     checked={selected.has(item._id)}
                     onChange={() => toggle(item._id)}
                     disabled={downloadsDisabled || locked}
-                    className="h-4 w-4 flex-shrink-0 accent-[#C2410C]"
+                    className="h-4 w-4 flex-shrink-0 accent-[#D14E00]"
                     aria-label={`Select ${item.title}`}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold text-[#1a1a1a]">
+                    <div className="truncate text-sm font-medium text-[#131315]">
                       {item.title}
                     </div>
-                    <div className="text-[11px] font-mono text-[#888]">
-                      {item.fileSize ? formatBytes(item.fileSize) : "—"}
+                    <div className="text-[11px] text-[#6E6E73]">
+                      {item.fileSize ? formatBytes(item.fileSize) : "Unknown"}
                     </div>
                   </div>
                   <Button
@@ -300,10 +300,10 @@ export function ShareDownloadSheet({
         </div>
 
         {/* Footer actions */}
-        <div className="flex-shrink-0 space-y-2 border-t-2 border-[#1a1a1a] p-4">
-          {error ? <p className="text-xs text-[#dc2626]">{error}</p> : null}
+        <div className="flex-shrink-0 space-y-2 border-t border-[#E8E8EC] p-4">
+          {error ? <p className="text-xs text-[#8A2B34]">{error}</p> : null}
           {progress ? (
-            <p className="text-xs font-mono text-[#888]">
+            <p className="text-xs text-[#6E6E73]">
               Downloading {progress.done}/{progress.total}…
             </p>
           ) : null}

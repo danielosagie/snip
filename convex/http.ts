@@ -1,5 +1,5 @@
 import { registerRoutes } from "@convex-dev/stripe";
-import { httpRouter } from "convex/server";
+import { httpRouter, makeFunctionReference } from "convex/server";
 import { httpAction } from "./_generated/server";
 import type Stripe from "stripe";
 import { components, internal } from "./_generated/api";
@@ -8,6 +8,21 @@ import { resolvePlanFromStripePriceId } from "./billingHelpers";
 import { extractConnectRequirements } from "./stripeConnect";
 
 const http = httpRouter();
+
+const recordMilestonePaymentSucceeded = makeFunctionReference<
+  "mutation",
+  {
+    stripeCheckoutSessionId: string;
+    stripePaymentIntentId?: string;
+  },
+  null
+>("invoices:recordMilestonePaymentSucceeded");
+
+const recordMilestonePaymentRefunded = makeFunctionReference<
+  "mutation",
+  { stripePaymentIntentId: string },
+  null
+>("invoices:recordMilestonePaymentRefunded");
 
 type ShareUnfurlImageItem = {
   title: string;
@@ -393,7 +408,8 @@ registerRoutes(http, components.stripe, {
         requirements: extractConnectRequirements(account),
       });
     },
-    // Client paid for a paywalled share link.
+    // Client payment fulfillment. New kinds route explicitly; sessions that
+    // predate metadata.kind continue through the legacy payment path.
     "checkout.session.completed": async (
       ctx,
       event: Stripe.Event & { type: "checkout.session.completed" },
@@ -401,10 +417,26 @@ registerRoutes(http, components.stripe, {
       const session = event.data.object as Stripe.Checkout.Session;
       // Subscriptions are handled separately by customer.subscription.created above.
       if (session.mode !== "payment") return;
+      if (session.payment_status !== "paid") return;
       const paymentIntentId =
         typeof session.payment_intent === "string"
           ? session.payment_intent
           : session.payment_intent?.id;
+      switch (session.metadata?.kind) {
+        case "invoice_milestone":
+          await ctx.runMutation(recordMilestonePaymentSucceeded, {
+            stripeCheckoutSessionId: session.id,
+            stripePaymentIntentId: paymentIntentId,
+          });
+          break;
+        case "share_item":
+        case "share_all":
+        case "video":
+        default:
+          // Fulfillment is driven by the server-recorded payment kind. The
+          // default keeps metadata-less legacy Checkout Sessions working.
+          break;
+      }
       await ctx.runMutation(internal.payments.recordPaymentSucceeded, {
         stripeCheckoutSessionId: session.id,
         stripePaymentIntentId: paymentIntentId,
@@ -421,6 +453,10 @@ registerRoutes(http, components.stripe, {
           ? charge.payment_intent
           : charge.payment_intent?.id;
       if (!paymentIntentId) return;
+      await ctx.runMutation(
+        recordMilestonePaymentRefunded,
+        { stripePaymentIntentId: paymentIntentId },
+      );
       await ctx.runMutation(internal.payments.recordPaymentRefunded, {
         stripePaymentIntentId: paymentIntentId,
       });

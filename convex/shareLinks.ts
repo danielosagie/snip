@@ -17,6 +17,7 @@ import {
   type ShareRole,
 } from "./shareAccess";
 import { resolveBundleVideos } from "./shareBundles";
+import { MAX_LINE_ITEM_AMOUNT_CENTS } from "./paymentsPolicy";
 
 const shareLinkStatusValidator = v.union(
   v.literal("missing"),
@@ -379,20 +380,72 @@ function sanitizeCurrency(code: string | undefined): string {
 
 function sanitizePaywallInput(
   paywall:
-    | { priceCents: number; currency?: string; description?: string }
+    | {
+        priceCents: number;
+        currency?: string;
+        description?: string;
+        mode?: "all" | "per_item";
+      }
     | undefined,
 ):
-  | { priceCents: number; currency: string; description?: string }
+  | {
+      priceCents: number;
+      currency: string;
+      description?: string;
+      mode?: "all" | "per_item";
+    }
   | undefined {
   if (!paywall) return undefined;
-  if (!Number.isFinite(paywall.priceCents) || paywall.priceCents < 50) {
-    throw new Error("Paywall price must be at least 50 cents.");
+  if (
+    !Number.isSafeInteger(paywall.priceCents) ||
+    paywall.priceCents < 50 ||
+    paywall.priceCents > MAX_LINE_ITEM_AMOUNT_CENTS
+  ) {
+    throw new Error(
+      `Paywall price must be an integer from 50 to ${MAX_LINE_ITEM_AMOUNT_CENTS} cents.`,
+    );
+  }
+  const currency = sanitizeCurrency(paywall.currency);
+  if (paywall.mode === "per_item" && currency !== "usd") {
+    throw new Error("Per-item pricing currently supports USD only.");
   }
   return {
-    priceCents: Math.floor(paywall.priceCents),
-    currency: sanitizeCurrency(paywall.currency),
+    priceCents: paywall.priceCents,
+    currency,
     description: paywall.description?.trim() || undefined,
+    mode: paywall.mode,
   };
+}
+
+function sanitizeItemPrices(
+  itemPrices: Array<{ videoId: Id<"videos">; priceCents: number }> | undefined,
+  shareItems: Doc<"videos">[],
+): Array<{ videoId: Id<"videos">; priceCents: number }> | undefined {
+  if (itemPrices === undefined) return undefined;
+  if (itemPrices.length === 0 || itemPrices.length > 200) {
+    throw new Error("Per-item pricing requires 1 to 200 priced items.");
+  }
+  const allowedIds = new Set(shareItems.map((item) => item._id));
+  const seen = new Set<string>();
+  return itemPrices.map((item) => {
+    if (!allowedIds.has(item.videoId)) {
+      throw new Error("Every item price must belong to this share.");
+    }
+    if (seen.has(item.videoId)) {
+      throw new Error("Each shared item may have only one price.");
+    }
+    seen.add(item.videoId);
+    if (
+      !Number.isSafeInteger(item.priceCents) ||
+      item.priceCents <= 0 ||
+      item.priceCents > MAX_LINE_ITEM_AMOUNT_CENTS
+    ) {
+      throw new Error(
+        `Item prices must be positive integer cents up to ${MAX_LINE_ITEM_AMOUNT_CENTS}.`,
+      );
+    }
+    return { videoId: item.videoId, priceCents: item.priceCents };
+  });
 }
 
 /**
@@ -432,7 +485,16 @@ export const create = mutation({
         priceCents: v.number(),
         currency: v.optional(v.string()),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
+    ),
+    itemPrices: v.optional(
+      v.array(
+        v.object({
+          videoId: v.id("videos"),
+          priceCents: v.number(),
+        }),
+      ),
     ),
     clientLabel: v.optional(v.string()),
     clientEmail: v.optional(v.string()),
@@ -485,6 +547,13 @@ export const create = mutation({
         ? await hashPassword(normalizedPassword)
         : undefined;
       const paywall = sanitizePaywallInput(args.paywall);
+      const itemPrices = sanitizeItemPrices(args.itemPrices, shareItems);
+      if (paywall?.mode === "per_item" && !itemPrices) {
+        throw new Error("Per-item paywalls require stored item prices.");
+      }
+      if (paywall?.mode !== "per_item" && itemPrices) {
+        throw new Error("Item prices require paywall mode per_item.");
+      }
       requireRecipientIdentityForPaywall(
         paywall,
         args.clientEmail,
@@ -506,6 +575,7 @@ export const create = mutation({
         lockedUntil: undefined,
         viewCount: 0,
         paywall,
+        itemPrices,
         clientLabel: args.clientLabel?.trim() || undefined,
         clientEmail: args.clientEmail?.trim() || undefined,
         generalAccess: args.generalAccess ?? "anyone",
@@ -598,6 +668,7 @@ export const list = query({
       creatorName: link.createdByName,
       isExpired: link.expiresAt ? link.expiresAt < Date.now() : false,
       paywall: link.paywall ?? null,
+      itemPrices: link.itemPrices ?? null,
       clientLabel: link.clientLabel ?? null,
       clientEmail: link.clientEmail ?? null,
       generalAccess: link.generalAccess ?? "anyone",
@@ -654,6 +725,7 @@ export const listForFolder = query({
         creatorName: link.createdByName,
         isExpired: link.expiresAt ? link.expiresAt < Date.now() : false,
         paywall: link.paywall ?? null,
+        itemPrices: link.itemPrices ?? null,
         clientLabel: link.clientLabel ?? null,
         clientEmail: link.clientEmail ?? null,
         generalAccess: link.generalAccess ?? "anyone",
@@ -703,6 +775,7 @@ export const getInternal = internalQuery({
       coverVideoId: link.coverVideoId ?? null,
       token: link.token,
       paywall: link.paywall ?? null,
+      itemPrices: link.itemPrices ?? null,
       clientEmail: link.clientEmail ?? null,
       clientLabel: link.clientLabel ?? null,
     };
@@ -716,6 +789,28 @@ export const update = mutation({
     allowDownload: v.optional(v.boolean()),
     password: v.optional(v.union(v.string(), v.null())),
     coverVideoId: v.optional(v.union(v.id("videos"), v.null())),
+    paywall: v.optional(
+      v.union(
+        v.object({
+          priceCents: v.number(),
+          currency: v.optional(v.string()),
+          description: v.optional(v.string()),
+          mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
+        }),
+        v.null(),
+      ),
+    ),
+    itemPrices: v.optional(
+      v.union(
+        v.array(
+          v.object({
+            videoId: v.id("videos"),
+            priceCents: v.number(),
+          }),
+        ),
+        v.null(),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const link = await ctx.db.get(args.linkId);
@@ -765,6 +860,41 @@ export const update = mutation({
       }
       updates.failedAccessAttempts = 0;
       updates.lockedUntil = undefined;
+    }
+
+    if (args.paywall !== undefined || args.itemPrices !== undefined) {
+      const shareItems = link.videoId
+        ? [await ctx.db.get(link.videoId)].filter(
+            (item): item is Doc<"videos"> => Boolean(item && !item.deletedAt),
+          )
+        : link.bundleId
+          ? await (async () => {
+              const bundle = await ctx.db.get(link.bundleId!);
+              if (!bundle) throw new Error("Bundle not found");
+              return await resolveBundleVideos(ctx, bundle);
+            })()
+          : [];
+      const paywall =
+        args.paywall === undefined
+          ? link.paywall
+          : sanitizePaywallInput(args.paywall ?? undefined);
+      const itemPrices =
+        args.itemPrices === undefined && args.paywall !== null
+          ? link.itemPrices
+          : sanitizeItemPrices(args.itemPrices ?? undefined, shareItems);
+      if (paywall?.mode === "per_item" && !itemPrices) {
+        throw new Error("Per-item paywalls require stored item prices.");
+      }
+      if (paywall?.mode !== "per_item" && itemPrices) {
+        throw new Error("Item prices require paywall mode per_item.");
+      }
+      requireRecipientIdentityForPaywall(
+        paywall,
+        link.clientEmail,
+        link.clientLabel,
+      );
+      updates.paywall = paywall;
+      updates.itemPrices = itemPrices;
     }
 
     await ctx.db.patch(args.linkId, updates);

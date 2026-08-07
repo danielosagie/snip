@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { DelayedAppear } from "@/components/ui/delayed-appear";
 import { SnipMark } from "@/components/SnipMark";
 import { cn } from "@/lib/utils";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { Check, X } from "lucide-react";
 
 type SignData = NonNullable<FunctionReturnType<typeof api.contractsTable.getByToken>>;
@@ -120,7 +121,7 @@ function SignPage() {
       setOtpSentTo(res.email ?? null);
       if (res.sent === false) {
         setOtpError(
-          "Email isn't configured on this deployment — ask the sender to verify you another way.",
+          "Email isn't configured on this deployment. Ask the sender to verify you another way.",
         );
       }
     } catch (e) {
@@ -134,7 +135,7 @@ function SignPage() {
     return (
       <CenteredShell>
         <DelayedAppear>
-          <p className="text-[#888]">Opening document…</p>
+          <p className="text-[#6E6E73]">Opening document…</p>
         </DelayedAppear>
       </CenteredShell>
     );
@@ -243,36 +244,38 @@ function SignPage() {
   };
 
   return (
-    <div className="surface-client min-h-screen bg-[#f0f0e8]">
-      <header className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 py-4 flex items-center justify-between">
+    <div className="surface-client surface-soft min-h-screen bg-[#FAFAFA]">
+      <header className="flex items-center justify-between border-b border-[#E8E8EC] bg-white px-6 py-4">
         <SnipMark />
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+        <span className="text-xs font-medium text-[#6E6E73]">
           Signing as {data.recipient.name}
         </span>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-12 space-y-6">
         <div>
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             {data.contract.kind}
           </div>
-          <h1 className="text-5xl md:text-6xl font-black uppercase tracking-tighter leading-[0.95] mt-2 text-[#1a1a1a]">
+          <h1 className="mt-2 text-[32px] font-semibold leading-tight tracking-[-0.02em] text-[#131315] md:text-[40px]">
             {data.contract.title}
           </h1>
         </div>
 
-        <article className="border-2 border-[#1a1a1a] bg-white p-8">
+        <article className="rounded-[14px] border border-[#E8E8EC] bg-white p-8">
           <div
-            className="prose prose-sm max-w-none text-[#1a1a1a]"
+            className="prose prose-sm max-w-none text-[#131315]"
             dangerouslySetInnerHTML={{
-              __html: data.contract.contentHtml || "<p><em>(no body)</em></p>",
+              __html: data.contract.contentHtml
+                ? sanitizeHtml(data.contract.contentHtml)
+                : "<p><em>(no body)</em></p>",
             }}
           />
         </article>
 
         {!showDeclineForm ? (
-          <section className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-6 shadow-[4px_4px_0px_0px_#1a1a1a] space-y-4">
-            <h2 className="text-xl font-black uppercase tracking-tighter text-[#1a1a1a]">
+          <section className="space-y-4 rounded-[14px] border border-[#E8E8EC] bg-white p-6">
+            <h2 className="text-xl font-semibold tracking-[-0.02em] text-[#131315]">
               Sign
             </h2>
 
@@ -289,18 +292,18 @@ function SignPage() {
             )}
 
             <div>
-              <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1.5">
-                Type your full legal name
+              <label className="mb-1.5 block text-[13px] font-medium text-[#6E6E73]">
+                Legal name
               </label>
               <Input
                 value={typedName}
                 onChange={(e) => setTypedName(e.target.value)}
                 placeholder={data.recipient.name}
-                className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none text-base h-12"
+                className="h-12 text-base"
               />
               {typedName && (
-                <div className="mt-2 border-2 border-[#1a1a1a]/15 bg-white p-4">
-                  <span className="font-['Caveat',cursive] text-3xl text-[#1a1a1a]">
+                <div className="mt-2 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-4">
+                  <span className="font-serif text-3xl text-[#131315]">
                     {typedName}
                   </span>
                 </div>
@@ -308,29 +311,29 @@ function SignPage() {
             </div>
 
             <div>
-              <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1.5">
-                Or draw your signature (optional)
+              <label className="mb-1.5 block text-[13px] font-medium text-[#6E6E73]">
+                Draw signature (optional)
               </label>
               <SignaturePad ref={padRef} />
             </div>
 
             {/* Identity verification (email OTP) — strengthens attribution. */}
-            <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
-              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
-                Verify your identity (recommended)
+            <div className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-4">
+              <div className="mb-2 text-[13px] font-medium text-[#6E6E73]">
+                Identity check (recommended)
               </div>
               {!otpSent ? (
                 <button
                   type="button"
                   onClick={() => void handleRequestOtp()}
                   disabled={otpBusy}
-                  className="inline-flex items-center gap-1.5 h-9 px-3 text-[11px] font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#FFEDD5] disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3.5 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] disabled:opacity-50"
                 >
                   {otpBusy ? "Sending…" : "Email me a code"}
                 </button>
               ) : (
                 <div className="space-y-2">
-                  <p className="text-xs text-[#1a1a1a]">
+                  <p className="text-xs text-[#6E6E73]">
                     Enter the 6-digit code sent to{" "}
                     <span className="font-mono">{otpSentTo ?? "your email"}</span>.
                   </p>
@@ -339,20 +342,20 @@ function SignPage() {
                     onChange={(e) => setOtpCode(e.target.value)}
                     placeholder="123456"
                     inputMode="numeric"
-                    className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none font-mono tracking-[0.3em] max-w-[160px]"
+                    className="max-w-[160px] font-mono tracking-[0.3em]"
                   />
                   <button
                     type="button"
                     onClick={() => void handleRequestOtp()}
                     disabled={otpBusy}
-                    className="text-[10px] font-mono uppercase tracking-wider text-[#888] underline"
+                    className="text-xs font-medium text-[#6E6E73] underline hover:text-[#131315]"
                   >
                     Resend code
                   </button>
                 </div>
               )}
               {otpError ? (
-                <p className="mt-2 text-xs text-[#dc2626]">{otpError}</p>
+                <p className="mt-2 text-xs text-[#D8434F]">{otpError}</p>
               ) : null}
             </div>
 
@@ -361,9 +364,9 @@ function SignPage() {
                 type="checkbox"
                 checked={agreed}
                 onChange={(e) => setAgreed(e.target.checked)}
-                className="mt-1 h-4 w-4 accent-[#C2410C]"
+                className="mt-1 h-4 w-4 accent-[#FF6600]"
               />
-              <span className="text-sm text-[#1a1a1a]">
+              <span className="text-sm text-[#131315]">
                 I consent to sign this document electronically (E-SIGN Act /
                 UETA) and to receive related records electronically. I have read
                 the document above and agree to be bound by its terms. I
@@ -380,7 +383,7 @@ function SignPage() {
                 type="button"
                 onClick={handleSign}
                 disabled={!canSubmit}
-                className="flex-1 inline-flex items-center justify-center gap-2 h-12 px-6 text-sm font-black uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] hover:bg-[#C2410C] shadow-[4px_4px_0px_0px_#1a1a1a] active:translate-y-[1px] active:translate-x-[1px] active:shadow-[2px_2px_0px_0px_#1a1a1a] disabled:opacity-50 transition-all"
+                className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[#131315] px-6 text-sm font-medium text-white transition-colors hover:bg-[#26262A] disabled:opacity-50"
               >
                 <Check className="h-4 w-4" />
                 {submitting ? "Signing…" : "Sign document"}
@@ -388,18 +391,18 @@ function SignPage() {
               <button
                 type="button"
                 onClick={() => setShowDeclineForm(true)}
-                className="h-12 px-6 text-sm font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#dc2626] hover:text-[#f0f0e8] transition-colors"
+                className="h-12 rounded-full border border-[#D8D8DE] bg-white px-6 text-sm font-medium text-[#D8434F] transition-colors hover:bg-[#FFF5F5]"
               >
                 Decline
               </button>
             </div>
           </section>
         ) : (
-          <section className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-6 shadow-[4px_4px_0px_0px_#1a1a1a] space-y-4">
-            <h2 className="text-xl font-black uppercase tracking-tighter text-[#1a1a1a]">
+          <section className="space-y-4 rounded-[14px] border border-[#E8E8EC] bg-white p-6">
+            <h2 className="text-xl font-semibold tracking-[-0.02em] text-[#131315]">
               Decline
             </h2>
-            <p className="text-sm text-[#1a1a1a]">
+            <p className="text-sm text-[#6E6E73]">
               Please briefly explain why you can't sign. The agency that sent
               this document will see your reason.
             </p>
@@ -407,7 +410,7 @@ function SignPage() {
               value={declineReason}
               onChange={(e) => setDeclineReason(e.target.value)}
               rows={4}
-              className="w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3 text-sm rounded-none focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
+              className="w-full rounded-[10px] border border-[#D8D8DE] bg-white p-3 text-sm text-[#131315] outline-none focus:border-[#FF6600]"
               placeholder="e.g. The price has changed since we last discussed…"
             />
             <div className="flex gap-3">
@@ -415,7 +418,7 @@ function SignPage() {
                 type="button"
                 onClick={handleDecline}
                 disabled={!declineReason.trim()}
-                className="flex-1 inline-flex items-center justify-center gap-2 h-12 text-sm font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#dc2626] text-[#f0f0e8] hover:bg-[#1a1a1a] disabled:opacity-50 transition-colors"
+                className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full border border-[#D8D8DE] bg-white text-sm font-medium text-[#D8434F] transition-colors hover:bg-[#FFF5F5] disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
                 Submit decline
@@ -426,7 +429,7 @@ function SignPage() {
                   setShowDeclineForm(false);
                   setDeclineReason("");
                 }}
-                className="h-12 px-6 text-sm font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5] transition-colors"
+                className="h-12 rounded-full border border-[#D8D8DE] bg-white px-6 text-sm font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
               >
                 Back
               </button>
@@ -440,8 +443,8 @@ function SignPage() {
 
 function CenteredShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="surface-client min-h-screen bg-[#f0f0e8] flex flex-col">
-      <header className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 py-4">
+    <div className="surface-client surface-soft flex min-h-screen flex-col bg-[#FAFAFA]">
+      <header className="border-b border-[#E8E8EC] bg-white px-6 py-4">
         <SnipMark />
       </header>
       <main className="flex-1 flex items-center justify-center px-6 py-12">
@@ -459,11 +462,11 @@ function TerminalCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="max-w-md w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[8px_8px_0px_0px_#1a1a1a] p-8 text-center">
-      <h2 className="text-3xl font-black uppercase tracking-tighter text-[#1a1a1a] mb-3">
+    <div className="w-full max-w-md rounded-[14px] border border-[#E8E8EC] bg-white p-8 text-center">
+      <h2 className="mb-3 text-[22px] font-semibold tracking-[-0.02em] text-[#131315]">
         {title}
       </h2>
-      <p className="text-sm text-[#1a1a1a]">{children}</p>
+      <p className="text-sm text-[#6E6E73]">{children}</p>
     </div>
   );
 }
@@ -522,7 +525,7 @@ const SignaturePad = (() => {
       if (!ctx) return;
       ctx.lineWidth = 2;
       ctx.lineCap = "round";
-      ctx.strokeStyle = "#1a1a1a";
+      ctx.strokeStyle = "#131315";
     }, []);
 
     const getPos = (e: PointerEvent | React.PointerEvent) => {
@@ -569,7 +572,7 @@ const SignaturePad = (() => {
     }));
 
     return (
-      <div className="border-2 border-[#1a1a1a] bg-white">
+      <div className="overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-white">
         <canvas
           ref={canvasRef}
           width={600}
@@ -582,7 +585,7 @@ const SignaturePad = (() => {
           onPointerCancel={onUp}
           onPointerLeave={onUp}
         />
-        <div className="border-t-2 border-[#1a1a1a]/15 flex justify-end px-2 py-1">
+        <div className="flex justify-end border-t border-[#F1F1F3] px-2 py-1">
           <button
             type="button"
             onClick={() => {
@@ -592,7 +595,7 @@ const SignaturePad = (() => {
                 setEmpty(true);
               }
             }}
-            className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] hover:text-[#1a1a1a]"
+            className="rounded-full px-2 py-1 text-xs font-medium text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
           >
             Clear
           </button>
@@ -624,8 +627,8 @@ function FieldInputs({
   if (visible.length === 0) return null;
 
   return (
-    <div className="border-2 border-[#1a1a1a] bg-white p-4">
-      <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#C2410C] mb-3">
+    <div className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-4">
+      <div className="mb-3 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
         Fill these in
       </div>
       <ul className="space-y-3">
@@ -633,9 +636,9 @@ function FieldInputs({
           const id = f._id as string;
           const value = values[id] ?? "";
           const label = (
-            <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#1a1a1a] mb-1">
+            <label className="mb-1 block text-[13px] font-medium text-[#6E6E73]">
               {FIELD_TYPE_LABELS[f.type]}
-              {f.required && <span className="text-[#C2410C] ml-1">*</span>}
+              {f.required && <span className="ml-1 text-[#D8434F]">*</span>}
             </label>
           );
           if (f.type === "checkbox") {
@@ -646,11 +649,11 @@ function FieldInputs({
                     type="checkbox"
                     checked={value === "true"}
                     onChange={(e) => onChange(id, e.target.checked ? "true" : "false")}
-                    className="mt-1 h-4 w-4 accent-[#C2410C]"
+                    className="mt-1 h-4 w-4 accent-[#FF6600]"
                   />
-                  <span className="text-sm text-[#1a1a1a]">
+                  <span className="text-sm text-[#131315]">
                     {FIELD_TYPE_LABELS[f.type]}
-                    {f.required && <span className="text-[#C2410C] ml-1">*</span>}
+                    {f.required && <span className="ml-1 text-[#D8434F]">*</span>}
                   </span>
                 </label>
               </li>
@@ -664,7 +667,7 @@ function FieldInputs({
                   type="date"
                   value={value}
                   onChange={(e) => onChange(id, e.target.value)}
-                  className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10"
+                  className="h-10"
                 />
               </li>
             );
@@ -676,7 +679,7 @@ function FieldInputs({
                 <Input
                   value={value || recipientName}
                   onChange={(e) => onChange(id, e.target.value)}
-                  className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10"
+                  className="h-10"
                 />
               </li>
             );
@@ -689,7 +692,7 @@ function FieldInputs({
                   type="email"
                   value={value || recipientEmail}
                   onChange={(e) => onChange(id, e.target.value)}
-                  className="border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10"
+                  className="h-10"
                 />
               </li>
             );
@@ -704,8 +707,8 @@ function FieldInputs({
                 placeholder={f.type === "initials" ? "AB" : ""}
                 maxLength={f.type === "initials" ? 5 : undefined}
                 className={cn(
-                  "border-2 border-[#1a1a1a] bg-[#f0f0e8] rounded-none h-10",
-                  f.type === "initials" && "max-w-[120px] uppercase font-bold tracking-widest",
+                  "h-10",
+                  f.type === "initials" && "max-w-[120px] tracking-widest",
                 )}
               />
             </li>

@@ -6,7 +6,11 @@ import { action, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { isFeatureEnabled } from "./featureFlags";
-import { computeApplicationFee } from "./paymentsPolicy";
+import {
+  computeApplicationFee,
+  computeBuyerTotal,
+  MAX_LINE_ITEM_AMOUNT_CENTS,
+} from "./paymentsPolicy";
 
 /**
  * Node-only side of payments. Lives here (and not in payments.ts) because
@@ -114,6 +118,7 @@ export const createCheckoutForGrant = action({
     successUrl: v.string(),
     cancelUrl: v.string(),
     clientEmail: v.optional(v.string()),
+    itemVideoIds: v.optional(v.array(v.id("videos"))),
   },
   returns: v.object({
     status: v.union(
@@ -155,9 +160,14 @@ export const createCheckoutForGrant = action({
 
     const lookup = await ctx.runQuery(internal.payments.lookupGrantForCheckout, {
       grantToken: args.grantToken,
+      itemVideoIds: args.itemVideoIds,
     });
     if (!lookup) {
-      return { status: "invalidGrant", url: null };
+      return {
+        status: "invalidGrant",
+        url: null,
+        reason: args.itemVideoIds ? "Invalid or already-unlocked item selection." : undefined,
+      };
     }
 
     if (lookup.grant.paidAt) {
@@ -165,6 +175,16 @@ export const createCheckoutForGrant = action({
     }
     if (!lookup.shareLink.paywall) {
       return { status: "noPaywall", url: null };
+    }
+    const perItem = lookup.shareLink.paywall.mode === "per_item";
+    if (perItem !== Boolean(args.itemVideoIds?.length)) {
+      return {
+        status: "invalidGrant",
+        url: null,
+        reason: perItem
+          ? "Select at least one priced item."
+          : "This share is sold as one delivery.",
+      };
     }
     // Settlement routing — Canva model: the BUYER's path never blocks on the
     // seller's payout plumbing. Connect active → destination charge to the
@@ -175,16 +195,64 @@ export const createCheckoutForGrant = action({
     const settlement = await resolveSettlement(ctx, stripe, lookup.team);
 
     const paywall = lookup.shareLink.paywall;
-    const amountCents = paywall.priceCents;
+    const subtotalCents = perItem
+      ? lookup.selectedItems.reduce(
+          (total, item) => total + item.priceCents,
+          0,
+        )
+      : paywall.priceCents;
+    if (
+      !Number.isSafeInteger(subtotalCents) ||
+      subtotalCents <= 0 ||
+      (!perItem && subtotalCents > MAX_LINE_ITEM_AMOUNT_CENTS)
+    ) {
+      throw new Error("Stored checkout subtotal is invalid.");
+    }
+    const amountCents = computeBuyerTotal(subtotalCents);
+    const buyerFeeCents = amountCents - subtotalCents;
     const currency = paywall.currency;
     const productName =
       paywall.description ??
       (lookup.bundleName
         ? `Final delivery: ${lookup.bundleName}`
         : `Final delivery: ${lookup.video.title}`);
-    const platformFeeAmount = computeApplicationFee(amountCents);
+    const platformFeeAmount = computeApplicationFee(subtotalCents);
     const applicationFeeAmount =
       settlement.mode === "connect" ? platformFeeAmount : 0;
+
+    const kind = perItem ? "share_item" : "share_all";
+    const itemVideoIds = perItem
+      ? lookup.selectedItems.map((item) => item.videoId)
+      : undefined;
+    const metadata = {
+      kind,
+      grantId: lookup.grant._id,
+      shareLinkId: lookup.shareLink._id,
+      videoId: lookup.video._id,
+      teamId: lookup.team._id,
+      ...(itemVideoIds
+        ? { itemVideoIds: itemVideoIds.join(",") }
+        : {}),
+    };
+    const deliveryLineItems = perItem
+      ? lookup.selectedItems.map((item) => ({
+          price_data: {
+            currency,
+            product_data: { name: item.title },
+            unit_amount: item.priceCents,
+          },
+          quantity: 1,
+        }))
+      : [
+          {
+            price_data: {
+              currency,
+              product_data: { name: productName },
+              unit_amount: subtotalCents,
+            },
+            quantity: 1,
+          },
+        ];
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -196,14 +264,19 @@ export const createCheckoutForGrant = action({
         },
       },
       line_items: [
-        {
-          price_data: {
-            currency,
-            product_data: { name: productName },
-            unit_amount: amountCents,
-          },
-          quantity: 1,
-        },
+        ...deliveryLineItems,
+        ...(buyerFeeCents > 0
+          ? [
+              {
+                price_data: {
+                  currency,
+                  product_data: { name: "Snip platform fee" },
+                  unit_amount: buyerFeeCents,
+                },
+                quantity: 1,
+              },
+            ]
+          : []),
       ],
       customer_email: args.clientEmail ?? lookup.shareLink.clientEmail,
       success_url: args.successUrl,
@@ -215,19 +288,9 @@ export const createCheckoutForGrant = action({
         ...(settlement.mode === "connect"
           ? { transfer_data: { destination: settlement.accountId } }
           : {}),
-        metadata: {
-          grantId: lookup.grant._id,
-          shareLinkId: lookup.shareLink._id,
-          videoId: lookup.video._id,
-          teamId: lookup.team._id,
-        },
+        metadata,
       },
-      metadata: {
-        grantId: lookup.grant._id,
-        shareLinkId: lookup.shareLink._id,
-        videoId: lookup.video._id,
-        teamId: lookup.team._id,
-      },
+      metadata,
     });
 
     await ctx.runMutation(internal.payments.recordCheckoutCreated, {
@@ -236,6 +299,9 @@ export const createCheckoutForGrant = action({
       teamId: lookup.team._id,
       videoId: lookup.video._id,
       clientEmail: args.clientEmail ?? lookup.shareLink.clientEmail,
+      kind,
+      itemVideoIds,
+      subtotalCents,
       amountCents,
       currency,
       stripeCheckoutSessionId: session.id,
@@ -339,7 +405,16 @@ export const createCheckoutForVideo = action({
     const paywall = lookup.video.paywall;
     const productName =
       paywall.description ?? `Download: ${lookup.video.title}`;
+    if (
+      !Number.isSafeInteger(paywall.priceCents) ||
+      paywall.priceCents <= 0 ||
+      paywall.priceCents > MAX_LINE_ITEM_AMOUNT_CENTS
+    ) {
+      throw new Error("Stored video price is invalid.");
+    }
     const platformFeeAmount = computeApplicationFee(paywall.priceCents);
+    const amountCents = computeBuyerTotal(paywall.priceCents);
+    const buyerFeeCents = amountCents - paywall.priceCents;
     const applicationFeeAmount =
       settlement.mode === "connect" ? platformFeeAmount : 0;
 
@@ -361,6 +436,18 @@ export const createCheckoutForVideo = action({
           },
           quantity: 1,
         },
+        ...(buyerFeeCents > 0
+          ? [
+              {
+                price_data: {
+                  currency: paywall.currency,
+                  product_data: { name: "Snip platform fee" },
+                  unit_amount: buyerFeeCents,
+                },
+                quantity: 1,
+              },
+            ]
+          : []),
       ],
       customer_email: args.clientEmail,
       success_url: args.successUrl,
@@ -373,6 +460,7 @@ export const createCheckoutForVideo = action({
           ? { transfer_data: { destination: settlement.accountId } }
           : {}),
         metadata: {
+          kind: "video",
           videoId: lookup.video._id,
           teamId: lookup.team._id,
         },
@@ -388,7 +476,8 @@ export const createCheckoutForVideo = action({
       teamId: lookup.team._id,
       videoId: lookup.video._id,
       clientEmail: args.clientEmail,
-      amountCents: paywall.priceCents,
+      subtotalCents: paywall.priceCents,
+      amountCents,
       currency: paywall.currency,
       stripeCheckoutSessionId: session.id,
       stripeConnectAccountId:

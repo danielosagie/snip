@@ -60,24 +60,24 @@ export default function CompareWipster() {
   return (
     <MarketingLayout>
       {/* Hero */}
-      <section className="px-6 pt-20 pb-24 md:pt-28 md:pb-32 border-b-2 border-[var(--border)] bg-[var(--background)]">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-[14vw] sm:text-[10vw] md:text-[8vw] font-black leading-[0.85] tracking-tighter uppercase">
+      <section className="border-b border-[#E8E8EC] bg-white px-6 pb-24 pt-20 md:pb-32 md:pt-28">
+        <div className="mx-auto max-w-5xl">
+          <h1 className="text-[42px] font-semibold leading-[1.05] tracking-[-0.055em] text-[#131315] sm:text-[54px] md:text-[64px]">
             snip vs
             <br />
             Wipster
           </h1>
-          <div className="mt-10 md:mt-14 max-w-2xl">
-            <p className="text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight">
+          <div className="mt-10 max-w-2xl md:mt-14">
+            <p className="text-[24px] font-semibold leading-tight tracking-[-0.02em] text-[#131315] md:text-[32px]">
               Two video review tools
               <br />
               walk into a bar.
               <br />
-              <span className="text-[var(--foreground-muted)]">
+              <span className="text-[#6E6E73]">
                 One costs less. That's the whole joke.
               </span>
             </p>
-            <p className="mt-6 text-lg text-[var(--foreground-muted)] font-medium max-w-lg">
+            <p className="mt-6 max-w-lg text-[16px] leading-6 text-[#6E6E73]">
               Wipster is a solid tool with real approval workflows and a proper
               feature set. snip is smaller, cheaper, and open source. We do less
               for less money, and that's the whole pitch.
@@ -87,24 +87,24 @@ export default function CompareWipster() {
       </section>
 
       {/* Side-by-side comparison table */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[var(--border)] bg-[var(--surface-alt)]">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-16 text-center">
-            SIDE BY
+      <section className="border-b border-[#E8E8EC] bg-[#FAFAFA] px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="mb-12 text-center text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Side by
             <br />
-            SIDE.
+            side.
           </h2>
 
-          <div className="border-2 border-[var(--border)] shadow-[8px_8px_0px_0px_var(--shadow-color)] bg-[var(--background)]">
+          <div className="overflow-x-auto rounded-[14px] border border-[#E8E8EC] bg-white">
             {/* Header row */}
-            <div className="grid grid-cols-3 border-b-2 border-[var(--border)] bg-[var(--surface-strong)] text-[var(--foreground-inverse)]">
-              <div className="p-4 md:p-6 font-black uppercase tracking-wider text-sm">
+            <div className="grid min-w-[680px] grid-cols-3 border-b border-[#F1F1F3] bg-[#FAFAFA]">
+              <div className="p-4 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5] md:p-6">
                 Feature
               </div>
-              <div className="p-4 md:p-6 font-black uppercase tracking-wider text-sm border-l-2 border-[var(--border)]">
+              <div className="p-4 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5] md:p-6">
                 Wipster
               </div>
-              <div className="p-4 md:p-6 font-black uppercase tracking-wider text-sm border-l-2 border-[var(--border)] text-[var(--accent-light)]">
+              <div className="p-4 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5] md:p-6">
                 snip
               </div>
             </div>
@@ -113,27 +113,27 @@ export default function CompareWipster() {
             {comparisonRows.map((row, i) => (
               <div
                 key={row.feature}
-                className={`grid grid-cols-3 ${i < comparisonRows.length - 1 ? "border-b-2 border-[var(--border)]" : ""}`}
+                className={`grid min-w-[680px] grid-cols-3 ${i < comparisonRows.length - 1 ? "border-b border-[#F1F1F3]" : ""}`}
               >
-                <div className="p-4 md:p-6 flex flex-col justify-center">
-                  <span className="font-black uppercase tracking-tight text-lg">
+                <div className="flex flex-col justify-center p-4 md:p-6">
+                  <span className="text-[14px] font-semibold leading-5 text-[#131315]">
                     {row.feature}
                   </span>
-                  <span className="text-xs text-[var(--foreground-muted)] mt-1 hidden md:block">
+                  <span className="mt-1 hidden text-[12px] leading-[18px] text-[#6E6E73] md:block">
                     {row.note}
                   </span>
                 </div>
-                <div className="p-4 md:p-6 border-l-2 border-[var(--border)] flex items-center text-[var(--foreground-muted)] font-medium">
+                <div className="flex items-center gap-2 p-4 text-[14px] leading-5 text-[#6E6E73] before:text-[#A0A0A5] before:content-['×'] md:p-6">
                   {row.wipster}
                 </div>
-                <div className="p-4 md:p-6 border-l-2 border-[var(--border)] flex items-center font-bold text-[var(--accent)]">
+                <div className="flex items-center gap-2 p-4 text-[14px] font-medium leading-5 text-[#131315] before:text-[#FF6600] before:content-['✓'] md:p-6">
                   {row.snip}
                 </div>
               </div>
             ))}
           </div>
 
-          <p className="text-center text-sm text-[var(--foreground-muted)] mt-6 md:hidden">
+          <p className="mt-6 text-center text-[13px] leading-5 text-[#6E6E73] md:hidden">
             * Wipster pricing based on their per-user model. Actual pricing may
             vary by plan.
           </p>
@@ -141,19 +141,19 @@ export default function CompareWipster() {
       </section>
 
       {/* Cost savings calculator */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[var(--border)] bg-[var(--background)]">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-4 text-center">
-            DO THE
+      <section className="border-b border-[#E8E8EC] bg-white px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="mb-4 text-center text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Do the
             <br />
-            MATH.
+            math.
           </h2>
-          <p className="text-center text-lg text-[var(--foreground-muted)] font-medium mb-16 max-w-lg mx-auto">
+          <p className="mx-auto mb-16 max-w-lg text-center text-[15px] leading-6 text-[#6E6E73]">
             Wipster charges per user. snip starts at $25 per month total. Not per
             user. Flat pricing. The math gets increasingly silly as your team grows.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {teamSizes.map((size) => {
               const savings = annualSavings(size);
               const wipsterAnnual = WIPSTER_PRICE_PER_USER * size * 12;
@@ -162,39 +162,39 @@ export default function CompareWipster() {
               return (
                 <div
                   key={size}
-                  className="border-2 border-[var(--border)] bg-[var(--background)] shadow-[6px_6px_0px_0px_var(--shadow-color)] hover:-translate-y-1 hover:translate-x-1 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all flex flex-col"
+                  className="flex flex-col overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white"
                 >
-                  <div className="border-b-2 border-[var(--border)] bg-[var(--surface-strong)] text-[var(--foreground-inverse)] p-5">
-                    <span className="text-4xl font-black">{size}</span>
-                    <span className="text-sm font-bold uppercase tracking-wider text-[var(--foreground-muted)] ml-2">
+                  <div className="border-b border-[#F1F1F3] bg-[#FAFAFA] p-5">
+                    <span className="text-4xl font-semibold tracking-tight text-[#131315]">{size}</span>
+                    <span className="ml-2 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                       people
                     </span>
                   </div>
-                  <div className="p-5 flex flex-col flex-grow">
-                    <div className="flex justify-between items-baseline mb-1">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--foreground-muted)]">
+                  <div className="flex flex-grow flex-col p-5">
+                    <div className="mb-1 flex items-baseline justify-between gap-3">
+                      <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                         Wipster
                       </span>
-                      <span className="font-black text-[var(--foreground-muted)] line-through">
+                      <span className="font-medium tabular-nums text-[#6E6E73] line-through">
                         ${wipsterAnnual.toLocaleString()}/yr
                       </span>
                     </div>
-                    <div className="flex justify-between items-baseline mb-4">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--accent)]">
+                    <div className="mb-4 flex items-baseline justify-between gap-3">
+                      <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                         snip
                       </span>
-                      <span className="font-black text-[var(--accent)]">
+                      <span className="font-semibold tabular-nums text-[#D14E00]">
                         ${snipAnnual}/yr
                       </span>
                     </div>
-                    <div className="border-t-2 border-[var(--border-subtle)] pt-4 mt-auto">
-                      <div className="text-3xl font-black text-[var(--accent)]">
+                    <div className="mt-auto border-t border-[#F1F1F3] pt-4">
+                      <div className="text-3xl font-semibold tracking-tight tabular-nums text-[#D14E00]">
                         ${savings.toLocaleString()}
                       </div>
-                      <div className="text-xs font-bold uppercase tracking-wider text-[var(--foreground-muted)]">
+                      <div className="mt-1 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                         saved per year
                       </div>
-                      <p className="text-sm text-[var(--foreground-muted)] mt-2 italic">
+                      <p className="mt-2 text-[13px] leading-5 text-[#6E6E73]">
                         {savingsCommentary[size]}
                       </p>
                     </div>
@@ -205,14 +205,14 @@ export default function CompareWipster() {
           </div>
 
           {/* Open source callout */}
-          <div className="mt-16 border-2 border-[var(--accent)] bg-[var(--accent)] text-[var(--foreground-inverse)] p-8 shadow-[8px_8px_0px_0px_var(--shadow-color)]">
-            <p className="text-sm font-bold uppercase tracking-widest mb-3 text-[var(--accent-light)]">
-              THE OPEN SOURCE THING
+          <div className="mt-16 rounded-[14px] border border-[#E8E8EC] bg-[#FAFAFA] p-8">
+            <p className="mb-3 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
+              Open source
             </p>
-            <p className="text-xl md:text-2xl font-black uppercase tracking-tight leading-tight mb-3">
+            <p className="mb-3 text-[20px] font-semibold leading-7 tracking-[-0.5px] text-[#131315] md:text-[24px]">
               You can literally read our code.
             </p>
-            <p className="text-base font-medium opacity-90 max-w-2xl">
+            <p className="max-w-2xl text-[15px] leading-6 text-[#6E6E73]">
               snip is fully open source. Every line. The elegant parts and the
               parts where we left a TODO from three months ago. No black box. No
               trust required. Just code you can read, fork, and judge silently.
@@ -221,7 +221,7 @@ export default function CompareWipster() {
               href="https://github.com/danielosagie/snip"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-block mt-4 text-sm font-black uppercase tracking-wider underline underline-offset-4 hover:text-[var(--accent-light)] transition-colors"
+              className="mt-5 inline-block rounded-full border border-[#D8D8DE] bg-white px-4 py-2 text-[13px] font-medium leading-[18px] text-[#131315] transition-colors hover:bg-[#F1F1F3]"
             >
               View on GitHub
             </a>
@@ -230,32 +230,32 @@ export default function CompareWipster() {
       </section>
 
       {/* Honest "who should use what" */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[var(--border)] bg-[var(--surface-alt)]">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-4 text-center">
-            HONEST
+      <section className="border-b border-[#E8E8EC] bg-[#FAFAFA] px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="mb-4 text-center text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Honest
             <br />
-            ADVICE.
+            advice.
           </h2>
-          <p className="text-center text-lg text-[var(--foreground-muted)] font-medium mb-16 max-w-lg mx-auto">
+          <p className="mx-auto mb-16 max-w-lg text-center text-[15px] leading-6 text-[#6E6E73]">
             Wipster is genuinely good software built by people who care about
             video review. We just think there's room for something simpler. Here
             are the facts.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             {/* Use Wipster if... */}
-            <div className="border-2 border-[var(--border)] bg-[var(--background)] shadow-[8px_8px_0px_0px_var(--shadow-color)]">
-              <div className="border-b-2 border-[var(--border)] p-6">
-                <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter">
+            <div className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
+              <div className="border-b border-[#F1F1F3] p-6">
+                <h3 className="text-[20px] font-semibold leading-7 tracking-[-0.5px] text-[#131315]">
                   Use Wipster if...
                 </h3>
               </div>
               <div className="p-6">
                 <ul className="space-y-5">
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       You need built-in approval workflows with multiple review
@@ -263,8 +263,8 @@ export default function CompareWipster() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       You're an established media team that's already invested in
@@ -272,8 +272,8 @@ export default function CompareWipster() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       You want deep review stages with version comparisons,
@@ -281,8 +281,8 @@ export default function CompareWipster() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       Per-user pricing is fine because your budget is already
@@ -290,7 +290,7 @@ export default function CompareWipster() {
                     </span>
                   </li>
                 </ul>
-                <p className="text-sm text-[var(--foreground-muted)] mt-6 pt-4 border-t-2 border-[var(--border-subtle)]">
+                <p className="mt-6 border-t border-[#F1F1F3] pt-4 text-[13px] leading-5 text-[#6E6E73]">
                   Seriously, Wipster is good. If this is you, go use it. We'll
                   be here if you change your mind later.
                 </p>
@@ -298,17 +298,17 @@ export default function CompareWipster() {
             </div>
 
             {/* Use snip if... */}
-            <div className="border-2 border-[var(--border)] bg-[var(--surface-strong)] text-[var(--foreground-inverse)] shadow-[8px_8px_0px_0px_var(--shadow-accent)]">
-              <div className="border-b-2 border-[var(--border)] p-6">
-                <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter text-[var(--accent-light)]">
+            <div className="overflow-hidden rounded-[14px] bg-[#0A0A0B] text-white">
+              <div className="border-b border-[#26262A] p-6">
+                <h3 className="text-[20px] font-semibold leading-7 tracking-[-0.5px] text-white">
                   Use snip if...
                 </h3>
               </div>
               <div className="p-6">
                 <ul className="space-y-5">
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You're a small team or agency that just needs to share cuts
@@ -316,8 +316,8 @@ export default function CompareWipster() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You hate per-seat pricing with a passion that concerns your
@@ -325,8 +325,8 @@ export default function CompareWipster() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You want clients to review with just a link, no account
@@ -334,8 +334,8 @@ export default function CompareWipster() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You value open source and want to know exactly what
@@ -343,7 +343,7 @@ export default function CompareWipster() {
                     </span>
                   </li>
                 </ul>
-                <p className="text-sm text-[var(--foreground-muted)] mt-6 pt-4 border-t border-[#333]">
+                <p className="mt-6 border-t border-[#26262A] pt-4 text-[13px] leading-5 text-[#A0A0A5]">
                   We do less than Wipster. Proudly. Upload, share, comment. Go
                   home. That's 90% of what anyone actually needs.
                 </p>
@@ -354,23 +354,23 @@ export default function CompareWipster() {
       </section>
 
       {/* CTA */}
-      <section className="px-6 py-32 bg-[var(--background)]">
-        <div className="max-w-4xl mx-auto text-center flex flex-col items-center">
-          <h2 className="text-7xl md:text-9xl font-black uppercase tracking-tighter leading-[0.8] mb-4">
-            START
+      <section className="bg-[#0A0A0B] px-6 py-32 text-white">
+        <div className="mx-auto flex max-w-4xl flex-col items-center text-center">
+          <h2 className="mb-4 text-[36px] font-medium leading-[1.25] tracking-[-1.8px] text-white sm:text-[60px]">
+            Start
             <br />
-            NOW.
+            now.
           </h2>
-          <p className="text-xl md:text-2xl text-[var(--foreground-muted)] font-medium mb-12 max-w-md">
+          <p className="mb-10 max-w-md text-[16px] leading-6 text-[#A0A0A5]">
             $25/month. Unlimited seats. Open source. No per-user nonsense.
           </p>
           <Link
             to="/sign-up"
-            className="bg-[var(--surface-strong)] text-[var(--foreground-inverse)] px-12 py-6 border-2 border-[var(--border)] text-2xl font-black uppercase tracking-wider hover:bg-[var(--accent)] hover:border-[var(--accent)] transition-colors shadow-[12px_12px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[8px_8px_0px_0px_var(--shadow-accent)]"
+            className="rounded-full bg-white px-6 py-3 text-[14px] font-medium leading-5 text-[#131315] transition-opacity hover:opacity-90"
           >
-            START FREE TRIAL
+            Start free
           </Link>
-          <p className="text-sm text-[var(--foreground-muted)] mt-6">
+          <p className="mt-6 text-[13px] leading-5 text-[#A0A0A5]">
             No credit card required. No per-seat gotchas.
             <br />
             Just video review that doesn't require a spreadsheet to budget.

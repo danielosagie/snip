@@ -249,9 +249,9 @@ export function ContractEditor({
 
   if (!editor) {
     return chromeMode === "bare" ? (
-      <div className="text-sm text-[#888] p-4">Loading editor…</div>
+      <div className="p-4 text-sm text-[#6E6E73]">Loading editor…</div>
     ) : (
-      <div className="border-2 border-[#1a1a1a] p-6 text-sm text-[#888]">
+      <div className="rounded-[14px] border border-[#E8E8EC] bg-white p-6 text-sm text-[#6E6E73]">
         Loading editor…
       </div>
     );
@@ -275,9 +275,9 @@ export function ContractEditor({
   }
 
   return (
-    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+    <div className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
       {editable ? <Toolbar editor={editor} /> : null}
-      <div className="bg-white border-t-2 border-[#1a1a1a]">
+      <div className="border-t border-[#E8E8EC] bg-white">
         <EditorContent
           editor={editor}
           className="contract-editor min-h-[400px] max-h-[55vh] overflow-y-auto px-6 py-5 text-[15px] leading-relaxed"
@@ -286,19 +286,19 @@ export function ContractEditor({
       <style>{`
         .contract-editor .ProseMirror {
           outline: none;
-          color: #1a1a1a;
-          font-family: 'Times New Roman', Georgia, serif;
+          color: #131315;
+          font-family: 'Inter Tight', system-ui, sans-serif;
         }
         .contract-editor .ProseMirror h1 {
           font-size: 26px;
-          font-weight: 900;
+          font-weight: 600;
           margin: 1em 0 0.5em;
           letter-spacing: -0.01em;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         }
         .contract-editor .ProseMirror h2 {
           font-size: 20px;
-          font-weight: 800;
+          font-weight: 600;
           margin: 1.2em 0 0.4em;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         }
@@ -316,13 +316,15 @@ export function ContractEditor({
         }
         .contract-editor .ProseMirror li { margin: 0.2em 0; }
         .contract-editor .ProseMirror blockquote {
-          border-left: 3px solid #FF6600;
-          padding-left: 12px;
-          color: #555;
+          border: 1px solid #E8E8EC;
+          border-radius: 11px;
+          padding: 10px 12px;
+          color: #6E6E73;
+          background: #FAFAFA;
           margin: 0.8em 0;
         }
         .contract-editor .ProseMirror a {
-          color: #FF6600;
+          color: #D14E00;
           text-decoration: underline;
         }
         .contract-editor .ProseMirror table {
@@ -332,16 +334,16 @@ export function ContractEditor({
         }
         .contract-editor .ProseMirror th,
         .contract-editor .ProseMirror td {
-          border: 1px solid #1a1a1a;
+          border: 1px solid #E8E8EC;
           padding: 6px 10px;
           vertical-align: top;
         }
         .contract-editor .ProseMirror th {
-          background: #e8e8e0;
+          background: #F1F1F3;
           font-weight: 700;
         }
         .contract-editor .ProseMirror[contenteditable="false"] {
-          color: #1a1a1a;
+          color: #131315;
         }
       `}</style>
     </div>
@@ -401,7 +403,7 @@ function ContractEditorStyles() {
         margin: 0.8em 0;
       }
       .contract-editor .ProseMirror a {
-        color: #FF6600;
+        color: #D14E00;
         text-decoration: underline;
       }
       .contract-editor .ProseMirror table {
@@ -449,7 +451,7 @@ function Toolbar({ editor }: { editor: Editor }) {
     return null;
   }
   return (
-    <div className="flex flex-wrap items-center gap-0.5 p-1 bg-[#e8e8e0]">
+    <div className="flex flex-wrap items-center gap-0.5 bg-[#FAFAFA] p-1">
       <ToolbarGroup>
         <ToolButton
           onClick={() => editor.chain().focus().undo().run()}
@@ -614,7 +616,7 @@ function Toolbar({ editor }: { editor: Editor }) {
 
 function ToolbarGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-0.5 pr-1 mr-1 border-r-2 border-[#1a1a1a] last:border-r-0 last:mr-0">
+    <div className="mr-1 flex items-center gap-0.5 border-r border-[#E8E8EC] pr-1 last:mr-0 last:border-r-0">
       {children}
     </div>
   );
@@ -641,10 +643,10 @@ function ToolButton({
       title={title}
       aria-label={title}
       className={
-        "inline-flex h-7 w-7 items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed " +
+        "inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 " +
         (active
-          ? "bg-[#1a1a1a] text-[#f0f0e8]"
-          : "text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]")
+          ? "bg-[#FFF0E6] text-[#D14E00]"
+          : "text-[#131315] hover:bg-[#F1F1F3]")
       }
     >
       {children}
@@ -773,7 +775,7 @@ function BubbleBtn({
       title={title}
       aria-label={title}
       className={
-        "inline-flex h-7 w-7 items-center justify-center rounded-[8px] transition-colors " +
+        "inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors " +
         (active
           ? "bg-[#FFF0E6] text-[#D14E00]"
           : "text-[#131315] hover:bg-[#F1F1F3]")
@@ -803,7 +805,7 @@ function EditorBlockMenu({ editor }: { editor: Editor }) {
             e.preventDefault();
             setExpanded((v) => !v);
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#D8D8DE] bg-white text-[#131315] transition-colors hover:bg-[#F7F7F8]"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#131315] transition-colors hover:bg-[#F1F1F3]"
           title="Insert block"
           aria-label="Insert block"
         >
@@ -950,7 +952,7 @@ function FontFamilySelect({ editor }: { editor: Editor }) {
           editor.chain().focus().setFontFamily(next).run();
         }
       }}
-      className="h-7 px-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] focus:outline-none"
+      className="h-7 rounded-full border border-[#D8D8DE] bg-white px-2.5 text-xs font-medium text-[#131315] outline-none hover:bg-[#F1F1F3] focus:border-[#FF6600]"
     >
       <option value="">Default</option>
       {FONT_FAMILIES.map((f) => (
@@ -979,7 +981,7 @@ function FontSizeSelect({ editor }: { editor: Editor }) {
           editor.chain().focus().setFontSize(next).run();
         }
       }}
-      className="h-7 px-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-mono font-bold hover:bg-[#e8e8e0] focus:outline-none w-[68px]"
+      className="h-7 w-[68px] rounded-full border border-[#D8D8DE] bg-white px-2.5 text-xs font-medium text-[#131315] outline-none hover:bg-[#F1F1F3] focus:border-[#FF6600]"
     >
       <option value="">Auto</option>
       {FONT_SIZES.map((s) => (

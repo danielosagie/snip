@@ -46,7 +46,7 @@ export function DesktopUninstallModal() {
         <DialogHeader>
           <DialogTitle>Uninstall snip Desktop</DialogTitle>
           <DialogDescription>
-            This removes the app and its local data — the drive unmounts and
+            This removes the app and its local data. The drive unmounts and
             macFUSE stays installed. Your cloud files are not affected.
           </DialogDescription>
         </DialogHeader>
@@ -55,7 +55,7 @@ export function DesktopUninstallModal() {
             type="button"
             onClick={() => setOpen(false)}
             disabled={busy}
-            className="px-4 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors disabled:opacity-50"
+            className="rounded-full border border-[#D8D8DE] bg-white px-4 py-2 text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] disabled:opacity-50"
           >
             Cancel
           </button>
@@ -63,7 +63,7 @@ export function DesktopUninstallModal() {
             type="button"
             onClick={() => void confirm()}
             disabled={busy}
-            className="px-4 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#b91c1c] bg-[#b91c1c] text-[#f0f0e8] hover:bg-[#9a1010] transition-colors disabled:opacity-50"
+            className="rounded-full px-4 py-2 text-xs font-medium text-[#D8434F] transition-colors hover:bg-[#FFF5F5] disabled:opacity-50"
           >
             {busy ? "Uninstalling…" : "Uninstall"}
           </button>

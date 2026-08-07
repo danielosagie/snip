@@ -159,7 +159,7 @@ export function VideoPaywallControl({
         ) {
           setError(
             result.status === "noPaywall"
-              ? "Paywall was just cleared — retry."
+              ? "Paywall was just cleared. Retry."
               : result.status === "videoNotFound"
                 ? "Video not found."
                 : "Payment simulation failed.",
@@ -199,16 +199,15 @@ export function VideoPaywallControl({
           size="sm"
           onClick={() => void handlePay()}
           disabled={busy !== null}
-          className="bg-[#FF6600] hover:bg-[#FF7A1F]"
         >
           <Lock className="mr-1.5 h-3.5 w-3.5" />
           {busy === "pay"
             ? "Opening checkout…"
-            : `Download — ${priceLabel}`}
+            : `Download · ${priceLabel}`}
         </Button>
         {!stripeReady ? (
-          <span className="text-[10px] uppercase tracking-widest text-[#888] font-mono">
-            demo
+          <span className="rounded-full bg-[#F1F1F3] px-2 py-1 text-[11px] font-medium text-[#6E6E73]">
+            Demo
           </span>
         ) : null}
       </div>
@@ -221,12 +220,12 @@ export function VideoPaywallControl({
         />
       ) : null}
       {paywall.description ? (
-        <div className="text-xs text-[#888] max-w-[280px] text-right">
+        <div className="max-w-[280px] text-right text-xs text-[#6E6E73]">
           {paywall.description}
         </div>
       ) : null}
       {error ? (
-        <div className="text-xs text-[#dc2626] border-l-2 border-[#dc2626] pl-2 max-w-[280px]">
+        <div className="max-w-[280px] rounded-[11px] bg-[#FFF5F5] px-3 py-2 text-xs text-[#8A2B34]">
           {error}
         </div>
       ) : null}
@@ -261,7 +260,7 @@ function PaywallEditTrigger({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 px-2 py-1 border-2 border-[#1a1a1a] text-[10px] font-bold uppercase tracking-wider hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+      className="inline-flex items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-2.5 py-1 text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
     >
       <DollarSign className="h-3 w-3" />
       {label}
@@ -330,7 +329,7 @@ function PaywallEditor({
         <div className="space-y-3">
           <div className="flex gap-2">
             <label className="flex-1">
-              <div className="text-[10px] uppercase tracking-[0.15em] font-bold text-[#888] mb-1">
+              <div className="mb-1 text-xs font-medium text-[#6E6E73]">
                 Price
               </div>
               <Input
@@ -343,7 +342,7 @@ function PaywallEditor({
               />
             </label>
             <label className="w-24">
-              <div className="text-[10px] uppercase tracking-[0.15em] font-bold text-[#888] mb-1">
+              <div className="mb-1 text-xs font-medium text-[#6E6E73]">
                 Currency
               </div>
               <Input
@@ -351,13 +350,12 @@ function PaywallEditor({
                 onChange={(e) =>
                   setCurrency(e.target.value.toLowerCase().slice(0, 4))
                 }
-                className="uppercase"
               />
             </label>
           </div>
           <label className="block">
-            <div className="text-[10px] uppercase tracking-[0.15em] font-bold text-[#888] mb-1">
-              Description (optional)
+            <div className="mb-1 text-xs font-medium text-[#6E6E73]">
+              Description
             </div>
             <Input
               placeholder="Final 60s hero edit, broadcast-ready"
@@ -365,16 +363,16 @@ function PaywallEditor({
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          <p className="text-[11px] text-[#666]">
+          <p className="text-[11px] text-[#6E6E73]">
             Snip keeps 5% + 30¢ per paid delivery. The remainder is paid to
             your connected Stripe account.
           </p>
           {err ? (
-            <div className="text-xs text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
+            <div className="rounded-[11px] bg-[#FFF5F5] px-3 py-2 text-xs text-[#8A2B34]">
               {err}
             </div>
           ) : null}
-          <div className="flex justify-between items-center pt-2 border-t-2 border-[#1a1a1a]">
+          <div className="flex items-center justify-between border-t border-[#E8E8EC] pt-3">
             {existing ? (
               <Button
                 variant="outline"
@@ -389,7 +387,6 @@ function PaywallEditor({
             <Button
               onClick={() => void handleSave()}
               disabled={saving || !priceDollars}
-              className="bg-[#FF6600] hover:bg-[#FF7A1F]"
             >
               {saving ? "Saving…" : existing ? "Save changes" : "Add paywall"}
             </Button>

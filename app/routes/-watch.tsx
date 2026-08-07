@@ -185,9 +185,9 @@ export default function WatchPage() {
 
   if (videoData === undefined) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA]">
         <DelayedAppear>
-          <div className="text-[#888]">Opening…</div>
+          <div className="text-[#6E6E73]">Opening…</div>
         </DelayedAppear>
       </div>
     );
@@ -195,11 +195,11 @@ export default function WatchPage() {
 
   if (!videoData?.video) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
-              <AlertCircle className="h-6 w-6 text-[#dc2626]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
+              <AlertCircle className="h-6 w-6 text-[#8A2B34]" />
             </div>
             <CardTitle>Video unavailable</CardTitle>
             <CardDescription>
@@ -229,25 +229,25 @@ export default function WatchPage() {
       : undefined;
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-[#f0f0e8]">
+    <div className="flex h-[100dvh] flex-col bg-[#FAFAFA] text-[#131315]">
       {/* Header */}
-      <header className="flex-shrink-0 bg-[#f0f0e8] border-b-2 border-[#1a1a1a] px-5 py-3 flex items-center justify-between">
+      <header className="flex flex-shrink-0 items-center justify-between border-b border-[#E8E8EC] bg-white px-5 py-3">
         <div className="flex items-center gap-4">
           <Link
             preload="intent"
             to="/"
-            className="text-[#888] hover:text-[#1a1a1a] text-sm flex items-center gap-2 font-bold"
+            className="flex items-center gap-2 text-sm font-semibold text-[#6E6E73] transition-colors hover:text-[#131315]"
           >
             snip
           </Link>
-          <div className="h-4 w-[2px] bg-[#1a1a1a]/20" />
-          <h1 className="text-base font-black truncate max-w-[150px] sm:max-w-[300px]">{video.title}</h1>
+          <div className="h-4 w-px bg-[#E8E8EC]" />
+          <h1 className="max-w-[150px] truncate text-base font-semibold tracking-[-0.01em] text-[#131315] sm:max-w-[300px]">{video.title}</h1>
         </div>
-        <div className="flex items-center gap-3 text-xs text-[#888]">
+        <div className="flex items-center gap-3 text-xs text-[#6E6E73]">
           {video.duration && (
             <>
-              <span className="hidden sm:inline text-[#ccc]">·</span>
-              <span className="hidden sm:inline font-mono">{formatDuration(video.duration)}</span>
+              <span className="hidden text-[#A0A0A5] sm:inline">·</span>
+              <span className="hidden sm:inline">{formatDuration(video.duration)}</span>
             </>
           )}
           <Button
@@ -278,13 +278,13 @@ export default function WatchPage() {
       {/* Main content - horizontal split */}
       <div className="flex-1 flex overflow-hidden">
         {/* Video player area */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#0A0A0B]">
           {downloadError ? (
             <div
               role="alert"
               aria-live="assertive"
               aria-atomic="true"
-              className="border-b border-[#dc2626]/40 bg-[#f8d7d7] px-5 py-3 text-sm text-[#7f1d1d]"
+              className="border-b border-[#E8E8EC] bg-[#FFF5F5] px-5 py-3 text-sm text-[#8A2B34]"
             >
               {downloadError}
             </div>
@@ -314,13 +314,13 @@ export default function WatchPage() {
         </div>
 
         {/* Comments sidebar — desktop */}
-        <aside className="hidden lg:flex w-80 xl:w-96 border-l-2 border-[#1a1a1a] flex-col bg-[#f0f0e8]">
-          <div className="flex-shrink-0 px-5 py-4 border-b border-[#1a1a1a]/10 flex items-center justify-between">
-            <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2 text-[#1a1a1a]">
+        <aside className="hidden w-80 flex-col border-l border-[#E8E8EC] bg-white lg:flex xl:w-96">
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-[#F1F1F3] px-5 py-4">
+            <h2 className="flex items-center gap-2 text-sm font-semibold tracking-[-0.01em] text-[#131315]">
               Discussion
             </h2>
             {comments && comments.length > 0 && (
-              <span className="text-[11px] font-medium text-[#888] bg-[#1a1a1a]/5 px-2 py-0.5 rounded-full">
+              <span className="rounded-full bg-[#F1F1F3] px-2 py-0.5 text-[11px] font-medium text-[#6E6E73]">
                 {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
               </span>
             )}
@@ -329,46 +329,46 @@ export default function WatchPage() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {comments === undefined ? (
               <DelayedAppear>
-                <p className="text-sm text-[#888]">Loading comments…</p>
+                <p className="text-sm text-[#6E6E73]">Loading comments…</p>
               </DelayedAppear>
             ) : comments.length === 0 ? (
-              <p className="text-sm text-[#888]">
+              <p className="text-sm text-[#6E6E73]">
                 {isUserLoaded && user
-                  ? "No comments yet — yours will pin to the exact frame you're watching."
+                  ? "No comments yet. Yours will pin to the exact frame you're watching."
                   : "No comments yet."}
               </p>
             ) : (
               <div className="space-y-3">
                 {comments.map((comment) => (
-                  <article key={comment._id} className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+                  <article key={comment._id} className="rounded-[11px] border border-[#E8E8EC] bg-white p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
+                      <div className="text-sm font-semibold text-[#131315]">{comment.userName}</div>
                       <button
                         type="button"
-                        className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                        className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                         onClick={() => playerRef.current?.seekTo(comment.timestampSeconds, { play: true })}
                       >
                         {formatTimestamp(comment.timestampSeconds)}
                       </button>
                     </div>
-                    <p className="text-sm text-[#1a1a1a] mt-1 whitespace-pre-wrap">{comment.text}</p>
-                    <p className="text-[11px] text-[#888] mt-1">{formatRelativeTime(comment._creationTime)}</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-[#131315]">{comment.text}</p>
+                    <p className="mt-1 text-[11px] text-[#6E6E73]">{formatRelativeTime(comment._creationTime)}</p>
 
                     {comment.replies.length > 0 ? (
-                      <div className="mt-3 ml-4 border-l-2 border-[#1a1a1a] pl-3 space-y-2">
+                      <div className="ml-4 mt-3 space-y-2 border-l border-[#F1F1F3] pl-3">
                         {comment.replies.map((reply) => (
                           <div key={reply._id} className="text-sm">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
+                              <span className="font-semibold text-[#131315]">{reply.userName}</span>
                               <button
                                 type="button"
-                                className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                                className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                                 onClick={() => playerRef.current?.seekTo(reply.timestampSeconds, { play: true })}
                               >
                                 {formatTimestamp(reply.timestampSeconds)}
                               </button>
                             </div>
-                            <p className="text-[#1a1a1a] whitespace-pre-wrap">{reply.text}</p>
+                            <p className="whitespace-pre-wrap text-[#131315]">{reply.text}</p>
                           </div>
                         ))}
                       </div>
@@ -379,10 +379,10 @@ export default function WatchPage() {
             )}
           </div>
           
-          <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8] p-4">
+          <div className="flex-shrink-0 border-t border-[#E8E8EC] bg-white p-4">
             {isUserLoaded && user ? (
               <form onSubmit={handleSubmitComment} className="space-y-2">
-                <div className="flex items-center gap-2 text-xs text-[#666]">
+                <div className="flex items-center gap-2 text-xs text-[#6E6E73]">
                   <Clock className="h-3.5 w-3.5" />
                   Comment at {formatTimestamp(currentTime)}
                 </div>
@@ -392,7 +392,7 @@ export default function WatchPage() {
                   placeholder="Leave a comment…"
                   className="min-h-[90px] text-sm"
                 />
-                {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
+                {commentError ? <p className="text-xs text-[#8A2B34]">{commentError}</p> : null}
                 <Button type="submit" size="sm" disabled={!commentText.trim() || isSubmittingComment} className="w-full">
                   <MessageSquare className="mr-1.5 h-4 w-4" />
                   {isSubmittingComment ? "Posting…" : "Post comment"}
@@ -415,12 +415,12 @@ export default function WatchPage() {
 
       {/* Comments overlay — mobile */}
       {mobileCommentsOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex flex-col bg-[#f0f0e8]">
-          <div className="flex-shrink-0 px-5 py-4 border-b-2 border-[#1a1a1a] flex items-center justify-between">
-            <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2 text-[#1a1a1a]">
+        <div className="fixed inset-0 z-50 flex flex-col bg-white lg:hidden">
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-[#E8E8EC] px-5 py-4">
+            <h2 className="flex items-center gap-2 text-sm font-semibold tracking-[-0.01em] text-[#131315]">
               Discussion
               {comments && comments.length > 0 && (
-                <span className="text-[11px] font-medium text-[#888] bg-[#1a1a1a]/5 px-2 py-0.5 rounded-full">
+                <span className="rounded-full bg-[#F1F1F3] px-2 py-0.5 text-[11px] font-medium text-[#6E6E73]">
                   {comments.length}
                 </span>
               )}
@@ -438,23 +438,23 @@ export default function WatchPage() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {comments === undefined ? (
               <DelayedAppear>
-                <p className="text-sm text-[#888]">Loading comments…</p>
+                <p className="text-sm text-[#6E6E73]">Loading comments…</p>
               </DelayedAppear>
             ) : comments.length === 0 ? (
-              <p className="text-sm text-[#888]">
+              <p className="text-sm text-[#6E6E73]">
                 {isUserLoaded && user
-                  ? "No comments yet — yours will pin to the exact frame you're watching."
+                  ? "No comments yet. Yours will pin to the exact frame you're watching."
                   : "No comments yet."}
               </p>
             ) : (
               <div className="space-y-3">
                 {comments.map((comment) => (
-                  <article key={comment._id} className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+                  <article key={comment._id} className="rounded-[11px] border border-[#E8E8EC] bg-white p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
+                      <div className="text-sm font-semibold text-[#131315]">{comment.userName}</div>
                       <button
                         type="button"
-                        className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                        className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                         onClick={() => {
                           playerRef.current?.seekTo(comment.timestampSeconds, { play: true });
                           setMobileCommentsOpen(false);
@@ -463,18 +463,18 @@ export default function WatchPage() {
                         {formatTimestamp(comment.timestampSeconds)}
                       </button>
                     </div>
-                    <p className="text-sm text-[#1a1a1a] mt-1 whitespace-pre-wrap">{comment.text}</p>
-                    <p className="text-[11px] text-[#888] mt-1">{formatRelativeTime(comment._creationTime)}</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-[#131315]">{comment.text}</p>
+                    <p className="mt-1 text-[11px] text-[#6E6E73]">{formatRelativeTime(comment._creationTime)}</p>
 
                     {comment.replies.length > 0 ? (
-                      <div className="mt-3 ml-4 border-l-2 border-[#1a1a1a] pl-3 space-y-2">
+                      <div className="ml-4 mt-3 space-y-2 border-l border-[#F1F1F3] pl-3">
                         {comment.replies.map((reply) => (
                           <div key={reply._id} className="text-sm">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
+                              <span className="font-semibold text-[#131315]">{reply.userName}</span>
                               <button
                                 type="button"
-                                className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                                className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                                 onClick={() => {
                                   playerRef.current?.seekTo(reply.timestampSeconds, { play: true });
                                   setMobileCommentsOpen(false);
@@ -483,7 +483,7 @@ export default function WatchPage() {
                                 {formatTimestamp(reply.timestampSeconds)}
                               </button>
                             </div>
-                            <p className="text-[#1a1a1a] whitespace-pre-wrap">{reply.text}</p>
+                            <p className="whitespace-pre-wrap text-[#131315]">{reply.text}</p>
                           </div>
                         ))}
                       </div>
@@ -494,10 +494,10 @@ export default function WatchPage() {
             )}
           </div>
           
-          <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8] p-4 pb-safe">
+          <div className="flex-shrink-0 border-t border-[#E8E8EC] bg-white p-4 pb-safe">
             {isUserLoaded && user ? (
               <form onSubmit={handleSubmitComment} className="space-y-2">
-                <div className="flex items-center gap-2 text-xs text-[#666]">
+                <div className="flex items-center gap-2 text-xs text-[#6E6E73]">
                   <Clock className="h-3.5 w-3.5" />
                   Comment at {formatTimestamp(currentTime)}
                 </div>
@@ -507,7 +507,7 @@ export default function WatchPage() {
                   placeholder="Leave a comment…"
                   className="min-h-[90px] text-sm"
                 />
-                {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
+                {commentError ? <p className="text-xs text-[#8A2B34]">{commentError}</p> : null}
                 <Button type="submit" size="sm" disabled={!commentText.trim() || isSubmittingComment} className="w-full">
                   <MessageSquare className="mr-1.5 h-4 w-4" />
                   {isSubmittingComment ? "Posting…" : "Post comment"}

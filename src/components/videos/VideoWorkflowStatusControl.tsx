@@ -29,9 +29,9 @@ function workflowStatusLabel(status: VideoWorkflowStatus) {
 }
 
 function workflowStatusDotColor(status: VideoWorkflowStatus) {
-  if (status === "done") return "bg-[#FF6600]";
-  if (status === "rework") return "bg-[#ca8a04]";
-  return "bg-[#888]";
+  if (status === "done") return "bg-[#225B36]";
+  if (status === "rework") return "bg-[#D39329]";
+  return "bg-[#FF6600]";
 }
 
 export type VideoWorkflowStatusButtonProps = {
@@ -63,16 +63,12 @@ export const VideoWorkflowStatusButton = forwardRef<
       type="button"
       disabled={disabled}
       className={cn(
-        "inline-flex items-center gap-1.5 transition-colors",
-        soft
-          ? "rounded-full bg-[#F1F1F3] px-2.5 py-1 text-[11px] font-medium tracking-normal text-[#6E6E73] hover:bg-[#E8E8EC] hover:text-[#131315]"
-          : "font-bold uppercase tracking-wider",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium tracking-normal text-[#6E6E73] transition-colors hover:bg-[#E8E8EC] hover:text-[#131315]",
+        soft ? "bg-[#F1F1F3]" : "border border-[#D8D8DE] bg-white",
         disabled
           ? "cursor-not-allowed opacity-50"
-          : soft
-            ? "cursor-pointer"
-            : "cursor-pointer hover:text-[#1a1a1a]",
-        !soft && (isLg ? "text-xs text-[#1a1a1a]" : "text-[10px] text-[#888]"),
+          : "cursor-pointer",
+        isLg ? "text-xs" : "text-[11px]",
         className,
       )}
       aria-label="Update review status"
@@ -140,10 +136,7 @@ export function VideoWorkflowStatusControl({
       <DropdownMenuContent
         align="start"
         onClick={handleClick}
-        className={cn(
-          soft &&
-            "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]",
-        )}
+        className="rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315]"
       >
         <DropdownMenuRadioGroup
           value={status}
@@ -157,9 +150,7 @@ export function VideoWorkflowStatusControl({
               key={option.value}
               value={option.value}
               className={cn(
-                "gap-2",
-                soft &&
-                  "rounded-[8px] py-1.5 pl-8 pr-2.5 text-[13px] font-medium hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]",
+                "gap-2 rounded-[8px] py-1.5 pl-8 pr-2.5 text-[13px] font-medium hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]",
               )}
             >
               <span className={cn(

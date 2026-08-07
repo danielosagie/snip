@@ -307,13 +307,13 @@ export function ContractWizardFullScreen({
   })();
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#f0f0e8]">
+    <div className="surface-soft fixed inset-0 z-50 flex flex-col bg-[#FAFAFA]">
       {/* Top bar: stepper + close */}
-      <header className="flex-shrink-0 border-b-2 border-[#1a1a1a] px-6 py-3 flex items-center gap-4">
-        <div className="flex items-center gap-2 font-black text-sm uppercase tracking-tight">
+      <header className="flex flex-shrink-0 items-center gap-4 border-b border-[#E8E8EC] bg-white px-6 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#131315]">
           <FileSignature className="h-4 w-4 text-[#FF6600]" />
           New contract
-          <span className="text-[#888] font-normal normal-case ml-2 truncate max-w-[40ch]">
+          <span className="ml-2 max-w-[40ch] truncate font-normal text-[#6E6E73]">
             · {projectName}
           </span>
         </div>
@@ -323,7 +323,7 @@ export function ContractWizardFullScreen({
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex items-center gap-1 px-2 py-1 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#1a1a1a] hover:text-[#f0f0e8]"
+          className="inline-flex items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-3 py-1.5 text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
           title="Exit wizard (Esc)"
         >
           <X className="h-3.5 w-3.5" />
@@ -333,7 +333,7 @@ export function ContractWizardFullScreen({
 
       {/* Two-pane body. Left = question. Right = live preview. */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] min-h-0">
-        <section className="overflow-y-auto p-8 sm:p-12 flex flex-col border-r-0 lg:border-r-2 border-[#1a1a1a]">
+        <section className="flex flex-col overflow-y-auto border-r-0 border-[#E8E8EC] p-8 sm:p-12 lg:border-r">
           {stage === "type" ? (
             <TypePicker
               selected={projectType}
@@ -360,13 +360,13 @@ export function ContractWizardFullScreen({
               onSubmit={advance}
             />
           ) : (
-            <div className="text-[#888] text-sm">
-              No questions for this stage — click <strong>Next</strong>.
+            <div className="text-sm text-[#6E6E73]">
+              No questions for this stage. Click <strong>Next</strong>.
             </div>
           )}
 
           {error ? (
-            <div className="mt-4 text-sm text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
+            <div className="mt-4 rounded-[11px] bg-[#FFF5F5] p-3 text-sm text-[#8A2B34]">
               {error}
             </div>
           ) : null}
@@ -383,15 +383,14 @@ export function ContractWizardFullScreen({
               <ArrowLeft className="h-4 w-4 mr-1.5" />
               Back
             </Button>
-            <div className="text-[10px] font-mono text-[#888] uppercase tracking-wider hidden sm:block">
-              Press <kbd className="px-1 border border-[#1a1a1a] bg-[#e8e8e0]">Enter</kbd>
+            <div className="hidden text-xs text-[#6E6E73] sm:block">
+              Press <kbd className="rounded-[6px] border border-[#D8D8DE] bg-[#F1F1F3] px-1.5 py-0.5 text-[#131315]">Enter</kbd>
               {" "}to continue
             </div>
             {stage === "review" ? (
               <Button
                 onClick={() => void handleSubmit()}
                 disabled={submitting}
-                className="bg-[#FF6600] hover:bg-[#FF7A1F]"
               >
                 <Check className="h-4 w-4 mr-1.5" />
                 {submitting ? "Generating…" : "Generate contract"}
@@ -405,8 +404,8 @@ export function ContractWizardFullScreen({
           </div>
         </section>
 
-        <section className="border-t-2 lg:border-t-0 border-[#1a1a1a] bg-[#e8e8e0] overflow-y-auto flex flex-col">
-          <div className="sticky top-0 z-10 px-4 py-2 bg-[#1a1a1a] text-[#f0f0e8] text-[10px] font-bold uppercase tracking-wider flex items-center justify-between">
+        <section className="flex flex-col overflow-y-auto border-t border-[#E8E8EC] bg-[#FAFAFA] lg:border-t-0">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#E8E8EC] bg-white px-4 py-2 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             <span>Live preview</span>
             <div className="flex items-center gap-2">
               {previewUserEdited ? (
@@ -416,14 +415,14 @@ export function ContractWizardFullScreen({
                     setPreviewUserEdited(false);
                     setPreviewOverrideHtml(null);
                   }}
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]"
+                  className="inline-flex items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-2.5 py-1 font-sans text-[11px] font-medium normal-case text-[#131315] transition-colors hover:bg-[#F1F1F3]"
                   title="Discard your edits and re-sync with the wizard answers"
                 >
                   <RotateCcw className="h-3 w-3" />
                   Reset
                 </button>
               ) : null}
-              <span className="font-mono opacity-70">
+              <span className="font-sans normal-case text-[#6E6E73]">
                 {!projectType
                   ? "waiting on project type"
                   : previewUserEdited
@@ -440,7 +439,7 @@ export function ContractWizardFullScreen({
               resyncWithHtml={!previewUserEdited}
             />
           ) : (
-            <div className="p-8 text-sm text-[#666]">
+            <div className="p-8 text-sm text-[#6E6E73]">
               The contract will start drafting itself here once you pick a
               project type on the left.
             </div>
@@ -476,22 +475,22 @@ function Stepper({
           <div key={s.id} className="flex items-center gap-2 flex-1 min-w-0">
             <div
               className={cn(
-                "flex items-center justify-center w-6 h-6 text-[10px] font-bold border-2 border-[var(--border)] flex-shrink-0",
+                "flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-medium",
                 isPast
-                  ? "bg-[#FF6600] text-[#f0f0e8]"
+                  ? "bg-[#FFF0E6] text-[#D14E00]"
                   : isCurrent
-                    ? "bg-[var(--foreground)] text-[var(--background)]"
-                    : "bg-[var(--background)] text-[var(--foreground-muted)]",
+                    ? "bg-[#FFF0E6] text-[#D14E00]"
+                    : "bg-[#F1F1F3] text-[#A0A0A5]",
               )}
             >
               {isPast ? <Check className="h-3 w-3" /> : i + 1}
             </div>
             <div
               className={cn(
-                "text-[10px] font-bold uppercase tracking-wider truncate hidden md:block",
+                "hidden truncate text-xs font-medium md:block",
                 isCurrent
-                  ? "text-[var(--foreground)]"
-                  : "text-[var(--foreground-muted)]",
+                  ? "text-[#D14E00]"
+                  : "text-[#6E6E73]",
               )}
             >
               {s.label}
@@ -500,10 +499,10 @@ function Stepper({
               // Use the foreground token at 30% so the track reads on both
               // the forced-light wizard backdrop AND any future theme-
               // respecting variant. Bumped from /20 → /30 for visibility.
-              <div className="flex-1 h-[2px] bg-[var(--foreground)]/30 relative overflow-hidden">
+              <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-[#E8E8EC]">
                 {isCurrent ? (
                   <div
-                    className="absolute inset-y-0 left-0 bg-[#FF6600] transition-all"
+                    className="absolute inset-y-0 left-0 rounded-full bg-[#FF6600] transition-all"
                     style={{ width: `${Math.round(stageProgress * 100)}%` }}
                   />
                 ) : isPast ? (
@@ -527,13 +526,13 @@ function TypePicker({
 }) {
   return (
     <div>
-      <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+      <div className="mb-2 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
         Step 1 of 4
       </div>
-      <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-[#1a1a1a] leading-tight">
+      <h1 className="text-3xl font-semibold leading-tight tracking-[-0.02em] text-[#131315] sm:text-4xl">
         What kind of project is this?
       </h1>
-      <p className="text-sm text-[#666] mt-2 max-w-prose">
+      <p className="mt-2 max-w-prose text-sm text-[#6E6E73]">
         Different project types ask different questions and generate
         type-specific clauses (e.g. raw footage ownership for video, source
         files for design, sync rights for music).
@@ -548,21 +547,21 @@ function TypePicker({
               key={t.type}
               onClick={() => onSelect(t.type)}
               className={cn(
-                "flex items-start gap-3 p-3 border-2 border-[#1a1a1a] text-left transition-colors",
+                "flex items-start gap-3 rounded-[14px] border p-4 text-left transition-colors",
                 isSelected
-                  ? "bg-[#FF6600] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                  ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                  : "border-[#E8E8EC] bg-white text-[#131315] hover:bg-[#FAFAFA]",
               )}
             >
               <div className="flex-shrink-0">
                 <Icon className="h-6 w-6" strokeWidth={1.75} />
               </div>
               <div className="min-w-0">
-                <div className="font-black text-sm">{t.label}</div>
+                <div className="text-sm font-semibold">{t.label}</div>
                 <div
                   className={cn(
                     "text-xs mt-0.5",
-                    isSelected ? "opacity-80" : "text-[#666]",
+                    isSelected ? "text-[#D14E00]" : "text-[#6E6E73]",
                   )}
                 >
                   {t.description}
@@ -598,17 +597,17 @@ function SingleQuestion({
 
   return (
     <div className="max-w-2xl">
-      <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+      <div className="mb-2 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
         {positionLabel}
       </div>
-      <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[#1a1a1a] leading-tight">
+      <h1 className="text-2xl font-semibold leading-tight tracking-[-0.02em] text-[#131315] sm:text-3xl">
         {question.prompt}
         {question.required ? (
-          <span className="ml-2 text-[#dc2626]">*</span>
+          <span className="ml-2 text-[#D8434F]">*</span>
         ) : null}
       </h1>
       {question.help ? (
-        <p className="text-sm text-[#666] mt-2 max-w-prose">{question.help}</p>
+        <p className="mt-2 max-w-prose text-sm text-[#6E6E73]">{question.help}</p>
       ) : null}
 
       <div className="mt-6">
@@ -655,10 +654,10 @@ function SingleQuestion({
                 queueMicrotask(onSubmit);
               }}
               className={cn(
-                "px-4 py-2 border-2 border-[#1a1a1a] text-base font-bold",
+                "rounded-full border px-4 py-2 text-base font-medium transition-colors",
                 value === true
-                  ? "bg-[#FF6600] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] hover:bg-[#e8e8e0]",
+                  ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                  : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
               )}
             >
               Yes
@@ -670,10 +669,10 @@ function SingleQuestion({
                 queueMicrotask(onSubmit);
               }}
               className={cn(
-                "px-4 py-2 border-2 border-[#1a1a1a] text-base font-bold",
+                "rounded-full border px-4 py-2 text-base font-medium transition-colors",
                 value === false
-                  ? "bg-[#FF6600] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] hover:bg-[#e8e8e0]",
+                  ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                  : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
               )}
             >
               No
@@ -735,10 +734,10 @@ function SingleQuestion({
                         type="button"
                         onClick={() => onChange(q.value)}
                         className={cn(
-                          "px-2 py-1 border-2 border-[#1a1a1a] text-xs font-bold transition-colors",
+                          "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                           active
-                            ? "bg-[#FF6600] text-[#f0f0e8]"
-                            : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                            ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                            : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
                         )}
                       >
                         {q.label}
@@ -768,35 +767,35 @@ function ReviewPane({
   const allQuestions = [...UNIVERSAL_QUESTIONS, ...specificQuestions];
   return (
     <div className="max-w-2xl">
-      <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+      <div className="mb-2 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
         Step 4 of 4
       </div>
-      <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[#1a1a1a] leading-tight">
+      <h1 className="text-2xl font-semibold leading-tight tracking-[-0.02em] text-[#131315] sm:text-3xl">
         Ready to generate?
       </h1>
-      <p className="text-sm text-[#666] mt-2 max-w-prose">
+      <p className="mt-2 max-w-prose text-sm text-[#6E6E73]">
         Pressing <strong>Generate contract</strong> creates the full
         structured document on the right with all standard clauses
         (payment, IP transfer, kill fee, dispute resolution) plus the
         type-specific sections. You can edit anything after.
       </p>
-      <div className="mt-4 inline-flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#e8e8e0]">
+      <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-[#FFF0E6] px-3.5 py-2 text-[#D14E00]">
         {(() => {
           const Icon = ICON_FOR_TYPE[projectType] ?? Sparkles;
           return <Icon className="h-5 w-5" strokeWidth={1.75} />;
         })()}
-        <span className="font-black text-sm">{template.label}</span>
+        <span className="text-sm font-semibold">{template.label}</span>
       </div>
-      <div className="mt-4 border-2 border-[#1a1a1a] divide-y divide-[#ccc] bg-[#f0f0e8]">
+      <div className="mt-4 divide-y divide-[#F1F1F3] overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-white">
         {allQuestions.map((q) => {
           const v = answers[q.id];
           if (v === undefined || v === null || String(v).trim() === "") return null;
           return (
             <div key={q.id} className="flex gap-3 p-2 text-xs">
-              <div className="w-44 flex-shrink-0 font-mono text-[#888] uppercase tracking-wider">
+              <div className="w-44 flex-shrink-0 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
                 {q.prompt}
               </div>
-              <div className="flex-1 text-[#1a1a1a] break-words">
+              <div className="flex-1 break-words text-[#131315]">
                 {String(v)}
               </div>
             </div>

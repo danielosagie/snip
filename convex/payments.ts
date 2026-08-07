@@ -6,8 +6,13 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
-import { shareCapabilities } from "./shareAccess";
+import {
+  isShareVideoUnlocked,
+  shareCapabilities,
+} from "./shareAccess";
 import { requireTeamAccess } from "./auth";
+import { resolveBundleVideos } from "./shareBundles";
+import { MAX_LINE_ITEM_AMOUNT_CENTS } from "./paymentsPolicy";
 
 /**
  * Per-delivery payments — V8 isolate side (queries, internal mutations).
@@ -33,7 +38,10 @@ const paymentStatusValidator = v.union(
 );
 
 export const lookupGrantForCheckout = internalQuery({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoIds: v.optional(v.array(v.id("videos"))),
+  },
   handler: async (ctx, args) => {
     const grant = await ctx.db
       .query("shareAccessGrants")
@@ -43,31 +51,20 @@ export const lookupGrantForCheckout = internalQuery({
     const shareLink = await ctx.db.get(grant.shareLinkId);
     if (!shareLink) return null;
 
-    // For bundle links we need a representative video so the existing
-    // payments-row shape (payments.videoId required) keeps working. We use
-    // the first non-deleted item in the bundle. All bundle items share a
-    // project + team by construction, so the team lookup downstream stays
-    // valid regardless of which item we pick.
+    // Bundle payments retain a representative video for legacy earnings/UI
+    // consumers. All bundle items share a project + team by construction.
     let video: Awaited<ReturnType<typeof ctx.db.get<"videos">>> | null = null;
+    let shareItems: Doc<"videos">[] = [];
     let bundleName: string | null = null;
     if (shareLink.videoId) {
       video = await ctx.db.get(shareLink.videoId);
+      if (video && !video.deletedAt) shareItems = [video];
     } else if (shareLink.bundleId) {
       const bundle = await ctx.db.get(shareLink.bundleId);
       if (bundle) {
         bundleName = bundle.name;
-        const items =
-          bundle.kind === "folder"
-            ? bundle.folderId
-              ? await ctx.db
-                  .query("videos")
-                  .withIndex("by_folder", (q) => q.eq("folderId", bundle.folderId))
-                  .collect()
-              : []
-            : await Promise.all((bundle.videoIds ?? []).map((id) => ctx.db.get(id)));
-        const firstReady = items.find(
-          (v): v is NonNullable<typeof v> => Boolean(v && !v.deletedAt),
-        );
+        shareItems = await resolveBundleVideos(ctx, bundle);
+        const firstReady = shareItems.find((item) => !item.deletedAt);
         video = firstReady ?? null;
       }
     }
@@ -77,9 +74,57 @@ export const lookupGrantForCheckout = internalQuery({
     if (!project) return null;
     const team = await ctx.db.get(project.teamId);
     if (!team) return null;
-    return { grant, shareLink, video, project, team, bundleName };
+
+    const requestedIds = args.itemVideoIds ?? [];
+    const uniqueIds = new Set(requestedIds);
+    if (requestedIds.length > 10 || uniqueIds.size !== requestedIds.length) {
+      return null;
+    }
+    const shareItemById = new Map(shareItems.map((item) => [item._id, item]));
+    const priceById = new Map(
+      (shareLink.itemPrices ?? []).map((price) => [price.videoId, price.priceCents]),
+    );
+    const selectedItems = requestedIds.map((videoId) => {
+      const item = shareItemById.get(videoId);
+      const priceCents = priceById.get(videoId);
+      if (!item || priceCents === undefined) return null;
+      if (
+        !Number.isSafeInteger(priceCents) ||
+        priceCents <= 0 ||
+        priceCents > MAX_LINE_ITEM_AMOUNT_CENTS
+      ) {
+        return null;
+      }
+      if (isShareVideoUnlocked(grant, shareLink, videoId)) return null;
+      return { videoId, title: item.title, priceCents };
+    });
+    if (selectedItems.some((item) => item === null)) return null;
+    return {
+      grant,
+      shareLink,
+      video,
+      project,
+      team,
+      bundleName,
+      selectedItems: selectedItems as Array<{
+        videoId: Id<"videos">;
+        title: string;
+        priceCents: number;
+      }>,
+    };
   },
 });
+
+function assertPaymentAmounts(subtotalCents: number, amountCents: number) {
+  if (
+    !Number.isSafeInteger(subtotalCents) ||
+    subtotalCents <= 0 ||
+    !Number.isSafeInteger(amountCents) ||
+    amountCents < subtotalCents
+  ) {
+    throw new Error("Payment amounts must be positive integer cents.");
+  }
+}
 
 export const lookupVideoForCheckout = internalQuery({
   args: { videoId: v.id("videos") },
@@ -107,13 +152,17 @@ export const recordVideoCheckoutCreated = internalMutation({
       v.union(v.literal("connect"), v.literal("platform")),
     ),
     applicationFeeAmountCents: v.optional(v.number()),
+    subtotalCents: v.optional(v.number()),
   },
   returns: v.id("payments"),
   handler: async (ctx, args): Promise<Id<"payments">> => {
+    assertPaymentAmounts(args.subtotalCents ?? args.amountCents, args.amountCents);
     return await ctx.db.insert("payments", {
       teamId: args.teamId,
       videoId: args.videoId,
+      kind: "video",
       clientEmail: args.clientEmail,
+      subtotalCents: args.subtotalCents,
       amountCents: args.amountCents,
       currency: args.currency,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
@@ -140,15 +189,25 @@ export const recordCheckoutCreated = internalMutation({
       v.union(v.literal("connect"), v.literal("platform")),
     ),
     applicationFeeAmountCents: v.optional(v.number()),
+    subtotalCents: v.optional(v.number()),
+    kind: v.optional(v.union(v.literal("share_all"), v.literal("share_item"))),
+    itemVideoIds: v.optional(v.array(v.id("videos"))),
   },
   returns: v.id("payments"),
   handler: async (ctx, args): Promise<Id<"payments">> => {
+    assertPaymentAmounts(args.subtotalCents ?? args.amountCents, args.amountCents);
+    if (args.kind === "share_item" && !args.itemVideoIds?.length) {
+      throw new Error("Per-item payments require item ids.");
+    }
     return await ctx.db.insert("payments", {
       grantId: args.grantId,
       shareLinkId: args.shareLinkId,
       teamId: args.teamId,
       videoId: args.videoId,
+      kind: args.kind,
+      itemVideoIds: args.itemVideoIds,
       clientEmail: args.clientEmail,
+      subtotalCents: args.subtotalCents,
       amountCents: args.amountCents,
       currency: args.currency,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
@@ -176,17 +235,18 @@ export const recordPaymentSucceeded = internalMutation({
     if (!payment) return null;
 
     const now = Date.now();
-    // Guard against a duplicate webhook double-counting the sale.
-    const alreadyCounted = payment.status === "succeeded";
+    // Terminal transitions are idempotent. A delayed completion must also
+    // never resurrect a payment already refunded.
+    if (payment.status === "succeeded" || payment.status === "refunded") {
+      return null;
+    }
     await ctx.db.patch(payment._id, {
       status: "succeeded",
       paidAt: now,
       stripePaymentIntentId:
         args.stripePaymentIntentId ?? payment.stripePaymentIntentId,
     });
-    if (!alreadyCounted) {
-      await applyEarningsDelta(ctx, payment, 1);
-    }
+    await applyEarningsDelta(ctx, payment, 1);
 
     if (payment.grantId) {
       const grant = await ctx.db.get(payment.grantId);
@@ -194,11 +254,25 @@ export const recordPaymentSucceeded = internalMutation({
         // Extend grant TTL on payment so the client keeps access without
         // needing to revisit the share link.
         const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
-        await ctx.db.patch(payment.grantId, {
-          paidAt: now,
-          paymentId: payment._id,
-          expiresAt: Math.max(grant.expiresAt, now + NINETY_DAYS_MS),
-        });
+        if (payment.kind === "share_item") {
+          const unlockedVideoIds = Array.from(
+            new Set([
+              ...(grant.unlockedVideoIds ?? []),
+              ...(payment.itemVideoIds ?? []),
+            ]),
+          );
+          await ctx.db.patch(payment.grantId, {
+            unlockedVideoIds,
+            expiresAt: Math.max(grant.expiresAt, now + NINETY_DAYS_MS),
+          });
+        } else {
+          await ctx.db.patch(payment.grantId, {
+            paidAt: now,
+            paymentId: payment._id,
+            unlockedVideoIds: undefined,
+            expiresAt: Math.max(grant.expiresAt, now + NINETY_DAYS_MS),
+          });
+        }
       }
     }
     return null;
@@ -229,11 +303,51 @@ export const recordPaymentRefunded = internalMutation({
     });
 
     if (payment.grantId) {
-      // Revoke unlock — clear paidAt. Player falls back to preview asset.
-      await ctx.db.patch(payment.grantId, {
-        paidAt: undefined,
-        paymentId: undefined,
-      });
+      if (payment.kind === "share_item") {
+        // Rebuild from the other succeeded item payments so overlapping
+        // purchases cannot revoke access another charge still grants.
+        const succeeded = await ctx.db
+          .query("payments")
+          .withIndex("by_grant", (q) => q.eq("grantId", payment.grantId))
+          .collect();
+        const unlockedVideoIds = Array.from(
+          new Set(
+            succeeded
+              .filter(
+                (candidate) =>
+                  candidate._id !== payment._id &&
+                  candidate.status === "succeeded" &&
+                  candidate.kind === "share_item",
+              )
+              .flatMap((candidate) => candidate.itemVideoIds ?? []),
+          ),
+        );
+        await ctx.db.patch(payment.grantId, { unlockedVideoIds });
+      } else {
+        // Revoke the full-share unlock while preserving any separately
+        // purchased items on this grant.
+        const succeeded = await ctx.db
+          .query("payments")
+          .withIndex("by_grant", (q) => q.eq("grantId", payment.grantId))
+          .collect();
+        const unlockedVideoIds = Array.from(
+          new Set(
+            succeeded
+              .filter(
+                (candidate) =>
+                  candidate.status === "succeeded" &&
+                  candidate.kind === "share_item",
+              )
+              .flatMap((candidate) => candidate.itemVideoIds ?? []),
+          ),
+        );
+        await ctx.db.patch(payment.grantId, {
+          paidAt: undefined,
+          paymentId: undefined,
+          unlockedVideoIds:
+            unlockedVideoIds.length > 0 ? unlockedVideoIds : undefined,
+        });
+      }
     }
     return null;
   },
@@ -295,7 +409,10 @@ export const getPaymentsForShareLink = query({
  * what the client needs to know to decide preview vs full-res.
  */
 export const getGrantUnlockState = query({
-  args: { grantToken: v.string() },
+  args: {
+    grantToken: v.string(),
+    itemVideoId: v.optional(v.id("videos")),
+  },
   returns: v.object({
     valid: v.boolean(),
     paid: v.boolean(),
@@ -305,6 +422,7 @@ export const getGrantUnlockState = query({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
       v.null(),
     ),
@@ -357,7 +475,11 @@ export const getGrantUnlockState = query({
       identity?.subject != null &&
       identity.subject === shareLink.createdByClerkId;
     const { role, canComment } = shareCapabilities(grant.role, shareLink);
-    const paid = Boolean(grant.paidAt);
+    const paid = args.itemVideoId
+      ? isShareVideoUnlocked(grant, shareLink, args.itemVideoId)
+      : shareLink.paywall?.mode === "per_item"
+        ? Boolean(grant.paidAt && grant.unlockedVideoIds === undefined)
+        : Boolean(grant.paidAt);
     const paywalled = Boolean(shareLink.paywall);
     return {
       valid: true,
@@ -418,11 +540,18 @@ export const getTeamEarnings = query({
     const recent = await Promise.all(
       rows.map(async (r) => {
       const fee = r.applicationFeeAmountCents ?? 0;
-      const video = await ctx.db.get(r.videoId);
+      const video = r.videoId ? await ctx.db.get(r.videoId) : null;
+      const invoice = r.invoiceId ? await ctx.db.get(r.invoiceId) : null;
       return {
         id: r._id,
-        videoId: r.videoId,
-        fileName: video?.title ?? "Deleted file",
+        videoId: r.videoId ?? null,
+        invoiceId: r.invoiceId ?? null,
+        kind: r.kind ?? null,
+        fileName:
+          invoice?.title ??
+          (r.kind === "share_item" && r.itemVideoIds
+            ? `${r.itemVideoIds.length} purchased item${r.itemVideoIds.length === 1 ? "" : "s"}`
+            : video?.title ?? "Deleted file"),
         paidAt: r.paidAt ?? r._creationTime,
         grossCents: r.amountCents,
         feeCents: fee,

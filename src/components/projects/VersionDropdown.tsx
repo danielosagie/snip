@@ -37,22 +37,22 @@ export function VersionDropdown({ projectId, canEdit }: Props) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex items-center gap-2 px-3 py-1.5 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-colors",
+          "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
           open
-            ? "bg-[#1a1a1a] text-[#f0f0e8]"
-            : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]",
+            ? "border-[#D8D8DE] bg-[#FFF0E6] text-[#D14E00]"
+            : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
         )}
       >
         <FolderClosed className="h-3.5 w-3.5" />
-        <span className="font-mono normal-case">{latest.folderName}</span>
+        <span>{latest.folderName}</span>
         {latest.isLatest ? (
           <span
             className={cn(
-              "text-[9px] px-1.5 py-0.5 font-bold uppercase",
-              open ? "bg-[#f0f0e8] text-[#1a1a1a]" : "bg-[#FF6600] text-[#f0f0e8]",
+              "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+              open ? "bg-white text-[#D14E00]" : "bg-[#FFF0E6] text-[#D14E00]",
             )}
           >
-            latest
+            Latest
           </span>
         ) : null}
         <ChevronDown className="h-3.5 w-3.5" />
@@ -64,26 +64,26 @@ export function VersionDropdown({ projectId, canEdit }: Props) {
             className="fixed inset-0 z-30"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute right-0 mt-1 min-w-[320px] max-w-[420px] z-40 bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)]">
-            <div className="px-3 py-2 border-b-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] font-black text-xs uppercase tracking-wider">
+          <div className="absolute right-0 z-40 mt-2 min-w-[320px] max-w-[420px] overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
+            <div className="border-b border-[#E8E8EC] px-3 py-2.5 text-[13px] font-semibold text-[#131315]">
               Version history
             </div>
             <ul className="max-h-[60vh] overflow-y-auto">
               {versions.map((v) => (
                 <li
                   key={v._id}
-                  className="border-b border-[#ccc] last:border-b-0"
+                  className="border-b border-[#F1F1F3] last:border-b-0"
                 >
-                  <div className="flex items-center gap-2 px-3 py-2">
-                    <FolderClosed className="h-4 w-4 text-[#888] flex-shrink-0" />
+                  <div className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-[#FAFAFA]">
+                    <FolderClosed className="h-4 w-4 flex-shrink-0 text-[#A0A0A5]" />
                     <div className="flex-1 min-w-0">
-                      <div className="font-mono text-sm font-bold text-[#1a1a1a] truncate flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 truncate text-sm font-medium text-[#131315]">
                         {v.folderName}
                         {v.isLatest ? (
                           <Star className="h-3 w-3 fill-[#FF6600] text-[#FF6600]" />
                         ) : null}
                       </div>
-                      <div className="text-[10px] text-[#888] flex items-center gap-2">
+                      <div className="flex items-center gap-2 text-[11px] text-[#6E6E73]">
                         <span>by {v.createdByName}</span>
                         <span>·</span>
                         <span>push #{v.versionNumber}</span>
@@ -111,7 +111,7 @@ export function VersionDropdown({ projectId, canEdit }: Props) {
                           }
                         }}
                         disabled={busyId !== null}
-                        className="text-xs font-bold uppercase tracking-wider text-[#FF6600] hover:text-[#1a1a1a] underline underline-offset-2 disabled:opacity-40"
+                        className="rounded-full px-2 py-1 text-xs font-medium text-[#D14E00] transition-colors hover:bg-[#FFF0E6] disabled:opacity-40"
                       >
                         {busyId === v._id ? "…" : "Set latest"}
                       </button>

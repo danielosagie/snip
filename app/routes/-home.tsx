@@ -175,7 +175,7 @@ export default function Homepage() {
           </h2>
           <div className="mx-auto mt-2 grid w-full max-w-3xl grid-cols-1 gap-5 md:grid-cols-2">
             {/* Basic */}
-            <div className="flex h-full flex-col rounded-2xl border-2 border-[#E8E8EC] bg-white p-8">
+            <div className="flex h-full flex-col rounded-2xl border border-[#E8E8EC] bg-white p-8">
               <div className="font-['Geist_Mono',system-ui,monospace] text-[10px] uppercase leading-[15px] tracking-[2px] text-[#A0A0A5]">
                 Basic
               </div>
