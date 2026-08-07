@@ -22,9 +22,9 @@ export interface DesktopFeatureFlags {
   /** Filesystem-level ACLs / team folder permissions. */
   acls: { enabled: boolean };
   /**
-   * Proxy mode (defaults ON, unlike the others). When on, the mount hides the
-   * heavy `originals/` subtrees so editors browse + stream the lightweight Mux
-   * proxies. Toggle off to expose full-res for conform/online.
+   * Proxy mode (defaults ON, unlike the others). The mount resolves each
+   * logical media file to its mirrored proxy. Toggle off to resolve the
+   * matching original for conform/online.
    */
   proxy: { enabled: boolean };
 }

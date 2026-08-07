@@ -172,10 +172,16 @@ function isHidden(name) {
 
 function start({ convexCall, pushLog, port = 0, preferProxy = true, uploadObject = null }) {
   let aborted = false;
+  let proxyPreference = preferProxy !== false;
 
   const server = http.createServer(async (req, res) => {
     try {
-      await handle(req, res, { convexCall, pushLog, preferProxy, uploadObject });
+      await handle(req, res, {
+        convexCall,
+        pushLog,
+        preferProxy: proxyPreference,
+        uploadObject,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       pushLog?.(`webdav: ${req.method} ${req.url} → 500: ${msg}`);
@@ -200,6 +206,12 @@ function start({ convexCall, pushLog, port = 0, preferProxy = true, uploadObject
           }),
         get aborted() {
           return aborted;
+        },
+        setPreferProxy(next) {
+          proxyPreference = next !== false;
+        },
+        get preferProxy() {
+          return proxyPreference;
         },
       });
     });
@@ -318,16 +330,11 @@ async function handlePropfind(req, res, segments, depth, { convexCall, pushLog, 
   const [teamSlug, projectName, ...folderPath] = segments;
   let node;
   try {
-    // NOTE: we intentionally do NOT send `preferProxy`. The deployed prod
-    // Convex browse/download validators don't (yet) accept it and strict-reject
-    // unknown args. Once the proxy-aware functions are deployed, their handler
-    // defaults `preferProxy ?? true`, so proxy-first activates server-side with
-    // no desktop change. Re-add the arg only after confirming prod accepts it
-    // (and to surface the user's proxy-off toggle).
     node = await convexCall("query", "desktopBrowse:browsePathForDesktop", {
       teamSlug,
       projectName,
       folderPath,
+      preferProxy,
     });
   } catch (err) {
     pushLog?.(
@@ -396,8 +403,7 @@ async function handleGet(req, res, segments, headOnly, { convexCall, pushLog, pr
   const result = await convexCall(
     "action",
     "desktopBrowse:getDownloadUrlForDesktop",
-    // preferProxy intentionally omitted — see the note in handlePropfind.
-    { teamSlug, projectName, folderPath, fileName },
+    { teamSlug, projectName, folderPath, fileName, preferProxy },
   );
   if (!result) return notFound(res);
   // rclone follows redirects; we hand back the presigned S3 URL so bytes
@@ -406,6 +412,7 @@ async function handleGet(req, res, segments, headOnly, { convexCall, pushLog, pr
     location: result.url,
     "content-type": result.contentType,
     "content-length": String(result.size),
+    "x-snip-rendition": result.isProxy ? "proxy" : "full-res",
   });
   return res.end();
 }

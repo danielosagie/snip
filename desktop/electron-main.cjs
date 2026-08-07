@@ -14,6 +14,7 @@ const {
   uniqueRoots,
 } = require("./lib/project-watcher.cjs");
 const { createConvexPresenceTransport } = require("./lib/watcher-transport.cjs");
+const { renditionCacheDirectory } = require("./lib/rendition-storage.cjs");
 
 // The desktop is a thin native shell around the WEB app — it loads
 // snipfilm.vercel.app directly (real https origin, so Clerk + Convex behave
@@ -51,11 +52,9 @@ const DEFAULT_FEATURES = {
   prefetch: { enabled: true },
   lanCache: { enabled: false, port: 17900 },
   acls: { enabled: false },
-  // Proxy mode is the ONE feature that defaults ON — proxy-first editing is the
-  // whole point of the drive (cheap, fast, cache-friendly). When on, the mount
-  // hides the heavy `originals/` subtrees so editors browse + stream the
-  // lightweight Mux proxies the backend mirrors to R2. Flip off to expose
-  // full-res for conform/online. See plans/proxies-unified.md.
+  // Proxy mode is the ONE feature that defaults ON. The WebDAV layer resolves
+  // each logical media path to a mirrored proxy when one is ready. Flip it off
+  // to resolve the original for conform/online. See plans/proxies-unified.md.
   proxy: { enabled: true },
 };
 
@@ -1793,21 +1792,21 @@ async function startMount({ mountPath } = {}) {
   // still lives under `features.lanCache` for that future work; it just doesn't
   // feed the mount. Tracked in bench/FINDINGS-AND-PLAN.md.
 
-  // Pin the cache dir so the second rclone process (the cache server)
-  // knows where to find our cached files to expose to peers.
-  const cacheDir = path.join(SETTINGS_DIR, "rclone-cache");
+  // Proxy bytes and originals share one logical Finder path, but they must not
+  // alias on disk. Separate namespaces guarantee that switching to full-res
+  // pulls the original on first touch and that subsequent reads stay local.
+  const cacheDir = renditionCacheDirectory(
+    path.join(SETTINGS_DIR, "rclone-cache"),
+    preferProxy,
+  );
   await fs.mkdir(cacheDir, { recursive: true });
 
-  // ── Optional: combined --filter-from (proxy mode + Convex ACLs) ──
+  // ── Optional: Convex ACLs through --filter-from ──
   //
   // We build ONE rclone filter file so rule precedence is explicit (rules
   // evaluate top-to-bottom, first match wins) and we never mix `--exclude`
-  // with `--filter-from` (their interaction is surprising). Two sources:
-  //  1. Proxy mode (default ON): hide the heavy `originals/` subtrees so the
-  //     drive presents the lightweight Mux proxies the backend mirrors to R2.
-  //     Toggle off (Settings → Proxy mode) to expose full-res for conform.
-  //  2. ACLs (`features.acls.enabled`): per-folder allow/deny from Convex,
-  //     fail-CLOSED to deny-all if the rule fetch fails.
+  // with `--filter-from` (their interaction is surprising). ACL rules are
+  // loaded from Convex and fail closed when the rule fetch fails.
   let filterFromArgs = [];
   const filterLines = [];
   // NOTE: proxy mode is no longer a path FILTER under the WebDAV mount. The
