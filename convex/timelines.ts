@@ -5,6 +5,7 @@ import {
   mutation,
   query,
 } from "./_generated/server";
+import { makeFunctionReference } from "convex/server";
 import { Id, Doc } from "./_generated/dataModel";
 import { requireProjectAccess, requireTeamAccess } from "./auth";
 
@@ -25,6 +26,11 @@ const sourceValidator = v.union(
   v.literal("premiere"),
   v.literal("manual"),
 );
+
+const ingestSnapshot = makeFunctionReference<
+  "mutation",
+  { snapshotId: Id<"timelineSnapshots"> }
+>("timelineDocs:ingestSnapshot");
 
 export const list = query({
   args: {
@@ -196,7 +202,7 @@ export const recordSnapshot = internalMutation({
       args.metadata.length +
       (args.fcpxml?.length ?? 0);
 
-    return await ctx.db.insert("timelineSnapshots", {
+    const snapshotId = await ctx.db.insert("timelineSnapshots", {
       teamId: args.teamId,
       projectId: args.projectId,
       versionId: args.versionId,
@@ -216,6 +222,14 @@ export const recordSnapshot = internalMutation({
       source: args.source,
       sizeBytes,
     });
+    // Parse asynchronously so malformed or expensive FCPXML can never regress
+    // the existing append-only snapshot ingest path.
+    if (args.fcpxml) {
+      await ctx.scheduler.runAfter(0, ingestSnapshot, {
+        snapshotId,
+      });
+    }
+    return snapshotId;
   },
 });
 
@@ -301,6 +315,12 @@ export const createFromDesktop = mutation({
       source: args.source ?? "resolve",
       sizeBytes,
     });
+
+    if (args.fcpxml) {
+      await ctx.scheduler.runAfter(0, ingestSnapshot, {
+        snapshotId: _id,
+      });
+    }
 
     return { _id, branch };
   },
