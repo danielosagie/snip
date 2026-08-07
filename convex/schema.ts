@@ -482,6 +482,12 @@ export default defineSchema({
     // the next watch. Cleared when the ladder is rebuilt. Presence =
     // "cold / archived" in the UI.
     renditionEvictedAt: v.optional(v.number()),
+    // Written by drive-first sync on some deployments (drive mtime and a
+    // monotonically increasing save counter). Declared here so deployments
+    // holding that data pass schema validation; no current code path
+    // writes or reads them on this branch.
+    driveModifiedAt: v.optional(v.number()),
+    driveVersion: v.optional(v.number()),
     // Storage class for billing. "cloud" (default) = source lives in our
     // object store and counts against the team's storage cap. "drive" =
     // the workspace is drive-first; the source is served from the
