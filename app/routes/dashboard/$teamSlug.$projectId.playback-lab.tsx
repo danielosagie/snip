@@ -1,4 +1,4 @@
-import { useAction, useQuery } from "convex/react";
+import { useAction, useConvex, useQuery } from "convex/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Pause, Play, StepBack, StepForward } from "lucide-react";
 import {
@@ -61,9 +61,10 @@ function PlaybackLabRoute() {
   const projectId = rawProjectId as Id<"projects">;
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
   const enabled = featureStatus?.demoMode === true;
+  const convex = useConvex();
   const videos = useQuery(
     api.videos.list,
-    enabled ? { projectId, folderId: null } : "skip",
+    enabled ? { projectId } : "skip",
   );
   const desktopProjects = useQuery(
     api.desktopBrowse.listProjectsForDesktop,
@@ -81,24 +82,25 @@ function PlaybackLabRoute() {
         extensionOf(video.s3Key) ?? extensionOf(video.title) ?? "mp4";
       const rawTitle = stripExtension(video.title, extension);
       const rawName = `${rawTitle}.${extension}`;
-      return { video, rawName };
+      const namespace = String(video.folderId ?? "project-root");
+      return { video, rawName, nameKey: `${namespace}\n${rawName}` };
     });
     const counts = new Map<string, number>();
     for (const row of rows) {
-      counts.set(row.rawName, (counts.get(row.rawName) ?? 0) + 1);
+      counts.set(row.nameKey, (counts.get(row.nameKey) ?? 0) + 1);
     }
     const oldestByName = new Map<string, number>();
     for (const row of rows) {
-      const current = oldestByName.get(row.rawName);
+      const current = oldestByName.get(row.nameKey);
       if (current === undefined || row.video._creationTime < current) {
-        oldestByName.set(row.rawName, row.video._creationTime);
+        oldestByName.set(row.nameKey, row.video._creationTime);
       }
     }
 
-    return rows.map(({ video, rawName }) => {
+    return rows.map(({ video, rawName, nameKey }) => {
       const displayName =
-        (counts.get(rawName) ?? 0) <= 1 ||
-        oldestByName.get(rawName) === video._creationTime
+        (counts.get(nameKey) ?? 0) <= 1 ||
+        oldestByName.get(nameKey) === video._creationTime
           ? rawName
           : `${rawName} (${String(video._id).slice(-6)})`;
       const mirrored = (video.staticRenditions ?? [])
@@ -126,6 +128,9 @@ function PlaybackLabRoute() {
   const pendingSeekRef = useRef<number | null>(null);
   const resumeAfterScrubRef = useRef(false);
   const frameRateRef = useRef(30);
+  const folderPathPromisesRef = useRef(
+    new Map<string, Promise<string[]>>(),
+  );
   const [source, setSource] = useState<PlaybackSource | null>(null);
   const [activeId, setActiveId] = useState<Id<"videos"> | null>(null);
   const [status, setStatus] = useState("Idle");
@@ -196,6 +201,22 @@ function PlaybackLabRoute() {
     [],
   );
 
+  const resolveFolderPath = useCallback(
+    (folderId: Id<"folders"> | undefined): Promise<string[]> => {
+      if (!folderId) return Promise.resolve([]);
+      const key = String(folderId);
+      const cached = folderPathPromisesRef.current.get(key);
+      if (cached) return cached;
+      const request = convex
+        .query(api.folders.breadcrumbs, { folderId })
+        .then((breadcrumbs) => breadcrumbs.map((folder) => folder.name));
+      folderPathPromisesRef.current.set(key, request);
+      void request.catch(() => folderPathPromisesRef.current.delete(key));
+      return request;
+    },
+    [convex],
+  );
+
   const openProxy = useCallback(
     async (item: (typeof playbackItems)[number]) => {
       if (!project || !item.mirrored?.r2Key || !item.mirrored.filesizeBytes) {
@@ -205,9 +226,11 @@ function PlaybackLabRoute() {
       setMetadata(null);
       setPlaying(false);
       try {
+        const folderPath = await resolveFolderPath(item.video.folderId);
         const result = await getR2ProxyUrl({
           teamSlug,
           projectName: project.displayName,
+          folderPath: folderPath.length > 0 ? folderPath : undefined,
           fileName: item.displayName,
           preferProxy: true,
         });
@@ -227,7 +250,7 @@ function PlaybackLabRoute() {
         setStatus(error instanceof Error ? error.message : "Proxy URL failed.");
       }
     },
-    [getR2ProxyUrl, project, teamSlug],
+    [getR2ProxyUrl, project, resolveFolderPath, teamSlug],
   );
 
   const togglePlayback = useCallback(async () => {
@@ -427,8 +450,8 @@ function PlaybackLabRoute() {
               Browser playback
             </h1>
             <p className="mt-3 text-sm leading-5 text-[#555]">
-              Only root-level videos with mirrored MP4 renditions are enabled.
-              Range requests read one GOP at a time.
+              Videos with mirrored MP4 renditions are enabled. Folder paths
+              prewarm on intent, then range requests read one GOP at a time.
             </p>
           </header>
 
@@ -451,6 +474,12 @@ function PlaybackLabRoute() {
                     type="button"
                     disabled={!available}
                     onClick={() => void openProxy(item)}
+                    onPointerEnter={() => {
+                      void resolveFolderPath(item.video.folderId);
+                    }}
+                    onFocus={() => {
+                      void resolveFolderPath(item.video.folderId);
+                    }}
                     className={`w-full p-5 text-left transition-colors disabled:cursor-not-allowed disabled:text-[#8b8a82] ${
                       active
                         ? "bg-[#1a1a1a] text-[#f0f0e8]"
