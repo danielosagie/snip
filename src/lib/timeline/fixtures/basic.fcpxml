@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fcpxml version="1.10">
+  <resources>
+    <format id="r1" name="FFVideoFormat1080p2398" frameDuration="1001/24000s" width="1920" height="1080"/>
+    <asset id="r2" name="Interview A.mov" src="file:///Volumes/Media/Interview%20A.mov" start="0s" duration="240240/24000s" hasVideo="1" hasAudio="1"/>
+  </resources>
+  <library>
+    <event name="Documentary">
+      <project name="Assembly v1">
+        <sequence format="r1" duration="96096/24000s" tcStart="0s">
+          <spine>
+            <asset-clip name="Opening answer" ref="r2" offset="0s" start="24024/24000s" duration="48048/24000s"/>
+            <asset-clip name="Second answer" ref="r2" offset="72072/24000s" start="96096/24000s" duration="24024/24000s"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>
