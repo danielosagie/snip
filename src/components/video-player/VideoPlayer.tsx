@@ -64,6 +64,7 @@ interface VideoPlayerProps {
 
 export interface VideoPlayerHandle {
   seekTo: (time: number, options?: { play?: boolean }) => void;
+  setPlaying: (playing: boolean) => void;
 }
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -214,7 +215,22 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     [applyTime, showControls]
   );
 
-  useImperativeHandle(ref, () => ({ seekTo }), [seekTo]);
+  const setPlaying = useCallback((playing: boolean) => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (!playing) {
+      video.pause();
+      return;
+    }
+    const playPromise = video.play();
+    if (playPromise) {
+      playPromise.catch(() => {
+        // Ignore autoplay rejections.
+      });
+    }
+  }, []);
+
+  useImperativeHandle(ref, () => ({ seekTo, setPlaying }), [seekTo, setPlaying]);
 
   const handleSeekBy = useCallback(
     (delta: number) => {

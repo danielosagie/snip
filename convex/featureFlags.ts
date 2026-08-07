@@ -71,6 +71,9 @@ export const FEATURES = {
    * unpaid viewers. Refuse paywalled grants when neither this flag nor
    * `muxSignedPlayback` is true. */
   demoMode: () => has("DEMO_MODE"),
+
+  /** Close-enough share-player presence sync. Off unless explicitly enabled. */
+  watchTogether: () => has("WATCH_TOGETHER_ENABLED"),
 } as const;
 
 export type FeatureKey = keyof typeof FEATURES;
@@ -107,6 +110,7 @@ export const getFeatureStatus = query({
     paywallReady: v.boolean(),
     desktopSyncReady: v.boolean(),
     demoMode: v.boolean(),
+    watchTogether: v.boolean(),
   }),
   handler: async () => {
     const stripeBilling = FEATURES.stripeBilling();
@@ -119,6 +123,7 @@ export const getFeatureStatus = query({
     const usingR2 = FEATURES.usingR2();
     const watermarkPipeline = FEATURES.watermarkPipeline();
     const demoMode = FEATURES.demoMode();
+    const watchTogether = FEATURES.watchTogether();
 
     // "Paywall ready" = client can complete a payment AND we can gate the file.
     const paywallReady =
@@ -140,6 +145,7 @@ export const getFeatureStatus = query({
       paywallReady,
       desktopSyncReady,
       demoMode,
+      watchTogether,
     };
   },
 });

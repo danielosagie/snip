@@ -68,6 +68,7 @@ import { DashboardHeader } from "@/components/DashboardHeader";
 import { ShareSelectionDialog } from "@/components/ShareSelectionDialog";
 import { ShareFolderDialog } from "@/components/ShareFolderDialog";
 import { MoveToFolderDialog } from "@/components/MoveToFolderDialog";
+import { ProjectFileActivity } from "@/components/presence";
 
 type ViewMode = ProjectViewMode;
 type ShareToastState = {
@@ -1310,6 +1311,10 @@ export default function ProjectPage({
             void handleMoveFolder(folderId, targetFolderId)
           }
         />
+      ) : null}
+
+      {resolvedProjectId ? (
+        <ProjectFileActivity projectId={resolvedProjectId} />
       ) : null}
 
       {/* Content */}

@@ -14,6 +14,7 @@ import { triggerDownload } from "@/lib/download";
 import { cn, formatDuration, formatTimestamp, formatRelativeTime } from "@/lib/utils";
 import { useVideoPresence } from "@/lib/useVideoPresence";
 import { VideoWatchers } from "@/components/presence/VideoWatchers";
+import { WatchTogetherControl } from "@/components/presence";
 import { Lock, Video, AlertCircle, MessageSquare, Clock, Download, ShieldCheck } from "lucide-react";
 import { useShareData } from "./-share.data";
 import {
@@ -296,6 +297,13 @@ export default function SharePage() {
     enabled: canTrackPresence,
     shareToken: token,
   });
+  const handleWatchChase = useCallback(
+    (playheadSeconds: number, options: { playing: boolean }) => {
+      playerRef.current?.seekTo(playheadSeconds);
+      playerRef.current?.setPlaying(options.playing);
+    },
+    [],
+  );
 
   useEffect(() => {
     setGrantToken(null);
@@ -1059,6 +1067,12 @@ export default function SharePage() {
                 <span className="font-mono text-[#1a1a1a]">{video.title}</span>
               ) : null}
               {comments && <span>{comments.length} threads</span>}
+              <WatchTogetherControl
+                videoId={videoData?.video?._id}
+                shareToken={token}
+                currentTime={currentTime}
+                onChase={handleWatchChase}
+              />
               <VideoWatchers watchers={watchers} className="ml-auto" />
             </div>
           </div>
@@ -1073,6 +1087,12 @@ export default function SharePage() {
                 <span className="font-mono">{formatDuration(video.duration)}</span>
               ) : null}
               {comments && <span>{comments.length} threads</span>}
+              <WatchTogetherControl
+                videoId={videoData?.video?._id}
+                shareToken={token}
+                currentTime={currentTime}
+                onChase={handleWatchChase}
+              />
               <VideoWatchers watchers={watchers} className="ml-auto" />
             </div>
           </div>
