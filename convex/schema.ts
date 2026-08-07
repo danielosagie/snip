@@ -1,6 +1,66 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+const timelineWriteValidator = v.object({
+  value: v.any(),
+  timestamp: v.number(),
+  actorId: v.string(),
+  opId: v.string(),
+});
+
+const timelineClipValidator = v.object({
+  id: v.string(),
+  mediaId: v.object({
+    value: v.id("videos"),
+    timestamp: v.number(),
+    actorId: v.string(),
+    opId: v.string(),
+  }),
+  trackId: v.object({
+    value: v.string(),
+    timestamp: v.number(),
+    actorId: v.string(),
+    opId: v.string(),
+  }),
+  removed: v.object({
+    value: v.boolean(),
+    timestamp: v.number(),
+    actorId: v.string(),
+    opId: v.string(),
+  }),
+  properties: v.record(v.string(), timelineWriteValidator),
+});
+
+const timelineTrackValidator = v.object({
+  id: v.string(),
+  removed: v.object({
+    value: v.boolean(),
+    timestamp: v.number(),
+    actorId: v.string(),
+    opId: v.string(),
+  }),
+  properties: v.record(v.string(), timelineWriteValidator),
+  clips: v.record(v.string(), timelineClipValidator),
+});
+
+const timelineDocumentValidator = v.object({
+  schemaVersion: v.literal(1),
+  sequence: v.object({
+    id: v.string(),
+    properties: v.record(v.string(), timelineWriteValidator),
+    tracks: v.record(v.string(), timelineTrackValidator),
+  }),
+});
+
+const renderStatusValidator = v.union(
+  v.literal("queued"),
+  v.literal("claimed"),
+  v.literal("running"),
+  v.literal("uploading"),
+  v.literal("done"),
+  v.literal("failed"),
+);
+
 export default defineSchema({
   teams: defineTable({
     name: v.string(),
@@ -742,6 +802,84 @@ export default defineSchema({
     .index("by_project_branch", ["projectId", "branch"])
     .index("by_version", ["versionId"])
     .index("by_team", ["teamId"]),
+
+  // Live, reactive timeline state. V1 embeds each track's clip map for one-row
+  // atomic operations. If a sequence nears Convex's document size limit, the
+  // sharding seam is the `tracks[trackId].clips` map: move those maps to rows
+  // keyed by (timelineDocId, trackId) while preserving TimelineDocument at the
+  // API boundary.
+  timelineDocs: defineTable({
+    teamId: v.id("teams"),
+    projectId: v.id("projects"),
+    versionId: v.optional(v.id("projectVersions")),
+    branch: v.string(),
+    revision: v.number(),
+    headSnapshotId: v.optional(v.id("timelineSnapshots")),
+    document: timelineDocumentValidator,
+    updatedAt: v.number(),
+    updatedBy: v.string(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_branch", ["projectId", "branch"])
+    .index("by_team", ["teamId"])
+    .index("by_head_snapshot", ["headSnapshotId"]),
+
+  renderJobs: defineTable({
+    teamId: v.id("teams"),
+    projectId: v.id("projects"),
+    status: renderStatusValidator,
+    snapshot: v.object({
+      timelineDocId: v.id("timelineDocs"),
+      timelineSnapshotId: v.id("timelineSnapshots"),
+      branch: v.string(),
+      revision: v.number(),
+    }),
+    output: v.object({
+      container: v.union(v.literal("mp4"), v.literal("mov"), v.literal("webm")),
+      videoCodec: v.union(
+        v.literal("h264"),
+        v.literal("hevc"),
+        v.literal("prores"),
+        v.literal("vp9"),
+        v.literal("av1"),
+      ),
+      audioCodec: v.union(
+        v.literal("aac"),
+        v.literal("pcm"),
+        v.literal("opus"),
+        v.literal("none"),
+      ),
+      width: v.number(),
+      height: v.number(),
+      frameRate: v.object({ value: v.number(), rate: v.number() }),
+    }),
+    outputObjectKey: v.optional(v.string()),
+    createdAt: v.number(),
+    queuedAt: v.number(),
+    claimedBy: v.optional(v.string()),
+    claimedAt: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    uploadingAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    failedAt: v.optional(v.number()),
+    heartbeatAt: v.optional(v.number()),
+    leaseExpiresAt: v.optional(v.number()),
+    attemptCount: v.number(),
+    error: v.optional(v.string()),
+    segmentCache: v.optional(
+      v.object({
+        segmentCount: v.number(),
+        cacheHits: v.number(),
+        cacheMisses: v.number(),
+        bytesReused: v.number(),
+        bytesRendered: v.number(),
+      }),
+    ),
+  })
+    .index("by_status", ["status"])
+    .index("by_project", ["projectId"])
+    .index("by_team_status", ["teamId", "status"])
+    .index("by_lease", ["status", "leaseExpiresAt"]),
 
   /**
    * Account-level subscription. One per Clerk user (the `ownerClerkId`).
