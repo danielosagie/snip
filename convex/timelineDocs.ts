@@ -14,7 +14,11 @@ import {
   createTimelineDocument,
   parseTimelineDocumentJson,
 } from "../src/lib/timeline/operations";
-import { fcpxmlToTimelineDocument } from "../src/lib/timeline/otio";
+import {
+  fcpxmlToTimelineDocument,
+  otioToTimelineDocument,
+  type OtioTimeline,
+} from "../src/lib/timeline/otio";
 import {
   TIMELINE_SEQUENCE_PROPERTIES,
   type TimelineDocument,
@@ -25,6 +29,14 @@ import {
 const MAX_OPS_PER_MUTATION = 100;
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_BRANCH_LENGTH = 128;
+const MAX_SOURCE_HASH_LENGTH = 256;
+
+const externalSourceFormatValidator = v.object({
+  name: v.string(),
+  version: v.optional(v.string()),
+  extension: v.optional(v.string()),
+  mimeType: v.optional(v.string()),
+});
 
 const timelineTimeValidator = v.object({ value: v.number(), rate: v.number() });
 const timelineRangeValidator = v.object({
@@ -417,6 +429,70 @@ export const remove = mutation({
   },
 });
 
+type PluginTimelineDocArgs = {
+  teamId: Id<"teams">;
+  projectId: Id<"projects">;
+  branch?: string;
+  sequenceName?: string;
+};
+
+/**
+ * Resolve a plugin-token-authenticated branch to a live document. This is the
+ * fresh-branch seam used by native panel presence, so missing state creates an
+ * empty document instead of forcing the panel through a 409 retry loop.
+ */
+export async function ensurePluginTimelineDoc(
+  ctx: MutationCtx,
+  args: PluginTimelineDocArgs,
+) {
+  const project = await ctx.db.get(args.projectId);
+  if (!project || project.teamId !== args.teamId) {
+    throw new Error("Project not found for this team.");
+  }
+  const branch = normalizeBranch(args.branch);
+  const existing = await ctx.db
+    .query("timelineDocs")
+    .withIndex("by_project_branch", (q) =>
+      q.eq("projectId", args.projectId).eq("branch", branch),
+    )
+    .first();
+  if (existing) {
+    return { id: existing._id, branch: existing.branch, created: false as const };
+  }
+
+  const now = Date.now();
+  const actorId = `plugin:${args.teamId}`;
+  const properties: Record<string, TimelinePropertyValue> = {};
+  const sequenceName = args.sequenceName?.trim();
+  if (sequenceName) properties[TIMELINE_SEQUENCE_PROPERTIES.name] = sequenceName;
+  const document = createTimelineDocument({
+    sequenceId: `sequence:${args.projectId}:${branch}`,
+    actorId,
+    timestamp: now,
+    properties,
+  });
+  const id = await ctx.db.insert("timelineDocs", {
+    teamId: args.teamId,
+    projectId: args.projectId,
+    branch,
+    revision: 0,
+    document,
+    updatedAt: now,
+    updatedBy: actorId,
+  });
+  return { id, branch, created: true as const };
+}
+
+export const ensureForPlugin = internalMutation({
+  args: {
+    teamId: v.id("teams"),
+    projectId: v.id("projects"),
+    branch: v.optional(v.string()),
+    sequenceName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => await ensurePluginTimelineDoc(ctx, args),
+});
+
 function normalizedMediaKeys(value: string | undefined) {
   if (!value) return [];
   let decoded = value;
@@ -455,6 +531,233 @@ function buildMediaLookup(videos: Array<Doc<"videos">>) {
     return undefined;
   };
 }
+
+type ExternalSourceFormat = {
+  name: string;
+  version?: string;
+  extension?: string;
+  mimeType?: string;
+};
+
+function snapshotSourceForFormat(format: ExternalSourceFormat) {
+  const name = `${format.name} ${format.extension ?? ""}`.toLowerCase();
+  if (name.includes("premiere") || name.includes("prproj")) return "premiere" as const;
+  if (name.includes("resolve")) return "resolve" as const;
+  return "manual" as const;
+}
+
+async function resolveExternalTimelineDocument(
+  ctx: MutationCtx,
+  args: {
+    projectId: Id<"projects">;
+    actorId: string;
+    timeline?: unknown;
+    otio?: unknown;
+  },
+) {
+  if ((args.timeline === undefined) === (args.otio === undefined)) {
+    throw new Error("Provide exactly one of timeline or otio.");
+  }
+  if (args.timeline !== undefined) {
+    const document = parseTimelineDocumentJson(JSON.stringify(args.timeline));
+    await validateDocumentMedia(ctx, args.projectId, document);
+    return document;
+  }
+
+  const videos = await ctx.db
+    .query("videos")
+    .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+    .collect();
+  const resolve = buildMediaLookup(videos);
+  const document = otioToTimelineDocument(args.otio as OtioTimeline, {
+    actorId: args.actorId,
+    timestamp: Date.now(),
+    resolveMediaId: (reference, clip) =>
+      resolve([
+        reference.OTIO_SCHEMA === "ExternalReference.1"
+          ? reference.target_url
+          : undefined,
+        clip.name,
+      ]) as GenericId<"videos"> | undefined,
+  });
+  await validateDocumentMedia(ctx, args.projectId, document);
+  return document;
+}
+
+export type ExternalTimelineIngestResult = {
+  status: "created" | "duplicate";
+  snapshotId: Id<"timelineSnapshots">;
+  timelineDocId: Id<"timelineDocs">;
+  branch: string;
+  revision: number;
+};
+
+/**
+ * Atomic desktop/NLE ingest. A source-file hash identifies one immutable save,
+ * while the converted document becomes the live branch head synchronously.
+ */
+export const ingestExternalTimeline = internalMutation({
+  args: {
+    teamId: v.id("teams"),
+    projectId: v.id("projects"),
+    branch: v.optional(v.string()),
+    sourceFileHash: v.string(),
+    sourceFile: v.optional(v.string()),
+    sourceFormat: externalSourceFormatValidator,
+    sourceMetadata: v.optional(v.any()),
+    timeline: v.optional(v.any()),
+    otio: v.optional(v.any()),
+    message: v.optional(v.string()),
+    createdByName: v.optional(v.string()),
+    sourceProjectId: v.optional(v.string()),
+    sourceTimelineId: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<ExternalTimelineIngestResult> => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.teamId !== args.teamId) {
+      throw new Error("Project not found for this team.");
+    }
+    const branch = normalizeBranch(args.branch);
+    const sourceFileHash = args.sourceFileHash.trim();
+    if (!sourceFileHash || sourceFileHash.length > MAX_SOURCE_HASH_LENGTH) {
+      throw new Error(
+        `Source file hash must contain 1 to ${MAX_SOURCE_HASH_LENGTH} characters.`,
+      );
+    }
+    const formatName = args.sourceFormat.name.trim();
+    if (!formatName || formatName.length > 128) {
+      throw new Error("Source format name must contain 1 to 128 characters.");
+    }
+
+    const duplicate = await ctx.db
+      .query("timelineSnapshots")
+      .withIndex("by_project_source_hash", (q) =>
+        q.eq("projectId", args.projectId).eq("sourceFileHash", sourceFileHash),
+      )
+      .first();
+    if (duplicate) {
+      let timelineDoc = await ctx.db
+        .query("timelineDocs")
+        .withIndex("by_project_branch", (q) =>
+          q.eq("projectId", args.projectId).eq("branch", duplicate.branch),
+        )
+        .first();
+      if (!timelineDoc) {
+        const document = parseTimelineDocumentJson(duplicate.cuts);
+        const now = Date.now();
+        const timelineDocId = await ctx.db.insert("timelineDocs", {
+          teamId: duplicate.teamId,
+          projectId: duplicate.projectId,
+          versionId: duplicate.versionId,
+          branch: duplicate.branch,
+          revision: 0,
+          headSnapshotId: duplicate._id,
+          document,
+          updatedAt: now,
+          updatedBy: `plugin:${args.teamId}`,
+        });
+        timelineDoc = await ctx.db.get(timelineDocId);
+      }
+      if (!timelineDoc) throw new Error("Timeline document could not be restored.");
+      return {
+        status: "duplicate",
+        snapshotId: duplicate._id,
+        timelineDocId: timelineDoc._id,
+        branch: timelineDoc.branch,
+        revision: timelineDoc.revision,
+      };
+    }
+
+    const actorId = `plugin:${args.teamId}`;
+    const document = await resolveExternalTimelineDocument(ctx, {
+      projectId: args.projectId,
+      actorId,
+      timeline: args.timeline,
+      otio: args.otio,
+    });
+    const existingDoc = await ctx.db
+      .query("timelineDocs")
+      .withIndex("by_project_branch", (q) =>
+        q.eq("projectId", args.projectId).eq("branch", branch),
+      )
+      .first();
+    const parentSnapshot = await ctx.db
+      .query("timelineSnapshots")
+      .withIndex("by_project_branch", (q) =>
+        q.eq("projectId", args.projectId).eq("branch", branch),
+      )
+      .order("desc")
+      .first();
+    const cuts = JSON.stringify(document);
+    const sourceFileMetadata = JSON.stringify({
+      sourceFile: args.sourceFile,
+      sourceFormat: { ...args.sourceFormat, name: formatName },
+      sourceMetadata: args.sourceMetadata,
+    });
+    const metadata = JSON.stringify({
+      format: "snip.timeline.external-ingest",
+      schemaVersion: document.schemaVersion,
+      sourceFileHash,
+      source: JSON.parse(sourceFileMetadata),
+    });
+    const snapshotId = await ctx.db.insert("timelineSnapshots", {
+      teamId: args.teamId,
+      projectId: args.projectId,
+      cuts,
+      color: "{}",
+      audio: "{}",
+      effects: "{}",
+      markers: "{}",
+      metadata,
+      branch,
+      parentSnapshotId: parentSnapshot?._id,
+      message: args.message?.trim() || `Imported ${formatName} timeline`,
+      sourceProjectId: args.sourceProjectId,
+      sourceTimelineId: args.sourceTimelineId,
+      sourceFileHash,
+      sourceFormat: formatName,
+      sourceFileMetadata,
+      createdByName: args.createdByName?.trim() || "Desktop ingest",
+      source: snapshotSourceForFormat(args.sourceFormat),
+      sizeBytes: cuts.length + metadata.length + sourceFileMetadata.length,
+    });
+    const now = Date.now();
+    if (existingDoc) {
+      const revision = existingDoc.revision + 1;
+      await ctx.db.patch(existingDoc._id, {
+        document,
+        revision,
+        headSnapshotId: snapshotId,
+        updatedAt: now,
+        updatedBy: actorId,
+      });
+      return {
+        status: "created",
+        snapshotId,
+        timelineDocId: existingDoc._id,
+        branch,
+        revision,
+      };
+    }
+    const timelineDocId = await ctx.db.insert("timelineDocs", {
+      teamId: args.teamId,
+      projectId: args.projectId,
+      branch,
+      revision: 0,
+      headSnapshotId: snapshotId,
+      document,
+      updatedAt: now,
+      updatedBy: actorId,
+    });
+    return {
+      status: "created",
+      snapshotId,
+      timelineDocId,
+      branch,
+      revision: 0,
+    };
+  },
+});
 
 export type TimelineSnapshotImportResult =
   | { status: "created" | "updated"; timelineDocId: Id<"timelineDocs"> }

@@ -786,6 +786,11 @@ export default defineSchema({
     // snapshots back to NLE state when restoring.
     sourceProjectId: v.optional(v.string()),
     sourceTimelineId: v.optional(v.string()),
+    // Desktop parser ingest identity. The project + sourceFileHash index makes
+    // retrying the same save idempotent while preserving immutable snapshots.
+    sourceFileHash: v.optional(v.string()),
+    sourceFormat: v.optional(v.string()),
+    sourceFileMetadata: v.optional(v.string()),
     // Who pushed it. clerkId is optional because the Resolve plugin
     // authenticates via the team's plugin token, not a Clerk identity.
     createdByClerkId: v.optional(v.string()),
@@ -800,6 +805,7 @@ export default defineSchema({
   })
     .index("by_project", ["projectId"])
     .index("by_project_branch", ["projectId", "branch"])
+    .index("by_project_source_hash", ["projectId", "sourceFileHash"])
     .index("by_version", ["versionId"])
     .index("by_team", ["teamId"]),
 

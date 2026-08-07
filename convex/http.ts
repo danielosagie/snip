@@ -192,16 +192,8 @@ http.route({
   path: "/timelines/snapshot",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const auth = request.headers.get("authorization");
-    if (!auth?.toLowerCase().startsWith("bearer ")) {
-      return new Response("Missing bearer token", { status: 401 });
-    }
-    const token = auth.slice(7).trim();
-    const team = (await ctx.runQuery(
-      internal.timelines.findTeamByPluginToken,
-      { token },
-    )) as { _id: string; name: string; slug: string } | null;
-    if (!team) return new Response("Invalid plugin token", { status: 401 });
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
 
     let body: Record<string, unknown>;
     try {
@@ -237,6 +229,20 @@ http.route({
     }
 
     try {
+      // Fresh branches are immediately presence-ready. The scheduled FCPXML
+      // import replaces this empty document once conversion completes.
+      await ctx.runMutation(ensureNleTimelineDocRef, {
+        teamId: team._id,
+        projectId: body["projectId"] as Id<"projects">,
+        branch:
+          typeof body["branch"] === "string"
+            ? (body["branch"] as string)
+            : undefined,
+        sequenceName:
+          typeof body["sourceTimelineId"] === "string"
+            ? (body["sourceTimelineId"] as string)
+            : undefined,
+      });
       const snapshotId = await ctx.runMutation(
         internal.timelines.recordSnapshot,
         {
@@ -653,30 +659,6 @@ export const agentEListNlePresence = internalQuery({
   },
 });
 
-export const agentEFindNleTimelineDoc = internalQuery({
-  args: {
-    projectId: v.id("projects"),
-    teamId: v.id("teams"),
-    branch: v.string(),
-  },
-  returns: v.union(
-    v.object({ id: v.id("timelineDocs"), branch: v.string() }),
-    v.null(),
-  ),
-  handler: async (ctx, args) => {
-    const project = await ctx.db.get(args.projectId);
-    if (!project || project.teamId !== args.teamId) return null;
-    const timelineDoc = await ctx.db
-      .query("timelineDocs")
-      .withIndex("by_project_branch", (q) =>
-        q.eq("projectId", args.projectId).eq("branch", args.branch),
-      )
-      .order("desc")
-      .first();
-    return timelineDoc ? { id: timelineDoc._id, branch: timelineDoc.branch } : null;
-  },
-});
-
 export const agentEListNleSnapshots = internalQuery({
   args: {
     projectId: v.id("projects"),
@@ -755,11 +737,49 @@ const listNlePresenceRef = makeFunctionReference<
   NlePresenceListItem[]
 >("http:agentEListNlePresence");
 
-const findNleTimelineDocRef = makeFunctionReference<
-  "query",
-  { projectId: Id<"projects">; teamId: Id<"teams">; branch: string },
-  { id: Id<"timelineDocs">; branch: string } | null
->("http:agentEFindNleTimelineDoc");
+const ensureNleTimelineDocRef = makeFunctionReference<
+  "mutation",
+  {
+    projectId: Id<"projects">;
+    teamId: Id<"teams">;
+    branch?: string;
+    sequenceName?: string;
+  },
+  { id: Id<"timelineDocs">; branch: string; created: boolean }
+>("timelineDocs:ensureForPlugin");
+
+type ExternalTimelineIngestHttpResult = {
+  status: "created" | "duplicate";
+  snapshotId: Id<"timelineSnapshots">;
+  timelineDocId: Id<"timelineDocs">;
+  branch: string;
+  revision: number;
+};
+
+const ingestExternalTimelineRef = makeFunctionReference<
+  "mutation",
+  {
+    teamId: Id<"teams">;
+    projectId: Id<"projects">;
+    branch?: string;
+    sourceFileHash: string;
+    sourceFile?: string;
+    sourceFormat: {
+      name: string;
+      version?: string;
+      extension?: string;
+      mimeType?: string;
+    };
+    sourceMetadata?: unknown;
+    timeline?: unknown;
+    otio?: unknown;
+    message?: string;
+    createdByName?: string;
+    sourceProjectId?: string;
+    sourceTimelineId?: string;
+  },
+  ExternalTimelineIngestHttpResult
+>("timelineDocs:ingestExternalTimeline");
 
 const listNleSnapshotsRef = makeFunctionReference<
   "query",
@@ -818,17 +838,12 @@ http.route({
 
     const projectId = body.projectId as Id<"projects">;
     try {
-      const timelineDoc = await ctx.runQuery(findNleTimelineDocRef, {
+      const timelineDoc = await ctx.runMutation(ensureNleTimelineDocRef, {
         projectId,
         teamId: team._id,
         branch: (body.branch as string).trim(),
+        sequenceName: body.timelineName as string,
       });
-      if (!timelineDoc) {
-        return nleJson(
-          { ok: false, error: "Timeline document is not ready for this branch." },
-          409,
-        );
-      }
       const { roomToken } = await ctx.runMutation(heartbeatNlePresenceRef, {
         timelineDocId: timelineDoc.id,
         sessionId: body.sessionId as string,
@@ -843,6 +858,96 @@ http.route({
       return nleJson({ ok: true, timelineDocId: timelineDoc.id, teammates });
     } catch (error) {
       return nleJson({ ok: false, error: error instanceof Error ? error.message : "Presence rejected." }, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/desktop/timelines/ingest",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const team = await authenticateNlePlugin(ctx, request);
+    if (team instanceof Response) return team;
+    const body = (await request.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    if (!body) return nleJson({ ok: false, error: "Body must be JSON." }, 400);
+    if (
+      typeof body.projectId !== "string" ||
+      typeof body.sourceFileHash !== "string" ||
+      !body.sourceFormat ||
+      typeof body.sourceFormat !== "object" ||
+      typeof (body.sourceFormat as Record<string, unknown>).name !== "string"
+    ) {
+      return nleJson(
+        {
+          ok: false,
+          error: "projectId, sourceFileHash, and sourceFormat.name are required.",
+        },
+        400,
+      );
+    }
+    if ((body.timeline === undefined) === (body.otio === undefined)) {
+      return nleJson(
+        { ok: false, error: "Provide exactly one of timeline or otio." },
+        400,
+      );
+    }
+
+    const parseEmbeddedJson = (value: unknown) => {
+      if (typeof value !== "string") return value;
+      return JSON.parse(value) as unknown;
+    };
+    try {
+      const format = body.sourceFormat as Record<string, unknown>;
+      const result = await ctx.runMutation(ingestExternalTimelineRef, {
+        teamId: team._id,
+        projectId: body.projectId as Id<"projects">,
+        branch: typeof body.branch === "string" ? body.branch : undefined,
+        sourceFileHash: body.sourceFileHash,
+        sourceFile:
+          typeof body.sourceFile === "string" ? body.sourceFile : undefined,
+        sourceFormat: {
+          name: format.name as string,
+          version:
+            typeof format.version === "string" ? format.version : undefined,
+          extension:
+            typeof format.extension === "string" ? format.extension : undefined,
+          mimeType:
+            typeof format.mimeType === "string" ? format.mimeType : undefined,
+        },
+        sourceMetadata: body.sourceMetadata,
+        timeline:
+          body.timeline === undefined
+            ? undefined
+            : parseEmbeddedJson(body.timeline),
+        otio:
+          body.otio === undefined ? undefined : parseEmbeddedJson(body.otio),
+        message: typeof body.message === "string" ? body.message : undefined,
+        createdByName:
+          typeof body.createdByName === "string"
+            ? body.createdByName
+            : undefined,
+        sourceProjectId:
+          typeof body.sourceProjectId === "string"
+            ? body.sourceProjectId
+            : undefined,
+        sourceTimelineId:
+          typeof body.sourceTimelineId === "string"
+            ? body.sourceTimelineId
+            : undefined,
+      });
+      return nleJson({ ok: true, ...result });
+    } catch (error) {
+      return nleJson(
+        {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Timeline ingest rejected.",
+        },
+        400,
+      );
     }
   }),
 });
