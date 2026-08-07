@@ -149,11 +149,8 @@ export const upsertLocks = mutation({
 });
 
 /**
- * Wave 1 activity transport. The existing schema has no structured activity
- * column, so recent events live in a separate desktop presence row with an
- * encoded process value. Readers only receive decoded events from the query
- * below. A dedicated activity table can replace this storage detail without
- * changing the desktop WatcherTransport contract.
+ * Legacy watcher transport retained for explicitly flagged fallback only.
+ * New desktop clients publish through desktopWatcherEvents:insert.
  */
 export const publishWatcherEvents = mutation({
   args: {

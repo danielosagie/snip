@@ -14,8 +14,17 @@ const {
   ProjectFileWatcher,
   uniqueRoots,
 } = require("./lib/project-watcher.cjs");
-const { createConvexPresenceTransport } = require("./lib/watcher-transport.cjs");
+const { createConvexWatcherTransport } = require("./lib/watcher-transport.cjs");
 const { renditionCacheDirectory } = require("./lib/rendition-storage.cjs");
+const { intermediateToOtio } = require("./lib/project-otio.cjs");
+const {
+  buildTimelineIngestPayload,
+  postTimelineIngest,
+} = require("./lib/timeline-ingest.cjs");
+const {
+  createLocalVersionStore,
+  sha256,
+} = require("./lib/version-store.cjs");
 
 // The desktop is a thin native shell around the WEB app — it loads
 // snipfilm.vercel.app directly (real https origin, so Clerk + Convex behave
@@ -26,6 +35,8 @@ const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://snipfilm.vercel.app").
 
 const SETTINGS_DIR = path.join(app.getPath("userData"));
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
+const VERSION_STORE_DIR = path.join(SETTINGS_DIR, "project-versions");
+const versionStore = createLocalVersionStore({ baseDirectory: VERSION_STORE_DIR });
 
 // ---- Settings persistence ----------------------------------------------------
 
@@ -42,6 +53,11 @@ const DEFAULT_FEATURES = {
     enabled: false,
     directories: [],
     extensions: DEFAULT_PROJECT_EXTENSIONS,
+    autoVersioning: true,
+    timelineIngest: true,
+    legacyPresenceFallback: false,
+    branch: "main",
+    siteUrl: "",
   },
   // Prefetch defaults ON: with a cloud-backed mount the cold path is too slow
   // for scrubbing unless rclone's VFS cache already holds the first chunk of
@@ -62,6 +78,7 @@ const DEFAULT_FEATURES = {
 const DEFAULT_SETTINGS = {
   convexUrl: "",
   convexAuthToken: "",
+  timelinePluginToken: "",
   storage: {
     provider: "r2", // "r2" | "railway"
     bucket: "",
@@ -86,6 +103,7 @@ const DEFAULT_SETTINGS = {
 // the previous behavior) rather than locking the user out.
 const SECRET_PATHS = [
   ["convexAuthToken"],
+  ["timelinePluginToken"],
   ["storage", "accessKeyId"],
   ["storage", "secretAccessKey"],
   ["storage", "sessionToken"],
@@ -288,11 +306,57 @@ async function walkLocal(dir) {
 // ---- IPC handlers ------------------------------------------------------------
 
 let mainWindow = null;
+let versionHistoryWindow = null;
 function reportProgress(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("sync:progress", payload);
   }
 }
+
+function emitVersionHistoryChanged() {
+  if (versionHistoryWindow && !versionHistoryWindow.isDestroyed()) {
+    versionHistoryWindow.webContents.send("versions:changed");
+  }
+}
+
+ipcMain.handle("versions:list", async () => versionStore.list());
+ipcMain.handle("versions:restore-copy", async (_event, { id } = {}) => {
+  if (typeof id !== "string" || id.length === 0 || id.length > 256) {
+    throw new Error("Local version ID is invalid.");
+  }
+  const versions = await versionStore.list();
+  const version = versions.find((candidate) => candidate.id === id);
+  if (!version) throw new Error("Local version was not found.");
+  const extension = path.extname(version.file);
+  const stem = path.basename(version.file, extension);
+  const options = {
+    title: "Restore copy",
+    buttonLabel: "Save copy",
+    defaultPath: path.join(
+      app.getPath("documents"),
+      `${stem}.${version.hash.slice(0, 8)}${extension}`,
+    ),
+    ...(extension
+      ? {
+          filters: [
+            {
+              name: "Project files",
+              extensions: [extension.slice(1)],
+            },
+          ],
+        }
+      : {}),
+  };
+  const parent = versionHistoryWindow && !versionHistoryWindow.isDestroyed()
+    ? versionHistoryWindow
+    : mainWindow;
+  const choice = parent
+    ? await dialog.showSaveDialog(parent, options)
+    : await dialog.showSaveDialog(options);
+  if (choice.canceled || !choice.filePath) return { ok: false, cancelled: true };
+  await versionStore.restoreToCopy(id, choice.filePath);
+  return { ok: true };
+});
 
 ipcMain.handle("settings:get", async () => loadSettings());
 ipcMain.handle("settings:set", async (_event, next) => {
@@ -361,6 +425,107 @@ async function convexCall(kind, fnPath, args) {
     throw new Error(`Convex ${fnPath}: ${body.errorMessage || "unknown error"}`);
   }
   return body.value;
+}
+
+const timelineTokenCache = new Map();
+
+async function resolveTimelineIngestContext(settings) {
+  const projectId = settings.activeProjectId;
+  if (!projectId) throw new Error("Select a project before timeline ingest.");
+  const watcherConfig = settings.features?.watcher || {};
+  const creds = resolveConvexCreds(settings);
+  const siteUrl = watcherConfig.siteUrl || process.env.SNIP_CONVEX_SITE_URL || creds.url;
+  if (!siteUrl) throw new Error("Timeline ingest URL is not configured.");
+
+  const configuredToken =
+    process.env.SNIP_DESKTOP_PLUGIN_TOKEN || settings.timelinePluginToken || "";
+  if (configuredToken.trim()) {
+    return { projectId, siteUrl, pluginToken: configuredToken.trim() };
+  }
+
+  let teamId = settings.activeTeamId;
+  if (!teamId) {
+    const project = await convexCall("query", "projects:get", { projectId });
+    teamId = project?.teamId;
+  }
+  if (!teamId) throw new Error("Timeline ingest workspace was not found.");
+
+  const cached = timelineTokenCache.get(teamId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { projectId, siteUrl, pluginToken: cached.token };
+  }
+  const pluginToken = await convexCall("query", "timelines:getPluginToken", {
+    teamId,
+  });
+  if (!pluginToken) {
+    throw new Error("Timeline ingest token is unavailable for this account.");
+  }
+  timelineTokenCache.set(teamId, {
+    token: pluginToken,
+    expiresAt: Date.now() + 5 * 60_000,
+  });
+  return { projectId, siteUrl, pluginToken };
+}
+
+async function handleWatchedProjectSave({
+  event,
+  absolutePath,
+  extension,
+  buffer,
+  parseResult,
+}) {
+  const settings = await loadSettings();
+  const watcherConfig = settings.features?.watcher || {};
+  const contentHash = sha256(buffer);
+  const sourceEvent = { ...event, hash: contentHash };
+
+  if (watcherConfig.autoVersioning !== false) {
+    void versionStore
+      .snapshot({
+        content: buffer,
+        file: event.file,
+        root: event.root,
+        sourcePath: absolutePath,
+        hash: contentHash,
+        mtime: event.mtime,
+        observedAt: event.observedAt,
+        sourceFormat: extension.replace(/^\./, ""),
+      })
+      .then(() => emitVersionHistoryChanged())
+      .catch((error) => {
+        pushLog(
+          `versions: snapshot failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  if (parseResult.status !== "parsed" || watcherConfig.timelineIngest === false) {
+    return { ...parseResult, hash: contentHash };
+  }
+
+  try {
+    const context = await resolveTimelineIngestContext(settings);
+    const otio = intermediateToOtio(parseResult.timeline);
+    const payload = buildTimelineIngestPayload({
+      projectId: context.projectId,
+      branch: watcherConfig.branch || "main",
+      event: sourceEvent,
+      intermediate: parseResult.timeline,
+      otio,
+    });
+    await postTimelineIngest({
+      siteUrl: context.siteUrl,
+      pluginToken: context.pluginToken,
+      payload,
+    });
+    return { ...parseResult, hash: contentHash };
+  } catch (error) {
+    return {
+      status: "saved_timeline_not_parsed",
+      error: error instanceof Error ? error.message : String(error),
+      hash: contentHash,
+    };
+  }
 }
 
 // ---- Feature loop: file presence + soft locks --------------------------------
@@ -511,8 +676,8 @@ function stopPresenceLoop() {
 //
 // This watcher is deliberately separate from the prefetch loop below. It
 // emits a small editor-agnostic contract (open/save, file, user, mtime, hash)
-// through WatcherTransport. Wave 2 can swap the transport for versioning and
-// timeline ingest without coupling those network paths to fs.watch.
+// through WatcherTransport. Save processing stays asynchronous so versioning
+// and timeline ingest never backpressure the editor's filesystem write.
 
 const projectWatcherState = {
   watcher: null,
@@ -547,7 +712,11 @@ async function reconcileProjectWatcher(settings) {
   }
   const roots = watcherRoots(settings);
   const extensions = Array.isArray(config.extensions) ? config.extensions : [];
-  const signature = JSON.stringify({ roots, extensions: [...extensions].sort() });
+  const signature = JSON.stringify({
+    roots,
+    extensions: [...extensions].sort(),
+    legacyPresenceFallback: config.legacyPresenceFallback === true,
+  });
   if (projectWatcherState.watcher && projectWatcherState.signature === signature) return;
   stopProjectWatcher();
   if (roots.length === 0) {
@@ -555,9 +724,10 @@ async function reconcileProjectWatcher(settings) {
     return;
   }
 
-  const transport = createConvexPresenceTransport({
+  const transport = createConvexWatcherTransport({
     convexCall,
     onLog: pushLog,
+    legacyPresenceFallback: config.legacyPresenceFallback === true,
     getContext: async () => {
       const current = await loadSettings();
       return {
@@ -575,6 +745,7 @@ async function reconcileProjectWatcher(settings) {
     transport,
     listOpenFiles: listOpenFilesUnderMount,
     parseProjectBufferSoft,
+    handleProjectSave: handleWatchedProjectSave,
     onLog: pushLog,
   }).start();
   projectWatcherState.watcher = watcher;
@@ -3030,6 +3201,11 @@ function buildAppMenu() {
     label: "Uninstall snip Desktop…",
     click: () => requestUninstallFromRenderer(),
   };
+  const fileHistory = {
+    label: "File History…",
+    accelerator: "CmdOrCtrl+Shift+H",
+    click: () => openVersionHistoryWindow(),
+  };
 
   const template = [
     ...(isMac
@@ -3053,6 +3229,10 @@ function buildAppMenu() {
           },
         ]
       : []),
+    {
+      label: "File",
+      submenu: [fileHistory, ...(isMac ? [] : [{ type: "separator" }, { role: "quit" }])],
+    },
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },
@@ -3073,6 +3253,38 @@ function buildAppMenu() {
 }
 
 // ---- Window management -------------------------------------------------------
+
+function openVersionHistoryWindow() {
+  if (versionHistoryWindow && !versionHistoryWindow.isDestroyed()) {
+    versionHistoryWindow.show();
+    versionHistoryWindow.focus();
+    return;
+  }
+  versionHistoryWindow = new BrowserWindow({
+    width: 760,
+    height: 620,
+    minWidth: 560,
+    minHeight: 420,
+    title: "File history",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    trafficLightPosition: { x: 14, y: 14 },
+    backgroundColor: "#f0f0e8",
+    webPreferences: {
+      preload: path.join(__dirname, "version-history-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  if (!app.isPackaged && process.env.NODE_ENV !== "production") {
+    versionHistoryWindow.loadURL("http://localhost:5300/version-history.html");
+  } else {
+    versionHistoryWindow.loadFile(path.join(__dirname, "dist", "version-history.html"));
+  }
+  versionHistoryWindow.on("closed", () => {
+    versionHistoryWindow = null;
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({

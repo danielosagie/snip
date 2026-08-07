@@ -108,6 +108,7 @@ class ProjectFileWatcher {
     openPollMs = 5000,
     listOpenFiles = null,
     parseProjectBufferSoft = null,
+    handleProjectSave = null,
     watchFactory = fssync.watch,
     statFile = fs.stat,
     readFile = fs.readFile,
@@ -125,6 +126,7 @@ class ProjectFileWatcher {
     this.openPollMs = openPollMs;
     this.listOpenFiles = listOpenFiles;
     this.parseProjectBufferSoft = parseProjectBufferSoft;
+    this.handleProjectSave = handleProjectSave;
     this.watchFactory = watchFactory;
     this.statFile = statFile;
     this.readFile = readFile;
@@ -248,14 +250,18 @@ class ProjectFileWatcher {
       };
       this.publish(event);
 
-      // Parsing is a follow-up notification. The save event above is already
-      // queued before this read begins, and parse errors become status data.
+      // Parsing, local versioning, and remote ingest are follow-up work. The
+      // save event above is already queued before this read begins.
       if (kind === "save" && this.parseProjectBufferSoft) {
         setImmediate(async () => {
           let result;
+          let buffer = null;
           try {
-            if (extension === ".prproj" || extension === ".fcpxml") {
-              const buffer = await this.readFile(absolutePath);
+            const supported = extension === ".prproj" || extension === ".fcpxml";
+            if (supported || this.handleProjectSave) {
+              buffer = await this.readFile(absolutePath);
+            }
+            if (supported) {
               result = this.parseProjectBufferSoft(buffer, extension);
             } else {
               result = {
@@ -268,6 +274,24 @@ class ProjectFileWatcher {
               status: "saved_timeline_not_parsed",
               error: error instanceof Error ? error.message : String(error),
             };
+          }
+          if (this.handleProjectSave && buffer) {
+            try {
+              const processed = await this.handleProjectSave({
+                event,
+                absolutePath,
+                extension,
+                buffer,
+                parseResult: result,
+              });
+              if (processed?.status) result = processed;
+              if (processed?.hash) event.hash = processed.hash;
+            } catch (error) {
+              result = {
+                status: "saved_timeline_not_parsed",
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
           }
           this.publish({
             ...event,

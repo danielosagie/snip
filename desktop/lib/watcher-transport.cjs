@@ -1,10 +1,6 @@
 "use strict";
 
-/**
- * Buffered transport keeps Convex latency and outages away from the NLE save
- * path. Wave 2 can replace `send` with a versioning/ingest channel without
- * changing ProjectFileWatcher.
- */
+/** Keep Convex latency and outages away from the NLE save path. */
 class BufferedWatcherTransport {
   constructor({ send, flushMs = 100, maxBuffered = 200, onLog = () => {} }) {
     if (typeof send !== "function") throw new TypeError("Watcher transport requires send().");
@@ -53,14 +49,14 @@ class BufferedWatcherTransport {
     try {
       await this.send(batch);
     } catch (error) {
-      // Keep newest data and retry slowly. Duplicate event keys are idempotent
-      // in desktopPresence, so an uncertain network response is safe to retry.
+      // Keep newest data and retry slowly. The server currently has no client
+      // event ID, so an uncertain response can produce a duplicate durable row.
       this.buffer.unshift(...batch);
       if (this.buffer.length > this.maxBuffered) {
         this.buffer.splice(0, this.buffer.length - this.maxBuffered);
       }
       this.onLog(
-        `watcher: presence publish failed: ${error instanceof Error ? error.message : String(error)}`,
+        `watcher: event publish failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
       this.inFlight = false;
@@ -76,21 +72,60 @@ class BufferedWatcherTransport {
   }
 }
 
-function createConvexPresenceTransport({ convexCall, getContext, onLog }) {
+function durableEvent(event) {
+  return {
+    kind: event.kind,
+    file: event.file,
+    root: event.root,
+    mtime: event.mtime,
+    observedAt: event.observedAt,
+    hash: event.hash,
+    parseStatus: event.parseStatus,
+    ...(event.parseError ? { parseError: event.parseError } : {}),
+  };
+}
+
+function createConvexWatcherTransport({
+  convexCall,
+  getContext,
+  onLog,
+  legacyPresenceFallback = false,
+}) {
   return new BufferedWatcherTransport({
     onLog,
     send: async (events) => {
       const context = await getContext();
-      await convexCall("mutation", "desktopPresence:publishWatcherEvents", {
-        clientId: context.clientId,
-        userName: context.userName || undefined,
-        projectId: context.projectId || undefined,
-        teamId: context.teamId || undefined,
-        mountPath: context.mountPath,
-        events,
-      });
+      if (!context.projectId) {
+        throw new Error("Select a project before publishing watcher events.");
+      }
+      try {
+        await convexCall("mutation", "desktopWatcherEvents:insert", {
+          clientId: context.clientId,
+          userName: context.userName || undefined,
+          projectId: context.projectId,
+          events: events.map(durableEvent),
+        });
+      } catch (error) {
+        if (!legacyPresenceFallback) throw error;
+        onLog?.("watcher: durable events unavailable, using legacy presence");
+        await convexCall("mutation", "desktopPresence:publishWatcherEvents", {
+          clientId: context.clientId,
+          userName: context.userName || undefined,
+          projectId: context.projectId,
+          teamId: context.teamId || undefined,
+          mountPath: context.mountPath,
+          events,
+        });
+      }
     },
   });
 }
 
-module.exports = { BufferedWatcherTransport, createConvexPresenceTransport };
+const createConvexPresenceTransport = createConvexWatcherTransport;
+
+module.exports = {
+  BufferedWatcherTransport,
+  createConvexPresenceTransport,
+  createConvexWatcherTransport,
+  durableEvent,
+};

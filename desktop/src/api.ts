@@ -13,8 +13,17 @@
 export interface DesktopFeatureFlags {
   /** File-level presence + soft locks ("Alex has X open in Premiere"). */
   presence: { enabled: boolean };
-  /** Structured NLE project open/save activity published through presence. */
-  watcher: { enabled: boolean; directories: string[]; extensions: string[] };
+  /** Structured NLE project saves, local history, and timeline ingest. */
+  watcher: {
+    enabled: boolean;
+    directories: string[];
+    extensions: string[];
+    autoVersioning: boolean;
+    timelineIngest: boolean;
+    legacyPresenceFallback: boolean;
+    branch: string;
+    siteUrl: string;
+  };
   /** Predictive prefetch on `.prproj` open — warms rclone's VFS cache. */
   prefetch: { enabled: boolean };
   /** LAN-shared cache (mDNS-discovered peers serve cached files). */
@@ -32,6 +41,7 @@ export interface DesktopFeatureFlags {
 export interface DesktopSettings {
   convexUrl: string;
   convexAuthToken: string;
+  timelinePluginToken: string;
   storage: {
     provider: "r2" | "railway";
     bucket: string;
