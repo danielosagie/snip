@@ -209,6 +209,14 @@ export type RenderJobStatus =
   | "done"
   | "failed";
 
+export type RenderJobPhase =
+  | "claimed"
+  | "downloading"
+  | "probing"
+  | "rendering"
+  | "uploading"
+  | "complete";
+
 export interface TimelineDocSnapshotReference {
   timelineDocId: GenericId<"timelineDocs">;
   timelineSnapshotId: GenericId<"timelineSnapshots">;
@@ -237,17 +245,92 @@ export interface RenderSegmentCacheStats {
   bytesRendered: number;
 }
 
+export interface RenderSegmentEffects {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  volume: number;
+  muted: boolean;
+}
+
+export interface RenderSourceSegmentSpec {
+  sourceKey: string;
+  /** Immutable checksum, object version, or other stable content identity. */
+  sourceContentId: string;
+  inSeconds: number;
+  outSeconds: number;
+  effects: RenderSegmentEffects;
+}
+
+export interface RenderWorkerTargetSpec {
+  codec: "h264" | "hevc";
+  container: "mp4";
+  width: number;
+  height: number;
+  fps: number;
+  pixelFormat: "yuv420p";
+  crf: number;
+  preset: "veryfast" | "faster" | "fast" | "medium" | "slow";
+  audioCodec: "aac";
+  audioBitrateKbps: number;
+  audioSampleRate: number;
+  audioChannels: 1 | 2;
+}
+
+/** Immutable, fully resolved input handed to a render worker at claim time. */
+export interface RenderWorkerSpec {
+  segments: RenderSourceSegmentSpec[];
+  target: RenderWorkerTargetSpec;
+  outputKey: string;
+  manifestKey: string;
+}
+
+export interface RenderCacheResult {
+  hits: number;
+  misses: number;
+  totalSegments: number;
+  hitRate: number;
+  hitBytes: number;
+  missBytes: number;
+  totalBytes: number;
+  byteHitRate: number;
+  hitDurationSeconds: number;
+  missDurationSeconds: number;
+  totalDurationSeconds: number;
+  streamCopyPercent: number;
+}
+
+export interface RenderFailureDetail {
+  code: string;
+  retryable: boolean;
+  message?: string;
+  detail?: Record<string, string>;
+}
+
 export interface RenderJob {
   id: GenericId<"renderJobs">;
   teamId: GenericId<"teams">;
   projectId: GenericId<"projects">;
+  /** Lower values are claimed first. New jobs must always set this field. */
+  priority?: number;
+  requesterClerkId?: string;
+  workspaceOwnerClerkId?: string;
   status: RenderJobStatus;
   snapshot: TimelineDocSnapshotReference;
   output: RenderOutputSpec;
+  /**
+   * Fully normalized before queueing and never mutated after insertion.
+   * Existing rows may omit it during the additive schema rollout.
+   */
+  workerSpec?: RenderWorkerSpec;
   outputObjectKey?: string;
+  manifestObjectKey?: string;
+  outputBytes?: number;
   createdAt: number;
   queuedAt: number;
   claimedBy?: string;
+  /** Must be checked with claimedBy on heartbeat, complete, fail, and release. */
+  claimToken?: string;
   claimedAt?: number;
   startedAt?: number;
   uploadingAt?: number;
@@ -255,7 +338,16 @@ export interface RenderJob {
   failedAt?: number;
   heartbeatAt?: number;
   leaseExpiresAt?: number;
+  phase?: RenderJobPhase;
+  /** Normalized to the inclusive range 0 through 1. */
+  progress?: number;
+  workerMessage?: string;
+  /** Workers observe this at heartbeat boundaries and stop cooperatively. */
+  cancellationRequestedAt?: number;
+  cancellationRequestedByClerkId?: string;
   attemptCount: number;
   error?: string;
+  failure?: RenderFailureDetail;
   segmentCache?: RenderSegmentCacheStats;
+  cacheResult?: RenderCacheResult;
 }

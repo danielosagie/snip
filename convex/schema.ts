@@ -827,6 +827,12 @@ export default defineSchema({
   renderJobs: defineTable({
     teamId: v.id("teams"),
     projectId: v.id("projects"),
+    // Additive rollout: existing rows may omit these fields. Every new job
+    // must set priority and both identities before entering the queue. Lower
+    // priority numbers are claimed first.
+    priority: v.optional(v.number()),
+    requesterClerkId: v.optional(v.string()),
+    workspaceOwnerClerkId: v.optional(v.string()),
     status: renderStatusValidator,
     snapshot: v.object({
       timelineDocId: v.id("timelineDocs"),
@@ -853,10 +859,62 @@ export default defineSchema({
       height: v.number(),
       frameRate: v.object({ value: v.number(), rate: v.number() }),
     }),
+    // Immutable, normalized worker input. Queue creation resolves all source
+    // content identities, trims, effects, and encode settings once so retries
+    // cannot drift as mutable timeline or media metadata changes.
+    //
+    // The first worker adapter must reject every output combination except
+    // MP4 with H.264 or HEVC video and AAC audio.
+    workerSpec: v.optional(
+      v.object({
+        segments: v.array(
+          v.object({
+            sourceKey: v.string(),
+            sourceContentId: v.string(),
+            inSeconds: v.number(),
+            outSeconds: v.number(),
+            effects: v.object({
+              brightness: v.number(),
+              contrast: v.number(),
+              saturation: v.number(),
+              volume: v.number(),
+              muted: v.boolean(),
+            }),
+          }),
+        ),
+        target: v.object({
+          codec: v.union(v.literal("h264"), v.literal("hevc")),
+          container: v.literal("mp4"),
+          width: v.number(),
+          height: v.number(),
+          fps: v.number(),
+          pixelFormat: v.literal("yuv420p"),
+          crf: v.number(),
+          preset: v.union(
+            v.literal("veryfast"),
+            v.literal("faster"),
+            v.literal("fast"),
+            v.literal("medium"),
+            v.literal("slow"),
+          ),
+          audioCodec: v.literal("aac"),
+          audioBitrateKbps: v.number(),
+          audioSampleRate: v.number(),
+          audioChannels: v.union(v.literal(1), v.literal(2)),
+        }),
+        outputKey: v.string(),
+        manifestKey: v.string(),
+      }),
+    ),
     outputObjectKey: v.optional(v.string()),
+    manifestObjectKey: v.optional(v.string()),
+    outputBytes: v.optional(v.number()),
     createdAt: v.number(),
     queuedAt: v.number(),
     claimedBy: v.optional(v.string()),
+    // An unguessable per-attempt token. Heartbeat, complete, fail, and release
+    // mutations must compare both this token and claimedBy before writing.
+    claimToken: v.optional(v.string()),
     claimedAt: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     uploadingAt: v.optional(v.number()),
@@ -864,8 +922,32 @@ export default defineSchema({
     failedAt: v.optional(v.number()),
     heartbeatAt: v.optional(v.number()),
     leaseExpiresAt: v.optional(v.number()),
+    phase: v.optional(
+      v.union(
+        v.literal("claimed"),
+        v.literal("downloading"),
+        v.literal("probing"),
+        v.literal("rendering"),
+        v.literal("uploading"),
+        v.literal("complete"),
+      ),
+    ),
+    // Mutation handlers clamp progress to the inclusive range 0 through 1.
+    progress: v.optional(v.number()),
+    workerMessage: v.optional(v.string()),
+    // Workers check this at heartbeat boundaries and stop cooperatively.
+    cancellationRequestedAt: v.optional(v.number()),
+    cancellationRequestedByClerkId: v.optional(v.string()),
     attemptCount: v.number(),
     error: v.optional(v.string()),
+    failure: v.optional(
+      v.object({
+        code: v.string(),
+        retryable: v.boolean(),
+        message: v.optional(v.string()),
+        detail: v.optional(v.record(v.string(), v.string())),
+      }),
+    ),
     segmentCache: v.optional(
       v.object({
         segmentCount: v.number(),
@@ -875,8 +957,25 @@ export default defineSchema({
         bytesRendered: v.number(),
       }),
     ),
+    cacheResult: v.optional(
+      v.object({
+        hits: v.number(),
+        misses: v.number(),
+        totalSegments: v.number(),
+        hitRate: v.number(),
+        hitBytes: v.number(),
+        missBytes: v.number(),
+        totalBytes: v.number(),
+        byteHitRate: v.number(),
+        hitDurationSeconds: v.number(),
+        missDurationSeconds: v.number(),
+        totalDurationSeconds: v.number(),
+        streamCopyPercent: v.number(),
+      }),
+    ),
   })
     .index("by_status", ["status"])
+    .index("by_queue", ["status", "priority", "queuedAt"])
     .index("by_project", ["projectId"])
     .index("by_team_status", ["teamId", "status"])
     .index("by_lease", ["status", "leaseExpiresAt"]),
