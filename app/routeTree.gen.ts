@@ -13,6 +13,7 @@ import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as MonoRouteImport } from './routes/mono'
+import { Route as DesktopSignInRouteImport } from './routes/desktop-sign-in'
 import { Route as ConnectDesktopRouteImport } from './routes/connect-desktop'
 import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -68,6 +69,11 @@ const PricingRoute = PricingRouteImport.update({
 const MonoRoute = MonoRouteImport.update({
   id: '/mono',
   path: '/mono',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesktopSignInRoute = DesktopSignInRouteImport.update({
+  id: '/desktop-sign-in',
+  path: '/desktop-sign-in',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectDesktopRoute = ConnectDesktopRouteImport.update({
@@ -269,6 +275,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteRouteWithChildren
   '/connect-desktop': typeof ConnectDesktopRoute
+  '/desktop-sign-in': typeof DesktopSignInRoute
   '/mono': typeof MonoRoute
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
@@ -310,6 +317,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/connect-desktop': typeof ConnectDesktopRoute
+  '/desktop-sign-in': typeof DesktopSignInRoute
   '/mono': typeof MonoRoute
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
@@ -350,6 +358,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteRouteWithChildren
   '/connect-desktop': typeof ConnectDesktopRoute
+  '/desktop-sign-in': typeof DesktopSignInRoute
   '/mono': typeof MonoRoute
   '/pricing': typeof PricingRoute
   '/sign-in': typeof SignInRouteWithChildren
@@ -394,6 +403,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/connect-desktop'
+    | '/desktop-sign-in'
     | '/mono'
     | '/pricing'
     | '/sign-in'
@@ -435,6 +445,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/connect-desktop'
+    | '/desktop-sign-in'
     | '/mono'
     | '/pricing'
     | '/sign-in'
@@ -474,6 +485,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/connect-desktop'
+    | '/desktop-sign-in'
     | '/mono'
     | '/pricing'
     | '/sign-in'
@@ -517,6 +529,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRouteRoute: typeof DashboardRouteRouteWithChildren
   ConnectDesktopRoute: typeof ConnectDesktopRoute
+  DesktopSignInRoute: typeof DesktopSignInRoute
   MonoRoute: typeof MonoRoute
   PricingRoute: typeof PricingRoute
   SignInRoute: typeof SignInRouteWithChildren
@@ -562,6 +575,13 @@ declare module '@tanstack/react-router' {
       path: '/mono'
       fullPath: '/mono'
       preLoaderRoute: typeof MonoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/desktop-sign-in': {
+      id: '/desktop-sign-in'
+      path: '/desktop-sign-in'
+      fullPath: '/desktop-sign-in'
+      preLoaderRoute: typeof DesktopSignInRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect-desktop': {
@@ -937,6 +957,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRouteRoute: DashboardRouteRouteWithChildren,
   ConnectDesktopRoute: ConnectDesktopRoute,
+  DesktopSignInRoute: DesktopSignInRoute,
   MonoRoute: MonoRoute,
   PricingRoute: PricingRoute,
   SignInRoute: SignInRouteWithChildren,

@@ -1,8 +1,10 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Electron main process. Plain CJS so it runs without a build step.
 // Talks to the renderer (React UI in src/) via IPC.
 
 const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage, Menu } = require("electron");
 const path = require("node:path");
+const { fileURLToPath } = require("node:url");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const { spawn, execSync, execFile } = require("node:child_process");
@@ -26,11 +28,11 @@ const {
   sha256,
 } = require("./lib/version-store.cjs");
 
-// The desktop is a thin native shell around the WEB app — it loads
-// snipfilm.vercel.app directly (real https origin, so Clerk + Convex behave
-// exactly like the browser) and exposes native capabilities (mount, file
-// open/reveal, auto-update) to it via the preload bridge. No separate desktop
-// UI to maintain. Override with SNIP_WEB_URL for staging / local web dev.
+// The desktop is a thin native shell around the web app. It loads the remote
+// app on its real https origin so Clerk and Convex behave like the browser,
+// then exposes native capabilities through the preload bridge. The small local
+// pairing page is the only bundled auth surface. Override with SNIP_WEB_URL for
+// staging or local web development.
 const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://www.snip.film").replace(/\/$/, "");
 
 const SETTINGS_DIR = path.join(app.getPath("userData"));
@@ -353,6 +355,7 @@ async function walkLocal(dir) {
 
 let mainWindow = null;
 let versionHistoryWindow = null;
+let desktopAuthMode = "idle"; // idle | pairing | redeeming | email
 function reportProgress(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("sync:progress", payload);
@@ -1027,6 +1030,7 @@ const lanCacheState = {
 // soon as the first peer shows up. Used by the mount-start flow so
 // the initial mount has the latest peer set when constructing the
 // rclone union remote.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function waitForLanCachePeers(ms) {
   return new Promise((resolve) => {
     if (lanCacheState.peers.size > 0) return resolve();
@@ -1040,6 +1044,7 @@ function waitForLanCachePeers(ms) {
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getLocalLanAddress() {
   // Pick the first non-internal IPv4 address. Good enough for the
   // typical single-NIC studio workstation; the bonjour client will
@@ -3418,7 +3423,94 @@ function openVersionHistoryWindow() {
   });
 }
 
+function pairingRendererPath() {
+  return path.resolve(__dirname, "dist", "pairing.html");
+}
+
+function isTrustedPairingRenderer(event) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (event.sender !== mainWindow.webContents) return false;
+
+  const senderUrl = event.senderFrame?.url || event.sender.getURL();
+  try {
+    const parsed = new URL(senderUrl);
+    if (!app.isPackaged && process.env.NODE_ENV !== "production") {
+      return (
+        parsed.origin === "http://localhost:5300" &&
+        parsed.pathname === "/pairing.html"
+      );
+    }
+    return (
+      parsed.protocol === "file:" &&
+      path.resolve(fileURLToPath(parsed)) === pairingRendererPath()
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function loadPairingPage(error = null) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  desktopAuthMode = "pairing";
+  try {
+    if (!app.isPackaged && process.env.NODE_ENV !== "production") {
+      const url = new URL("http://localhost:5300/pairing.html");
+      if (error) url.searchParams.set("error", error);
+      await mainWindow.loadURL(url.toString());
+    } else {
+      await mainWindow.loadFile(
+        pairingRendererPath(),
+        error ? { query: { error } } : undefined,
+      );
+    }
+  } catch (loadError) {
+    console.error("Could not load desktop pairing page", loadError);
+    desktopAuthMode = "email";
+    await mainWindow
+      .loadURL(`${WEB_APP_URL}/sign-in?desktop_email=1`)
+      .catch((emailError) =>
+        console.error("Could not load email sign-in fallback", emailError),
+      );
+  }
+}
+
+ipcMain.handle("desktop-auth:config", async (event) => {
+  if (!isTrustedPairingRenderer(event)) {
+    throw new Error("Desktop pairing is unavailable from this page.");
+  }
+  return {
+    webOrigin: WEB_APP_URL,
+    deviceLabel: `snip desktop (${process.platform})`,
+  };
+});
+
+ipcMain.handle("desktop-auth:redeem-ticket", async (event, ticket) => {
+  if (!isTrustedPairingRenderer(event) || desktopAuthMode !== "pairing") {
+    throw new Error("Desktop pairing is unavailable from this page.");
+  }
+  if (typeof ticket !== "string" || ticket.length < 16 || ticket.length > 8192) {
+    throw new Error("Invalid sign-in ticket.");
+  }
+
+  desktopAuthMode = "redeeming";
+  const url = new URL("/desktop-sign-in", WEB_APP_URL);
+  url.searchParams.set("__clerk_ticket", ticket);
+  return { url: url.toString() };
+});
+
+ipcMain.handle("desktop-auth:use-email", async (event) => {
+  if (!isTrustedPairingRenderer(event)) {
+    throw new Error("Desktop pairing is unavailable from this page.");
+  }
+
+  desktopAuthMode = "email";
+  const url = new URL("/sign-in", WEB_APP_URL);
+  url.searchParams.set("desktop_email", "1");
+  return { url: url.toString() };
+});
+
 function createWindow() {
+  desktopAuthMode = "idle";
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 720,
@@ -3437,9 +3529,6 @@ function createWindow() {
     },
   });
 
-  // Go straight into the app, not the marketing landing page. /dashboard
-  // redirects to sign-in when signed out, and to the workspace when signed in.
-  mainWindow.loadURL(`${WEB_APP_URL}/dashboard`);
   if (!app.isPackaged && process.env.NODE_ENV !== "production") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
@@ -3454,8 +3543,15 @@ function createWindow() {
   const OUR_ORIGINS = new Set([
     new URL(WEB_APP_URL).origin,
     "https://www.snip.film",
+    // Apex 308s to www, but the guard runs BEFORE the redirect, so leaving it
+    // out cancels the hop and strands the window. This is exactly how 0.2.8
+    // broke: it allowed only snipfilm.vercel.app, which now redirects to www.
+    "https://snip.film",
     "https://snipfilm.vercel.app",
   ]);
+  // clerk.snip.film is intentionally excluded. Clerk JS reaches it with fetch,
+  // which this navigation guard does not affect. Pairing and ticket redemption
+  // do not require a top-level navigation to Clerk's frontend host.
   const isOurApp = (url) => {
     try {
       return OUR_ORIGINS.has(new URL(url).origin);
@@ -3463,17 +3559,109 @@ function createWindow() {
       return false;
     }
   };
+  const parsedAppUrl = (url) => {
+    try {
+      const parsed = new URL(url);
+      return OUR_ORIGINS.has(parsed.origin) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+  const isSignInUrl = (url) => {
+    const parsed = parsedAppUrl(url);
+    return Boolean(
+      parsed &&
+        (parsed.pathname === "/sign-in" ||
+          parsed.pathname.startsWith("/sign-in/")),
+    );
+  };
+  const handleAuthNavigation = (url) => {
+    const parsed = parsedAppUrl(url);
+    if (!parsed) return;
+
+    if (
+      parsed.pathname === "/sign-in" ||
+      parsed.pathname.startsWith("/sign-in/")
+    ) {
+      if (parsed.searchParams.get("desktop_email") === "1") {
+        desktopAuthMode = "email";
+        return;
+      }
+      if (parsed.searchParams.get("desktop_pairing") === "1") {
+        void loadPairingPage();
+        return;
+      }
+      if (desktopAuthMode === "pairing" || desktopAuthMode === "redeeming") {
+        return;
+      }
+      if (desktopAuthMode !== "email") void loadPairingPage();
+      return;
+    }
+
+    if (parsed.pathname === "/desktop-sign-in") {
+      desktopAuthMode = "redeeming";
+      return;
+    }
+
+    desktopAuthMode = "idle";
+  };
+  mainWindow.webContents.on("did-navigate", (_event, url) => {
+    handleAuthNavigation(url);
+  });
+  mainWindow.webContents.on("did-navigate-in-page", (_event, url) => {
+    handleAuthNavigation(url);
+  });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isOurApp(url)) {
       event.preventDefault();
+      if (
+        desktopAuthMode === "email" &&
+        isSignInUrl(mainWindow.webContents.getURL())
+      ) {
+        void loadPairingPage();
+        return;
+      }
       void shell.openExternal(url);
     }
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isOurApp(url)) return { action: "allow" };
+    if (
+      desktopAuthMode === "email" &&
+      isSignInUrl(mainWindow.webContents.getURL())
+    ) {
+      void loadPairingPage();
+      return { action: "deny" };
+    }
     void shell.openExternal(url);
     return { action: "deny" };
   });
+
+  mainWindow.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (
+        !isMainFrame ||
+        errorCode === -3 ||
+        desktopAuthMode !== "redeeming"
+      ) {
+        return;
+      }
+      let failedPage = "unknown";
+      try {
+        const parsed = new URL(validatedURL);
+        failedPage = `${parsed.origin}${parsed.pathname}`;
+      } catch {
+        // Keep the fallback label. Never log a URL that may contain a ticket.
+      }
+      console.error("Desktop ticket redemption page failed to load", {
+        errorCode,
+        errorDescription,
+        failedPage,
+      });
+      void loadPairingPage("redemption-load");
+    },
+  );
 
   // Allow opening DevTools in the packaged build for diagnosis (⌘⌥I / Ctrl+Shift+I).
   mainWindow.webContents.on("before-input-event", (_event, input) => {
@@ -3485,6 +3673,10 @@ function createWindow() {
       mainWindow.webContents.toggleDevTools();
     }
   });
+
+  // Go straight into the app. Signed-out navigation is caught by the handlers
+  // above before the embedded sign-in screen can start a federated OAuth flow.
+  void mainWindow.loadURL(`${WEB_APP_URL}/dashboard`);
 }
 
 // macOS auto-update (Squirrel) can't replace the app bundle when it runs from a

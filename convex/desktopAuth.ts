@@ -6,7 +6,7 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { internal, api } from "./_generated/api";
-import { getIdentity, identityName } from "./auth";
+import { getIdentity, identityEmail, identityName } from "./auth";
 
 /**
  * Zero-setup desktop pairing (Clerk sign-in token relay).
@@ -247,7 +247,9 @@ export const approvePairing = action({
       await ctx.runMutation(internal.desktopAuth.markApproved, {
         code: args.code,
         userClerkId: userId,
-        userName: identityName(identity),
+        // Email makes the desktop's wrong-account check unambiguous. Fall back
+        // to the display name only for accounts without an email claim.
+        userName: identityEmail(identity) || identityName(identity),
         signInToken: body.token,
       });
 

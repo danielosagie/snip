@@ -12,20 +12,19 @@
 const env = import.meta.env as Record<string, string | undefined>;
 
 export const CONVEX_URL =
-  env.VITE_CONVEX_URL?.trim() || "https://confident-starling-497.convex.cloud";
+  env.VITE_CONVEX_URL?.trim() || "https://knowing-dogfish-12.convex.cloud";
 
 export const CLERK_PUBLISHABLE_KEY =
   env.VITE_CLERK_PUBLISHABLE_KEY?.trim() ||
-  "pk_test_b3V0Z29pbmctd2VldmlsLTE4LmNsZXJrLmFjY291bnRzLmRldiQ";
+  "pk_live_Y2xlcmsuc25pcC5maWxtJA";
 
 /** Web origin for the connect-desktop hand-off. Override at build time
  *  via VITE_WEB_ORIGIN (desktop/.env) for staging/self-host builds.
- *  Default points at the canonical Vercel project URL until a custom
- *  domain is registered + assigned to the project — `snip.film` was the
- *  planned domain but is unregistered (NXDOMAIN), so it can't be the
- *  fallback. */
+ *  www is canonical: the apex 308s to it and the old snipfilm.vercel.app
+ *  307s to it. These defaults must stay correct on their own, because the
+ *  release workflow passes no VITE_ variables. */
 export const WEB_ORIGIN =
-  env.VITE_WEB_ORIGIN?.trim() || "https://snipfilm.vercel.app";
+  env.VITE_WEB_ORIGIN?.trim() || "https://www.snip.film";
 
 /** Convex function path → full HTTP endpoint for unauthenticated public
  *  mutation calls (pairing) made before we have a session. */

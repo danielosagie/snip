@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Preload bridge — exposes a minimal IPC surface to the renderer under
 // window.api. Keep this list tight so the renderer can't make arbitrary IPC
 // calls (Electron security best practice).
@@ -24,6 +25,12 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.on("menu:uninstall", listener);
       return () => ipcRenderer.off("menu:uninstall", listener);
     },
+  },
+  desktopAuth: {
+    config: () => ipcRenderer.invoke("desktop-auth:config"),
+    redeemTicket: (ticket) =>
+      ipcRenderer.invoke("desktop-auth:redeem-ticket", ticket),
+    useEmail: () => ipcRenderer.invoke("desktop-auth:use-email"),
   },
   update: {
     state: () => ipcRenderer.invoke("update:state"),

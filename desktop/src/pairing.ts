@@ -29,6 +29,25 @@ export interface PairingResult {
   storage: PairingStorage | null;
 }
 
+export type PairingFailureCode =
+  | "cancelled"
+  | "expired"
+  | "consumed"
+  | "unknown"
+  | "timeout"
+  | "browser"
+  | "network";
+
+export class PairingError extends Error {
+  constructor(
+    readonly code: PairingFailureCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PairingError";
+  }
+}
+
 type PollResponse =
   | { status: "pending" }
   | { status: "unknown" }
@@ -57,33 +76,76 @@ const POLL_TIMEOUT_MS = 10 * 60 * 1000;
  */
 export async function runPairing(opts: {
   deviceLabel?: string;
+  webOrigin?: string;
   onOpened?: (url: string) => void;
   signal?: { cancelled: boolean };
 }): Promise<PairingResult> {
   const code = makeCode();
   const client = new ConvexClient(CONVEX_URL);
   try {
-    await client.mutation(
-      "desktopAuth:createPairing" as unknown as Parameters<
-        typeof client.mutation
-      >[0],
-      { code, deviceLabel: opts.deviceLabel },
-    );
+    try {
+      await client.mutation(
+        "desktopAuth:createPairing" as unknown as Parameters<
+          typeof client.mutation
+        >[0],
+        { code, deviceLabel: opts.deviceLabel },
+      );
+    } catch {
+      throw new PairingError(
+        "network",
+        "Could not start the connection. Check your network and try again.",
+      );
+    }
 
-    const url = `${WEB_ORIGIN.replace(/\/$/, "")}/connect-desktop?code=${code}`;
-    await api.shell.openExternal(url);
+    if (opts.signal?.cancelled) {
+      throw new PairingError(
+        "cancelled",
+        "Connection cancelled. Try again or use email.",
+      );
+    }
+
+    const webOrigin = opts.webOrigin?.trim() || WEB_ORIGIN;
+    const url = `${webOrigin.replace(/\/$/, "")}/connect-desktop?code=${code}`;
+    try {
+      await api.shell.openExternal(url);
+    } catch {
+      throw new PairingError(
+        "browser",
+        "Could not open your browser. Try again.",
+      );
+    }
     opts.onOpened?.(url);
 
     const deadline = Date.now() + POLL_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      if (opts.signal?.cancelled) throw new Error("Pairing cancelled.");
+      if (opts.signal?.cancelled) {
+        throw new PairingError(
+          "cancelled",
+          "Connection cancelled. Try again or use email.",
+        );
+      }
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-      const res = (await client.mutation(
-        "desktopAuth:pollPairing" as unknown as Parameters<
-          typeof client.mutation
-        >[0],
-        { code },
-      )) as PollResponse;
+      if (opts.signal?.cancelled) {
+        throw new PairingError(
+          "cancelled",
+          "Connection cancelled. Try again or use email.",
+        );
+      }
+
+      let res: PollResponse;
+      try {
+        res = (await client.mutation(
+          "desktopAuth:pollPairing" as unknown as Parameters<
+            typeof client.mutation
+          >[0],
+          { code },
+        )) as PollResponse;
+      } catch {
+        throw new PairingError(
+          "network",
+          "Connection lost. Check your network and try again.",
+        );
+      }
 
       if (res.status === "approved") {
         return {
@@ -93,17 +155,20 @@ export async function runPairing(opts: {
         };
       }
       if (res.status === "expired") {
-        throw new Error("The pairing request expired. Try again.");
+        throw new PairingError("expired", "Connection expired. Try again.");
       }
       if (res.status === "consumed") {
-        throw new Error("This pairing was already used. Try again.");
+        throw new PairingError(
+          "consumed",
+          "Connection already used. Try again.",
+        );
       }
       if (res.status === "unknown") {
-        throw new Error("Pairing was lost server-side. Try again.");
+        throw new PairingError("unknown", "Connection not found. Try again.");
       }
-      // pending → keep polling
+      // The pending state keeps polling while the waiting screen stays visible.
     }
-    throw new Error("Pairing timed out. Try again.");
+    throw new PairingError("timeout", "No approval received. Try again.");
   } finally {
     client.close();
   }

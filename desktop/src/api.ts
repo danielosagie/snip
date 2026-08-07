@@ -117,6 +117,11 @@ interface DesktopApi {
   app: {
     version: () => Promise<string>;
   };
+  desktopAuth: {
+    config: () => Promise<{ webOrigin: string; deviceLabel: string }>;
+    redeemTicket: (ticket: string) => Promise<{ url: string }>;
+    useEmail: () => Promise<{ url: string }>;
+  };
   update: {
     state: () => Promise<UpdateState>;
     check: () => Promise<{ ok: boolean; reason?: string }>;

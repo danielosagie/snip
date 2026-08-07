@@ -12,6 +12,12 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         history: resolve(__dirname, "version-history.html"),
+        pairing: resolve(__dirname, "pairing.html"),
+      },
+      output: {
+        manualChunks(id) {
+          if (id.includes("/node_modules/convex/")) return "convex";
+        },
       },
     },
   },
