@@ -5,12 +5,9 @@
  * price the instant the user drags the slider, with no Stripe round-trip.
  * Stripe is only involved when they commit and we open checkout.
  *
- * The stops below mirror convex/workspaceBilling.ts TIERS. They are a
- * ladder, not a continuum, because each one maps to a fixed Stripe price
- * ID (STRIPE_PRICE_*_MONTHLY_V2) and createCheckout asserts that the
- * price's unit_amount equals the tier's baseCents. Selling an arbitrary
- * GB number needs a per-unit price with a quantity, which is a pricing
- * change, not a UI change — see docs note in the billing route.
+ * The stops below are presentation math for the pricing page and storage
+ * planner. They intentionally lead the billing enforcement in
+ * convex/workspaceBilling.ts during the never-per-seat migration.
  */
 
 export const GIBIBYTE = 1024 * 1024 * 1024;
@@ -22,19 +19,19 @@ export type StorageStop = {
   label: string;
   gb: number;
   monthlyCents: number;
-  /** Free caps collaborators; the paid stops don't. */
+  /** Every advertised stop includes unlimited collaborators. */
   seatCap: number | null;
 };
 
 /** Ordered smallest to largest. Index doubles as the slider position. */
 export const STORAGE_STOPS: readonly StorageStop[] = [
-  { plan: "free", label: "Free", gb: 25, monthlyCents: 0, seatCap: 2 },
-  { plan: "basic", label: "Basic", gb: 500, monthlyCents: 2500, seatCap: null },
-  { plan: "pro", label: "Pro", gb: 2048, monthlyCents: 5000, seatCap: null },
+  { plan: "free", label: "Free", gb: 100, monthlyCents: 0, seatCap: null },
+  { plan: "basic", label: "Studio", gb: 1024, monthlyCents: 4900, seatCap: null },
+  { plan: "pro", label: "Scale", gb: 5120, monthlyCents: 14900, seatCap: null },
 ];
 
 export function stopForPlan(plan: string): StorageStop | undefined {
-  // Legacy rows still say "studio" for what is now "basic".
+  // Keep archived "studio" rows mapped to the stable Basic checkout key.
   const key = plan === "studio" ? "basic" : plan;
   return STORAGE_STOPS.find((s) => s.plan === key);
 }
@@ -51,7 +48,7 @@ export function indexOfPlan(plan: string): number {
 
 /**
  * Cheapest stop that holds `gb`. Returns null when the number is past the
- * largest stop — the caller should route that to "contact us" rather than
+ * largest stop: the caller should route that to "contact us" rather than
  * silently clamping someone down to a plan that can't hold their files.
  */
 export function smallestStopFor(gb: number): StorageStop | null {
