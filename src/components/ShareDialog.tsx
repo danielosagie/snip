@@ -46,6 +46,11 @@ import { formatRelativeTime, cn } from "@/lib/utils";
 import { ShareAccessPanel } from "@/components/share/ShareAccessPanel";
 import { publicShareUrl, publicWatchUrl } from "@/lib/publicUrl";
 import {
+  formatUsdCents,
+  parseUsdDollarsToCents,
+} from "@/lib/money";
+import { MAX_LINE_ITEM_AMOUNT_CENTS } from "../../convex/paymentsPolicy";
+import {
   softButton,
   softButtonPrimary,
   softInput,
@@ -85,11 +90,110 @@ export type ShareCoverSource = {
 };
 
 export type SharePaywallOptions = {
+  mode: "all" | "per_item";
   priceDollars: string;
   currency: string;
   clientEmail: string;
   description: string;
+  itemPriceDollars: Record<string, string>;
 };
+
+export const DEFAULT_SHARE_PAYWALL_OPTIONS: SharePaywallOptions = {
+  mode: "all",
+  priceDollars: "",
+  currency: "usd",
+  clientEmail: "",
+  description: "",
+  itemPriceDollars: {},
+};
+
+function enteredPriceLabel(value: string): string {
+  const entered = value.trim();
+  return entered ? `$${entered}` : "Empty price";
+}
+
+export function getItemPriceInputError(value: string): string | null {
+  if (!value.trim()) return null;
+  const cents = parseUsdDollarsToCents(value);
+  if (cents === null || cents <= 0) {
+    return `${enteredPriceLabel(value)} is invalid. Use $0.01 to ${formatUsdCents(MAX_LINE_ITEM_AMOUNT_CENTS)}.`;
+  }
+  if (cents > MAX_LINE_ITEM_AMOUNT_CENTS) {
+    return `${enteredPriceLabel(value)} exceeds the ${formatUsdCents(MAX_LINE_ITEM_AMOUNT_CENTS)} limit.`;
+  }
+  return null;
+}
+
+export function buildSharePaywallConfiguration(
+  enabled: boolean,
+  options: SharePaywallOptions,
+  items: ShareCoverItem[] | undefined,
+): {
+  paywall?: {
+    priceCents: number;
+    currency: string;
+    description?: string;
+    mode: "all" | "per_item";
+  };
+  itemPrices?: Array<{ videoId: Id<"videos">; priceCents: number }>;
+} {
+  if (!enabled) return {};
+  if (!options.clientEmail.trim()) {
+    throw new Error("Client email is required.");
+  }
+
+  if (options.mode === "all") {
+    const priceCents = parseUsdDollarsToCents(options.priceDollars);
+    if (
+      priceCents === null ||
+      priceCents < 50 ||
+      priceCents > MAX_LINE_ITEM_AMOUNT_CENTS
+    ) {
+      throw new Error(
+        `${enteredPriceLabel(options.priceDollars)} is invalid. Use $0.50 to ${formatUsdCents(MAX_LINE_ITEM_AMOUNT_CENTS)}.`,
+      );
+    }
+    return {
+      paywall: {
+        priceCents,
+        currency: options.currency || "usd",
+        description: options.description.trim() || undefined,
+        mode: "all",
+      },
+    };
+  }
+
+  if (!items) throw new Error("Items are still loading.");
+  const itemPrices: Array<{ videoId: Id<"videos">; priceCents: number }> = [];
+  for (const item of items) {
+    const value = options.itemPriceDollars[item._id] ?? "";
+    if (!value.trim()) continue;
+    const inputError = getItemPriceInputError(value);
+    if (inputError) throw new Error(`${item.title}: ${inputError}`);
+    itemPrices.push({
+      videoId: item._id,
+      priceCents: parseUsdDollarsToCents(value)!,
+    });
+  }
+  if (itemPrices.length === 0) {
+    throw new Error("Price at least one item. Unpriced files are not purchasable.");
+  }
+  if (itemPrices.length > 200) {
+    throw new Error(
+      `${itemPrices.length} priced items exceeds the 200 item limit.`,
+    );
+  }
+
+  return {
+    paywall: {
+      priceCents: Math.max(50, itemPrices[0].priceCents),
+      currency: "usd",
+      description: options.description.trim() || undefined,
+      mode: "per_item",
+    },
+    itemPrices,
+  };
+}
 
 export function useShareCoverPicker(
   source: ShareCoverSource | null,
@@ -346,6 +450,7 @@ export function ShareCapabilitiesSection({
   paywallOptions,
   onPaywallOptionsChange,
   paywallProductionReady,
+  items,
 }: {
   allowDownload: boolean;
   onAllowDownloadChange: (value: boolean) => void;
@@ -356,6 +461,7 @@ export function ShareCapabilitiesSection({
   paywallOptions: SharePaywallOptions;
   onPaywallOptionsChange: (value: SharePaywallOptions) => void;
   paywallProductionReady: boolean;
+  items: ShareCoverItem[] | undefined;
 }) {
   return (
     <ShareSection label="What they can do">
@@ -390,38 +496,115 @@ export function ShareCapabilitiesSection({
               </span>
             ) : null}
           </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_108px] gap-3">
-            <label className="space-y-2">
-              <span className="text-[13px] font-medium text-[#6E6E73]">Price</span>
-              <Input
-                type="number"
-                min={0.5}
-                step={0.5}
-                placeholder="500.00"
-                value={paywallOptions.priceDollars}
-                onChange={(event) =>
-                  onPaywallOptionsChange({
-                    ...paywallOptions,
-                    priceDollars: event.target.value,
+          <SoftSegmentedControl
+            label="Pricing"
+            value={paywallOptions.mode}
+            onChange={(mode) =>
+              onPaywallOptionsChange({
+                ...paywallOptions,
+                mode,
+                currency: mode === "per_item" ? "usd" : paywallOptions.currency,
+              })
+            }
+            options={[
+              { value: "all", label: "Whole share" },
+              { value: "per_item", label: "Per item" },
+            ]}
+          />
+          {paywallOptions.mode === "all" ? (
+            <div className="grid grid-cols-[minmax(0,1fr)_108px] gap-3">
+              <label className="space-y-2">
+                <span className="text-[13px] font-medium text-[#6E6E73]">Price</span>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="500.00"
+                  value={paywallOptions.priceDollars}
+                  onChange={(event) =>
+                    onPaywallOptionsChange({
+                      ...paywallOptions,
+                      priceDollars: event.target.value,
+                    })
+                  }
+                  className={cn(softInput, "tabular-nums")}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className="text-[13px] font-medium text-[#6E6E73]">Currency</span>
+                <Input
+                  value={paywallOptions.currency.toUpperCase()}
+                  onChange={(event) =>
+                    onPaywallOptionsChange({
+                      ...paywallOptions,
+                      currency: event.target.value.toLowerCase().slice(0, 4),
+                    })
+                  }
+                  className={softInput}
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-white">
+              <div className="grid grid-cols-[minmax(0,1fr)_112px] border-b border-[#F1F1F3] px-3 py-2 font-['Geist_Mono',ui-monospace,monospace] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
+                <span>File</span>
+                <span>USD</span>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {items === undefined ? (
+                  <div className="px-3 py-4 text-[13px] text-[#6E6E73]">
+                    Loading items…
+                  </div>
+                ) : items.length === 0 ? (
+                  <div className="px-3 py-4 text-[13px] text-[#6E6E73]">
+                    No items
+                  </div>
+                ) : (
+                  items.map((item) => {
+                    const value = paywallOptions.itemPriceDollars[item._id] ?? "";
+                    const inputError = getItemPriceInputError(value);
+                    return (
+                      <div
+                        key={item._id}
+                        className="grid grid-cols-[minmax(0,1fr)_112px] gap-3 border-b border-[#F1F1F3] px-3 py-2.5 last:border-b-0"
+                      >
+                        <div className="min-w-0 self-center">
+                          <div className="truncate text-[13px] font-medium text-[#131315]">
+                            {item.title}
+                          </div>
+                          <div
+                            className={cn(
+                              "mt-0.5 text-[11px]",
+                              inputError ? "text-[#D8434F]" : "text-[#A0A0A5]",
+                            )}
+                          >
+                            {inputError ?? (value.trim() ? "Purchasable" : "Not purchasable")}
+                          </div>
+                        </div>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          aria-label={`${item.title} price in dollars`}
+                          aria-invalid={Boolean(inputError)}
+                          placeholder="Not set"
+                          value={value}
+                          onChange={(event) =>
+                            onPaywallOptionsChange({
+                              ...paywallOptions,
+                              itemPriceDollars: {
+                                ...paywallOptions.itemPriceDollars,
+                                [item._id]: event.target.value,
+                              },
+                            })
+                          }
+                          className={cn(softInput, "h-9 tabular-nums")}
+                        />
+                      </div>
+                    );
                   })
-                }
-                className={softInput}
-              />
-            </label>
-            <label className="space-y-2">
-              <span className="text-[13px] font-medium text-[#6E6E73]">Currency</span>
-              <Input
-                value={paywallOptions.currency.toUpperCase()}
-                onChange={(event) =>
-                  onPaywallOptionsChange({
-                    ...paywallOptions,
-                    currency: event.target.value.toLowerCase().slice(0, 4),
-                  })
-                }
-                className={softInput}
-              />
-            </label>
-          </div>
+                )}
+              </div>
+            </div>
+          )}
           <label className="space-y-2">
             <span className="text-[13px] font-medium text-[#6E6E73]">Client email</span>
             <Input
@@ -452,7 +635,7 @@ export function ShareCapabilitiesSection({
             />
           </label>
           <p className="text-[12px] leading-[18px] text-[#A0A0A5]">
-            Snip keeps 5% plus 30¢ per paid delivery.
+            You receive the listed price. Buyer pays the Snip fee on top.
           </p>
         </div>
       ) : null}
@@ -778,13 +961,6 @@ interface ShareDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const DEFAULT_PAYWALL_OPTIONS: SharePaywallOptions = {
-  priceDollars: "",
-  currency: "usd",
-  clientEmail: "",
-  description: "",
-};
-
 export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const video = useQuery(api.videos.get, { videoId });
   const shareLinks = useQuery(api.shareLinks.list, { videoId });
@@ -819,7 +995,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const [newLinkOptions, setNewLinkOptions] = useState({
     expiresInDays: undefined as number | undefined,
     password: "",
-    ...DEFAULT_PAYWALL_OPTIONS,
+    ...DEFAULT_SHARE_PAYWALL_OPTIONS,
   });
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -832,10 +1008,12 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   }, [open, scope, video?.folderId, videoId]);
   const coverPicker = useShareCoverPicker(coverSource);
   const paywallOptions: SharePaywallOptions = {
+    mode: newLinkOptions.mode,
     priceDollars: newLinkOptions.priceDollars,
     currency: newLinkOptions.currency,
     clientEmail: newLinkOptions.clientEmail,
     description: newLinkOptions.description,
+    itemPriceDollars: newLinkOptions.itemPriceDollars,
   };
   const paywallProductionReady = featureStatus?.paywallReady ?? false;
   const shareTitle =
@@ -855,29 +1033,15 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
     }
   };
 
-  const buildPaywall = () => {
-    if (!paywallEnabled) return undefined;
-    const dollars = Number.parseFloat(newLinkOptions.priceDollars);
-    if (!Number.isFinite(dollars) || dollars < 0.5) {
-      throw new Error("Price must be at least $0.50.");
-    }
-    if (!newLinkOptions.clientEmail.trim()) {
-      throw new Error(
-        "A client email is required for paid links. It identifies the watermark and checkout.",
-      );
-    }
-    return {
-      priceCents: Math.round(dollars * 100),
-      currency: newLinkOptions.currency || "usd",
-      description: newLinkOptions.description || undefined,
-    };
-  };
-
   const handleCreateLink = async () => {
     setCreateError(null);
     setIsCreating(true);
     try {
-      const paywall = buildPaywall();
+      const { paywall, itemPrices } = buildSharePaywallConfiguration(
+        paywallEnabled,
+        paywallOptions,
+        coverPicker.data?.items,
+      );
       let bundleId: Id<"shareBundles"> | undefined;
       if (scope === "folder" && video?.folderId) {
         bundleId = await createBundleForFolder({ folderId: video.folderId });
@@ -890,6 +1054,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
         allowDownload,
         password: newLinkOptions.password || undefined,
         paywall,
+        itemPrices,
         clientEmail: newLinkOptions.clientEmail || undefined,
         generalAccess,
         commentsEnabled,
@@ -941,7 +1106,8 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
     setNewLinkOptions({
       expiresInDays: undefined,
       password: "",
-      ...DEFAULT_PAYWALL_OPTIONS,
+      ...DEFAULT_SHARE_PAYWALL_OPTIONS,
+      itemPriceDollars: {},
     });
   };
 
@@ -1027,6 +1193,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                   setNewLinkOptions((current) => ({ ...current, ...next }))
                 }
                 paywallProductionReady={paywallProductionReady}
+                items={coverPicker.data?.items}
               />
 
               <ShareLooksSection
@@ -1127,7 +1294,9 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                           ) : null}
                           {link.paywall ? (
                             <span className="text-[#D14E00]">
-                              {(link.paywall.priceCents / 100).toFixed(2)} {link.paywall.currency.toUpperCase()}
+                              {link.paywall.mode === "per_item"
+                                ? `${link.itemPrices?.length ?? 0} priced`
+                                : formatUsdCents(link.paywall.priceCents)}
                             </span>
                           ) : null}
                           {link.expiresAt ? (

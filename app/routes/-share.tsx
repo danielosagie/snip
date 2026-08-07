@@ -27,17 +27,8 @@ import {
   ShareItemMetadata,
   type ShareItemMeta,
 } from "@/components/share/ShareItemMetadata";
-
-function formatPrice(cents: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency.toUpperCase(),
-    }).format(cents / 100);
-  } catch {
-    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
-  }
-}
+import { ItemUnlockControl } from "@/components/share/ItemUnlockControl";
+import { formatUsdCents } from "@/lib/money";
 
 export default function SharePage() {
   const params = useParams({ strict: false });
@@ -84,7 +75,7 @@ export default function SharePage() {
     previewError?: string | null;
   } | null>(null);
   // Owner-only verification toggle. Defaults to "client" so an owner
-  // viewing their own link still exercises the real watermark pipeline —
+  // viewing their own link still exercises the real watermark pipeline.
   // they can flip to "owner" to bypass the paywall and stream full-res.
   const [viewAs, setViewAs] = useState<"client" | "owner">("client");
   const [isRetryingPreview, setIsRetryingPreview] = useState(false);
@@ -92,6 +83,9 @@ export default function SharePage() {
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [isCreatingCheckout, setIsCreatingCheckout] = useState(false);
+  const [checkoutItemId, setCheckoutItemId] = useState<string | null>(null);
+  const [purchaseItemId, setPurchaseItemId] = useState<string | null>(null);
+  const [confirmingItemId, setConfirmingItemId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [commentText, setCommentText] = useState("");
@@ -112,52 +106,97 @@ export default function SharePage() {
   const [coverReload, setCoverReload] = useState(0);
   const [downloadSheetOpen, setDownloadSheetOpen] = useState(false);
   const [rightTab, setRightTab] = useState<"comments" | "info">("comments");
+  const [activeItemId, setActiveItemId] = useState<Id<"videos"> | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const playerSectionRef = useRef<HTMLDivElement | null>(null);
-
-  // Live unlock-state subscription. Convex reactivity flips this from
-  // paid:false to paid:true the instant the Stripe webhook fires, with no
-  // polling.
-  const unlockState = useQuery(
-    api.payments.getGrantUnlockState,
-    grantToken ? { grantToken } : "skip",
-  );
-
-  // Source of truth for paywall state is the live unlockState query — it
-  // works even when playbackSession failed to load (e.g. preview asset still
-  // ingesting). Playback mode is only used for the player UI.
-  const paywall = unlockState?.paywall ?? null;
-  const isPaid = Boolean(unlockState?.paid);
-  const isPaywalled = Boolean(paywall);
-  const isOwner = Boolean(unlockState?.isOwner);
-  // Drive-style role capabilities (Phase 3). Default canComment to true until
-  // the unlock state resolves so the composer doesn't flicker for the common
-  // commenter case.
-  const canComment = unlockState ? unlockState.canComment : true;
-  const canDownloadGrant = Boolean(unlockState?.canDownload);
-  const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
-
-  // For bundle shares, the active item is the one currently being viewed /
-  // commented on. Defaults to the first ready item once the summary loads.
-  const [activeItemId, setActiveItemId] = useState<Id<"videos"> | null>(null);
-
-  useEffect(() => {
-    setIsDownloading(false);
-    setDownloadError(null);
-  }, [token]);
 
   const { shareInfo, summary, videoData, comments } = useShareData({
     token,
     grantToken,
     itemVideoId: activeItemId,
   });
-
   const isBundle = summary?.kind === "bundle";
+  const queriedItemVideoId = isBundle
+    ? activeItemId
+    : summary?.single?.videoId ?? null;
+
+  const unlockState = useQuery(
+    api.payments.getGrantUnlockState,
+    grantToken
+      ? {
+          grantToken,
+          itemVideoId: queriedItemVideoId ?? undefined,
+        }
+      : "skip",
+  );
+
+  // Source of truth for paywall state is the live unlockState query. It
+  // works even when playbackSession failed to load (e.g. preview asset still
+  // ingesting). Playback mode is only used for the player UI.
+  const paywall = unlockState?.paywall ?? summary?.paywall ?? null;
+  const isPaid = Boolean(unlockState?.paid);
+  const isPaywalled = Boolean(paywall);
+  const perItemPricing = paywall?.mode === "per_item";
+  const isOwner = Boolean(unlockState?.isOwner);
+  // Drive-style role capabilities (Phase 3). Default canComment to true until
+  // the unlock state resolves so the composer doesn't flicker for the common
+  // commenter case.
+  const canComment = unlockState ? unlockState.canComment : true;
+  const canDownloadGrant = Boolean(unlockState?.canDownload);
+  const canDownloadShare = isOwner || Boolean(summary?.allowDownload);
+  const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
+
+  useEffect(() => {
+    setIsDownloading(false);
+    setDownloadError(null);
+  }, [token]);
+
+  const itemPriceById = useMemo(
+    () =>
+      new Map<string, number>(
+        (summary?.itemPrices ?? []).map((price) => [
+          price.videoId,
+          price.priceCents,
+        ]),
+      ),
+    [summary?.itemPrices],
+  );
+  const unlockedItemIds = useMemo(
+    () => new Set<string>(summary?.unlockedVideoIds ?? []),
+    [summary?.unlockedVideoIds],
+  );
+  const allItemsUnlocked = Boolean(
+    perItemPricing &&
+      summary?.grantPaidAt &&
+      summary.unlockedVideoIds.length === 0,
+  );
+
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search);
+    setConfirmingItemId(
+      search.get("paid") === "1" ? search.get("item") : null,
+    );
+  }, [token]);
+
+  useEffect(() => {
+    if (
+      !confirmingItemId ||
+      (!allItemsUnlocked && !unlockedItemIds.has(confirmingItemId))
+    ) {
+      return;
+    }
+    setConfirmingItemId(null);
+    setPurchaseItemId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("paid");
+    url.searchParams.delete("item");
+    window.history.replaceState(window.history.state, "", url);
+  }, [allItemsUnlocked, confirmingItemId, unlockedItemIds]);
   // Memoized so the `?? []` fallback doesn't mint a fresh array reference on
   // every render. SharePage re-renders ~4×/sec while the video plays (via
   // onTimeUpdate → setCurrentTime); an unstable bundleItems made the
   // playback-loader effect below re-fire on each of those renders, re-minting
-  // the signed Mux URL and rebuilding HLS — the cause of the ~300ms stop/play
+  // the signed Mux URL and rebuilding HLS. This caused the ~300ms stop/play
   // stutter.
   const bundleItems = useMemo(
     () => summary?.bundle?.items ?? [],
@@ -176,7 +215,7 @@ export default function SharePage() {
     grantToken && summary && !isBundle ? { grantToken } : "skip",
   );
 
-  // One items list for the export sheet regardless of share shape — the
+  // One items list for the export sheet regardless of share shape. The
   // Canva-style download flow (pick quality → download, or unlock inline
   // when paywalled) is identical for a single file and a bundle.
   const sheetItems = useMemo(() => {
@@ -346,7 +385,7 @@ export default function SharePage() {
   }, [videoData?.video?.title]);
 
   // Load (and re-load) the playback session. Re-runs when unlockState.paid
-  // flips so payment immediately swaps preview → full-res. Also re-runs as
+  // flips so payment immediately swaps preview to full-res. Also re-runs as
   // signed-token expiry approaches via the heartbeat below.
   const reloadCounter = useRef(0);
   const [reloadTrigger, setReloadTrigger] = useState(0);
@@ -355,7 +394,7 @@ export default function SharePage() {
   // Without this gate, the effect below re-fires whenever any of its 10
   // useQuery/useAction deps re-resolve (notably `summary` and `bundleItems`,
   // which Convex re-emits on subscription ticks), and we end up hammering
-  // the action with the same dead token — dozens per second under network
+  // the action with the same dead token, dozens per second under network
   // flutter. Keying by `${token}::${itemId}` lets a paid checkout's new
   // grant still go through after the user reloads.
   const failedGrantKeysRef = useRef<Set<string>>(new Set());
@@ -490,7 +529,7 @@ export default function SharePage() {
     viewAs,
   ]);
 
-  // Heartbeat — refresh the signed Mux JWT before it expires. Token TTL is
+  // Heartbeat refreshes the signed Mux JWT before it expires. Token TTL is
   // 5 minutes; refresh at 4 minutes.
   useEffect(() => {
     if (!playbackSession?.tokenExpiresAt) return;
@@ -518,7 +557,7 @@ export default function SharePage() {
   }, [playbackSession?.mode]);
 
   // If the preview has been "pending" for a while, stop showing the
-  // optimistic "30–90 seconds" copy and tell the viewer the truth: they
+  // optimistic "30 to 90 seconds" copy and tell the viewer the truth: they
   // can pay now and we'll unlock full-res the moment it's ready.
   const [previewTakingLong, setPreviewTakingLong] = useState(false);
   useEffect(() => {
@@ -557,39 +596,43 @@ export default function SharePage() {
     }
   }, [activeItemId, grantToken, isRetryingPreview, retryPreviewAsset]);
 
-  const handlePay = useCallback(async () => {
+  const handlePay = useCallback(async (itemVideoId?: string) => {
     if (!grantToken || isCreatingCheckout) return;
     setIsCreatingCheckout(true);
+    setCheckoutItemId(itemVideoId ?? "all");
     setCheckoutError(null);
 
     // Demo bypass: if Stripe isn't configured, simulate the payment on the
     // server (flip grant.paidAt directly). Lets you exercise the full
-    // preview → paid swap without standing up Stripe.
+    // preview to paid swap without standing up Stripe.
     //
-    // Default to the real Stripe path while `demoStatus` is still loading —
+    // Default to the real Stripe path while `demoStatus` is still loading.
     // the server's `simulatePaymentForGrant` returns `stripeIsConfigured` on
     // prod deployments and we used to silently swallow it, so a fast click
     // before the query resolved produced no redirect.
     const stripeConfigured = demoStatus?.stripeConfigured ?? true;
-    if (!stripeConfigured) {
+    if (!stripeConfigured && !itemVideoId) {
       try {
         const result = await simulatePayment({ grantToken });
         if (result.status === "ok" || result.status === "alreadyPaid") {
           setReloadTrigger((n) => n + 1);
           setIsCreatingCheckout(false);
+          setCheckoutItemId(null);
           return;
         }
         if (result.status === "noPaywall") {
           setCheckoutError("This link is not paywalled.");
           setIsCreatingCheckout(false);
+          setCheckoutItemId(null);
           return;
         }
         if (result.status === "invalidGrant") {
           setCheckoutError("Session expired. Please reload.");
           setIsCreatingCheckout(false);
+          setCheckoutItemId(null);
           return;
         }
-        // `stripeIsConfigured` — the deployment actually has Stripe wired
+        // `stripeIsConfigured` means the deployment has Stripe wired
         // up; fall through to the real checkout path below instead of
         // silently bailing.
       } catch (err) {
@@ -597,14 +640,21 @@ export default function SharePage() {
           err instanceof Error ? err.message : "Demo payment failed.",
         );
         setIsCreatingCheckout(false);
+        setCheckoutItemId(null);
         return;
       }
     }
 
     try {
+      const successUrl = new URL(`/share/${token}`, window.location.origin);
+      successUrl.searchParams.set("paid", "1");
+      if (itemVideoId) successUrl.searchParams.set("item", itemVideoId);
       const result = await createCheckoutForGrant({
         grantToken,
-        successUrl: `${window.location.origin}/share/${token}?paid=1`,
+        itemVideoIds: itemVideoId
+          ? [itemVideoId as Id<"videos">]
+          : undefined,
+        successUrl: successUrl.toString(),
         cancelUrl: `${window.location.origin}/share/${token}`,
       });
       if (result.status === "ok" && result.url) {
@@ -627,6 +677,7 @@ export default function SharePage() {
       setCheckoutError(err instanceof Error ? err.message : "Could not start checkout.");
     } finally {
       setIsCreatingCheckout(false);
+      setCheckoutItemId(null);
     }
   }, [
     createCheckoutForGrant,
@@ -758,7 +809,7 @@ export default function SharePage() {
   const handleDownload = useCallback(async () => {
     if (!grantToken || isDownloading) return;
 
-    // Bundles have no single downloadable target — the server resolves a video
+    // Bundles have no single downloadable target. The server resolves a video
     // by `itemVideoId`. Calling without one throws "Video not found". Require an
     // active item first. (Phase 4 replaces this with a multi-item download
     // sheet.)
@@ -795,7 +846,7 @@ export default function SharePage() {
 
   if (isBootstrappingShare) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA]">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA]">
         <DelayedAppear>
           <div className="text-[#6E6E73]">Opening…</div>
         </DelayedAppear>
@@ -805,7 +856,7 @@ export default function SharePage() {
 
   if (shareInfo.status === "missing" || shareInfo.status === "expired") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
@@ -831,10 +882,10 @@ export default function SharePage() {
 
   // The link is valid, the video is just still encoding (the owner shared it
   // right after upload). getByToken is reactive, so this flips to the player
-  // automatically the moment Mux finishes — no reload needed.
+  // automatically the moment Mux finishes. No reload needed.
   if (shareInfo.status === "processing") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
@@ -853,7 +904,7 @@ export default function SharePage() {
 
   if (shareInfo.status === "requiresPassword" && !grantToken) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
@@ -897,7 +948,7 @@ export default function SharePage() {
   // reactively once they sign in, so a match flips this away automatically.
   if (shareInfo.status === "requiresAccess" && !grantToken) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
@@ -926,11 +977,11 @@ export default function SharePage() {
   }
 
   // Single-video shares fail closed when the video can't be loaded. Bundle
-  // shares are valid as long as the bundle row exists — they show an empty-
+  // shares are valid as long as the bundle row exists. They show an empty-
   // state if there are no ready items.
   if (!isBundle && !videoData?.video) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
@@ -960,19 +1011,21 @@ export default function SharePage() {
   const isPreviewPending = playbackSession?.mode === "preview_pending";
   const isPreviewUnavailable = playbackSession?.mode === "preview_unavailable";
   const isFullMode = playbackSession?.mode === "full";
-  // The watermarked-preview pipeline only runs for video uploads — image
+  // The watermarked-preview pipeline only runs for video uploads. Image
   // and file paywalled shares don't have a "preview asset" concept. The
   // owner viewAs toggle + retry controls are video-specific, so gate the
   // banner on the playback session's media kind.
   const isVideoPlayback = playbackSession?.kind === "video";
   const downloadAllowed = !isPaywalled || isPaid;
+  const isConfirmingActiveItem =
+    perItemPricing && confirmingItemId === queriedItemVideoId;
   // Mux auto-captions for the share player. The player attaches them only on
   // the Mux (HLS) source. Skipped for paywalled shares: those stream via a
   // signed playback id whose VTT would need its own signed token, and the
-  // watermarked preview asset carries a different track — not worth wiring up
+  // watermarked preview asset carries a different track, so it is not wired up
   // here. Free/public share links get captions just like the /watch page.
   // Captions ride the MAIN asset's public playback id. Pre-payment on a
-  // paywalled share we withhold them — the VTT is the full spoken content
+  // paywalled share we withhold them. The VTT is the full spoken content
   // of the full video, which would leak past the 360p watermarked preview.
   // Once paid (or on free links) they're on.
   const shareCaptionsVttUrl =
@@ -982,7 +1035,7 @@ export default function SharePage() {
 
   if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
@@ -1000,7 +1053,7 @@ export default function SharePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] text-[#131315]">
+    <div className="surface-client surface-soft min-h-screen bg-[#FAFAFA] text-[#131315]">
       <header className="border-b border-[#E8E8EC] bg-white px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <Link
@@ -1011,23 +1064,22 @@ export default function SharePage() {
             snip
           </Link>
           {/* Canva-style export: this button ALWAYS opens the download
-              sheet — quality picker, item list, and (when paywalled) the
-              inline unlock CTA all live there, so paying and downloading
-              are one continuous surface instead of a disabled button. */}
+              sheet with the quality picker, item list, and paywall action.
+              Paying and downloading stay in one surface. */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => setDownloadSheetOpen(true)}
             disabled={!grantToken || sheetItems.length === 0}
             title={
-              paywall && !isPaid
+              paywall && !perItemPricing && !isPaid
                 ? "Preview free. Pay once to unlock downloads."
                 : undefined
             }
           >
             <Download className="h-4 w-4" />
-            {paywall && !isPaid
-              ? `Download ${formatPrice(paywall.priceCents, paywall.currency)}`
+            {paywall && !perItemPricing && !isPaid
+              ? `Download ${formatUsdCents(paywall.priceCents)}`
               : "Download"}
           </Button>
         </div>
@@ -1077,6 +1129,23 @@ export default function SharePage() {
             </div>
           </div>
         )}
+
+        {perItemPricing && !isBundle && queriedItemVideoId && !isPaid ? (
+          <section
+            aria-label="Item purchase"
+            className="rounded-[14px] border border-[#E8E8EC] bg-white p-4"
+          >
+            <ItemUnlockControl
+              priceCents={itemPriceById.get(queriedItemVideoId) ?? null}
+              unlocked={false}
+              expanded={purchaseItemId === queriedItemVideoId}
+              confirming={confirmingItemId === queriedItemVideoId}
+              busy={checkoutItemId === queriedItemVideoId}
+              onExpand={() => setPurchaseItemId(queriedItemVideoId)}
+              onConfirm={() => void handlePay(queriedItemVideoId)}
+            />
+          </section>
+        ) : null}
 
         {paywall && isOwner && isVideoPlayback ? (
           <section className="flex flex-col gap-3 rounded-[14px] border border-[#26262A] bg-[#161618] p-5 text-white">
@@ -1152,7 +1221,7 @@ export default function SharePage() {
         ) : null}
 
         {/* The paywall pitch + pay CTA live in the download sheet (header
-            Download button) — no banner above the player. The viewer watches
+            Download button). The viewer watches
             the watermarked preview undisturbed and pays when they go to
             export, Canva-style. */}
 
@@ -1189,7 +1258,7 @@ export default function SharePage() {
                     user?.fullName ??
                     `share/${token.slice(0, 8)}`
                   }
-                  secondary={isPreviewMode ? "PREVIEW — DO NOT REDISTRIBUTE" : undefined}
+                  secondary={isPreviewMode ? "PREVIEW. DO NOT REDISTRIBUTE" : undefined}
                   active={isPreviewMode}
                 />
               ) : null}
@@ -1212,7 +1281,7 @@ export default function SharePage() {
                     user?.fullName ??
                     `share/${token.slice(0, 8)}`
                   }
-                  secondary={isPreviewMode ? "PREVIEW — DO NOT REDISTRIBUTE" : undefined}
+                  secondary={isPreviewMode ? "PREVIEW. DO NOT REDISTRIBUTE" : undefined}
                   active={isPreviewMode}
                 />
               ) : null}
@@ -1250,8 +1319,9 @@ export default function SharePage() {
                 </div>
                 {playbackSession.mode === "locked" ? (
                   <p className="max-w-md text-sm text-[#131315]">
-                    This file is locked until paid. Use the Download button
-                    in the header to pay and unlock it.
+                    {isConfirmingActiveItem
+                      ? "Confirming payment…"
+                      : "Locked. Choose Unlock above."}
                   </p>
                 ) : downloadAllowed ? (
                   <Button onClick={() => void handleDownload()}>
@@ -1308,7 +1378,9 @@ export default function SharePage() {
                         ? previewTakingLong
                           ? "Still preparing the watermarked preview. This one is taking longer than usual."
                           : "Preparing watermarked preview… this usually takes 30 to 90 seconds."
-                        : playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
+                        : isConfirmingActiveItem
+                          ? "Confirming payment…"
+                          : playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
                     </p>
                     {isPreviewPending && paywall && !isPaid ? (
                       <p className="text-xs text-white/60 max-w-sm">
@@ -1561,6 +1633,15 @@ export default function SharePage() {
             onSelectItem={handleSelectBundleItem}
             grantToken={grantToken}
             viewAs={viewAs}
+            perItemPricing={perItemPricing}
+            itemPriceById={itemPriceById}
+            unlockedItemIds={unlockedItemIds}
+            allItemsUnlocked={allItemsUnlocked}
+            purchaseItemId={purchaseItemId}
+            checkoutItemId={checkoutItemId}
+            confirmingItemId={confirmingItemId}
+            onExpandPurchase={setPurchaseItemId}
+            onConfirmPurchase={(itemId) => void handlePay(itemId)}
           />
         ) : null}
       </main>
@@ -1574,21 +1655,32 @@ export default function SharePage() {
         </div>
       </footer>
 
-      {/* Export sheet — mounts for BOTH share shapes (single video and
+      {/* Export sheet mounts for both share shapes (single video and
           bundle); the Canva-style flow is the same either way. */}
       <ShareDownloadSheet
         open={downloadSheetOpen}
         onOpenChange={setDownloadSheetOpen}
         items={sheetItems}
         grantToken={grantToken}
-        canDownload={canDownloadGrant}
+        canDownload={perItemPricing ? canDownloadShare : canDownloadGrant}
         isPaywalled={isPaywalled}
         isPaid={isPaid}
         paywallPriceLabel={
-          paywall ? formatPrice(paywall.priceCents, paywall.currency) : null
+          paywall && !perItemPricing
+            ? formatUsdCents(paywall.priceCents)
+            : null
         }
         onPay={() => void handlePay()}
         isPaying={isCreatingCheckout}
+        perItemPricing={perItemPricing}
+        itemPriceById={itemPriceById}
+        unlockedItemIds={unlockedItemIds}
+        allItemsUnlocked={allItemsUnlocked}
+        purchaseItemId={purchaseItemId}
+        checkoutItemId={checkoutItemId}
+        confirmingItemId={confirmingItemId}
+        onExpandItemPurchase={setPurchaseItemId}
+        onConfirmItemPurchase={(itemId) => void handlePay(itemId)}
       />
     </div>
   );

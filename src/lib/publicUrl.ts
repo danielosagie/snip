@@ -12,3 +12,7 @@ export function publicShareUrl(token: string): string {
 export function publicWatchUrl(publicId: string): string {
   return `${SITE_URL}/watch/${encodeURIComponent(publicId)}`;
 }
+
+export function publicInvoiceUrl(token: string): string {
+  return `${SITE_URL}/pay/${encodeURIComponent(token)}`;
+}

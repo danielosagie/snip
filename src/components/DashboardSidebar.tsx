@@ -2,12 +2,13 @@
 
 import { Link, useLocation, useParams } from "@tanstack/react-router";
 import { UserButton, useUser, useAuth } from "@clerk/tanstack-react-start";
-import { useQuery, useAction } from "convex/react";
+import { useQuery, useAction, useConvex } from "convex/react";
 import {
   ChevronsUpDown,
   CreditCard,
   HardDrive,
   Plus,
+  ReceiptText,
   Settings,
   Trash2,
   Users,
@@ -31,12 +32,23 @@ import { useSidebarState } from "@/lib/sidebarContext";
 import {
   projectPath,
   teamHomePath,
+  teamInvoicesPath,
   teamSettingsPath,
 } from "@/lib/routes";
+import { prewarmInvoiceList } from "../../app/routes/dashboard/-invoices.data";
+import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 
 export const SETTINGS_PATH = "/dashboard/settings";
 export const BILLING_PATH = "/dashboard/billing";
 export const TRASH_PATH = "/dashboard/trash";
+
+type IntentHandlers = {
+  onMouseEnter: () => void;
+  onFocus: () => void;
+  onTouchStart: () => void;
+  onMouseLeave: () => void;
+  onBlur: () => void;
+};
 
 /**
  * Persistent left sidebar. Layout:
@@ -48,6 +60,7 @@ export const TRASH_PATH = "/dashboard/trash";
  *     [+ New project]
  *   ── ACCOUNT ──
  *     [Billing & usage]
+ *     [Invoices]
  *     [Team members]
  *     [Settings]
  *   ── footer: avatar + name + theme toggle
@@ -66,6 +79,7 @@ export function DashboardSidebar() {
   const activeProjectId =
     typeof params.projectId === "string" ? params.projectId : undefined;
   const teams = useQuery(api.teams.listWithProjects, {});
+  const convex = useConvex();
   const { user } = useUser();
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -89,6 +103,10 @@ export function DashboardSidebar() {
   // team get to create projects there; if you only have member rows,
   // we still surface it but the dialog will guide team selection.
   const defaultTeam = teams?.find((t) => t.slug === activeTeamSlug) ?? teams?.[0];
+  const prewarmInvoicesIntentHandlers = useRoutePrewarmIntent(() => {
+    if (!defaultTeam) return;
+    return prewarmInvoiceList(convex, defaultTeam.slug);
+  });
 
   if (collapsed) {
     return (
@@ -102,6 +120,7 @@ export function DashboardSidebar() {
               pathname={pathname}
               activeTeamSlug={defaultTeam?.slug}
               onOpenSearch={() => setSearchOpen(true)}
+              prewarmInvoicesIntentHandlers={prewarmInvoicesIntentHandlers}
             />
             <div className="flex flex-col items-center gap-2 border-t border-[#E8E8EC] pt-3">
               <ThemeStyleToggle className="flex h-8 w-8 items-center justify-center rounded-[10px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315]" />
@@ -264,8 +283,19 @@ export function DashboardSidebar() {
             active={pathname.startsWith(BILLING_PATH)}
             muted
           >
-            Billing &amp; Invoices
+            Billing &amp; usage
           </SidebarLink>
+          {defaultTeam ? (
+            <SidebarLink
+              to={teamInvoicesPath(defaultTeam.slug)}
+              icon={<ReceiptText className="h-4 w-4" />}
+              active={pathname.startsWith(teamInvoicesPath(defaultTeam.slug))}
+              muted
+              intentHandlers={prewarmInvoicesIntentHandlers}
+            >
+              Invoices
+            </SidebarLink>
+          ) : null}
           {defaultTeam ? (
             <SidebarLink
               to={teamSettingsPath(defaultTeam.slug)}
@@ -314,10 +344,12 @@ function CollapsedRail({
   pathname,
   activeTeamSlug,
   onOpenSearch,
+  prewarmInvoicesIntentHandlers,
 }: {
   pathname: string;
   activeTeamSlug: string | undefined;
   onOpenSearch: () => void;
+  prewarmInvoicesIntentHandlers: IntentHandlers;
 }) {
   return (
     <div className="flex flex-col items-center gap-1">
@@ -331,7 +363,7 @@ function CollapsedRail({
       </button>
       <Link
         to={BILLING_PATH}
-        title="Billing & Invoices"
+        title="Billing & usage"
         className={cn(
           "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors",
           pathname.startsWith(BILLING_PATH)
@@ -341,6 +373,22 @@ function CollapsedRail({
       >
         <CreditCard className="h-4 w-4" />
       </Link>
+      {activeTeamSlug ? (
+        <Link
+          to={teamInvoicesPath(activeTeamSlug)}
+          preload="intent"
+          title="Invoices"
+          className={cn(
+            "flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors",
+            pathname.startsWith(teamInvoicesPath(activeTeamSlug))
+              ? "bg-[#FFF0E6] text-[#D14E00]"
+              : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
+          )}
+          {...prewarmInvoicesIntentHandlers}
+        >
+          <ReceiptText className="h-4 w-4" />
+        </Link>
+      ) : null}
       {activeTeamSlug ? (
         <Link
           to={teamSettingsPath(activeTeamSlug)}
@@ -396,18 +444,21 @@ function SidebarLink({
   icon,
   active,
   muted,
+  intentHandlers,
   children,
 }: {
   to: string;
   icon?: ReactNode;
   active?: boolean;
   muted?: boolean;
+  intentHandlers?: IntentHandlers;
   children: ReactNode;
 }) {
   return (
     <Link
       to={to}
       preload="intent"
+      {...intentHandlers}
       className={cn(
         "flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-[15px] font-medium leading-[22px] transition-colors",
         active

@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input";
 import { publicShareUrl } from "@/lib/publicUrl";
 import { softInput } from "@/components/soft";
 import {
+  buildSharePaywallConfiguration,
   CreatedLinkPanel,
+  DEFAULT_SHARE_PAYWALL_OPTIONS,
   SHARE_DIALOG_CONTENT_CLASS,
   ShareCapabilitiesSection,
   ShareLooksSection,
@@ -31,13 +33,6 @@ interface ShareSelectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const DEFAULT_PAYWALL_OPTIONS: SharePaywallOptions = {
-  priceDollars: "",
-  currency: "usd",
-  clientEmail: "",
-  description: "",
-};
 
 export function ShareSelectionDialog({
   videoIds,
@@ -68,7 +63,7 @@ export function ShareSelectionDialog({
   const [expiresInDays, setExpiresInDays] = useState<number | undefined>();
   const [password, setPassword] = useState("");
   const [paywallOptions, setPaywallOptions] = useState<SharePaywallOptions>(
-    DEFAULT_PAYWALL_OPTIONS,
+    DEFAULT_SHARE_PAYWALL_OPTIONS,
   );
 
   const coverSource = useMemo<ShareCoverSource | null>(
@@ -90,26 +85,18 @@ export function ShareSelectionDialog({
 
   const handleCreate = async () => {
     setCreateError(null);
-    let paywall:
-      | { priceCents: number; currency: string; description?: string }
-      | undefined;
-    if (paywallEnabled) {
-      const dollars = Number.parseFloat(paywallOptions.priceDollars);
-      if (!Number.isFinite(dollars) || dollars < 0.5) {
-        setCreateError("Price must be at least $0.50.");
-        return;
-      }
-      if (!paywallOptions.clientEmail.trim()) {
-        setCreateError(
-          "A client email is required for paid links. It identifies the watermark and checkout.",
-        );
-        return;
-      }
-      paywall = {
-        priceCents: Math.round(dollars * 100),
-        currency: paywallOptions.currency || "usd",
-        description: paywallOptions.description || undefined,
-      };
+    let pricing: ReturnType<typeof buildSharePaywallConfiguration>;
+    try {
+      pricing = buildSharePaywallConfiguration(
+        paywallEnabled,
+        paywallOptions,
+        coverPicker.data?.items,
+      );
+    } catch (error) {
+      setCreateError(
+        error instanceof Error ? error.message : "Invalid pricing.",
+      );
+      return;
     }
 
     setIsCreating(true);
@@ -124,7 +111,8 @@ export function ShareSelectionDialog({
         expiresInDays,
         allowDownload,
         password: password || undefined,
-        paywall,
+        paywall: pricing.paywall,
+        itemPrices: pricing.itemPrices,
         clientEmail: paywallOptions.clientEmail || undefined,
         generalAccess,
         commentsEnabled,
@@ -154,7 +142,10 @@ export function ShareSelectionDialog({
     setSelectedCoverVideoId(null);
     setExpiresInDays(undefined);
     setPassword("");
-    setPaywallOptions(DEFAULT_PAYWALL_OPTIONS);
+    setPaywallOptions({
+      ...DEFAULT_SHARE_PAYWALL_OPTIONS,
+      itemPriceDollars: {},
+    });
   };
 
   return (
@@ -211,6 +202,7 @@ export function ShareSelectionDialog({
                 paywallOptions={paywallOptions}
                 onPaywallOptionsChange={setPaywallOptions}
                 paywallProductionReady={paywallProductionReady}
+                items={coverPicker.data?.items}
               />
 
               <ShareLooksSection

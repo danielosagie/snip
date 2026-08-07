@@ -89,7 +89,7 @@ type CheckoutLookup = {
 
 const lookupMilestoneForCheckout = makeFunctionReference<
   "query",
-  { invoiceId: Id<"invoices">; milestoneId: string },
+  { payToken: string; milestoneId: string },
   CheckoutLookup | null
 >("invoices:lookupMilestoneForCheckout");
 
@@ -108,7 +108,7 @@ const recordMilestoneCheckoutCreated = makeFunctionReference<
 
 export const createMilestoneCheckout = action({
   args: {
-    invoiceId: v.id("invoices"),
+    payToken: v.string(),
     milestoneId: v.string(),
     successUrl: v.string(),
     cancelUrl: v.string(),
@@ -145,7 +145,7 @@ export const createMilestoneCheckout = action({
 
     const lookup: CheckoutLookup | null = await ctx.runQuery(
       lookupMilestoneForCheckout,
-      { invoiceId: args.invoiceId, milestoneId: args.milestoneId },
+      { payToken: args.payToken, milestoneId: args.milestoneId },
     );
     if (!lookup) return { status: "notPayable", url: null };
 
@@ -165,7 +165,7 @@ export const createMilestoneCheckout = action({
         }
       } catch (error) {
         console.warn("Could not verify invoice Checkout Session", {
-          invoiceId: args.invoiceId,
+          invoiceId: lookup.invoice._id,
           milestoneId: args.milestoneId,
           sessionId: priorSessionId,
           error: error instanceof Error ? error.message : String(error),

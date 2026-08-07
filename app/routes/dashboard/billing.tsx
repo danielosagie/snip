@@ -7,7 +7,6 @@ import { DashboardHeader } from "@/components/DashboardHeader";
 import { StorageUsageBar } from "@/components/StorageUsageBar";
 import { StoragePlanner } from "@/components/StoragePlanner";
 import { AddOnsSection } from "@/components/AddOnsSection";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -412,7 +411,7 @@ function TeamBillingCards({
         <CardHeading
           id={`paid-${teamId}`}
           title="Paid to you"
-          subtitle="What clients paid for your files, minus the 5% + 30¢ fee."
+          subtitle="Clients pay the Snip fee on top. You receive the listed price."
           aside={<div className="flex items-center gap-2">{showTeamName ? <span className="text-xs text-[#6E6E73]">{teamName}</span> : null}<PeriodPill /></div>}
         />
         <div className="mt-4">

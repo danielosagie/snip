@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn, formatBytes } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
+import { ItemUnlockControl } from "@/components/share/ItemUnlockControl";
 
 /**
  * Download manager side-sheet for a shared bundle. Lets the viewer pick
@@ -50,6 +51,15 @@ interface Props {
   paywallPriceLabel: string | null;
   onPay?: () => void;
   isPaying?: boolean;
+  perItemPricing: boolean;
+  itemPriceById: ReadonlyMap<string, number>;
+  unlockedItemIds: ReadonlySet<string>;
+  allItemsUnlocked: boolean;
+  purchaseItemId: string | null;
+  checkoutItemId: string | null;
+  confirmingItemId: string | null;
+  onExpandItemPurchase: (id: string) => void;
+  onConfirmItemPurchase: (id: string) => void;
 }
 
 export function ShareDownloadSheet({
@@ -63,6 +73,15 @@ export function ShareDownloadSheet({
   paywallPriceLabel,
   onPay,
   isPaying,
+  perItemPricing,
+  itemPriceById,
+  unlockedItemIds,
+  allItemsUnlocked,
+  purchaseItemId,
+  checkoutItemId,
+  confirmingItemId,
+  onExpandItemPurchase,
+  onConfirmItemPurchase,
 }: Props) {
   const getDownloadUrl = useAction(api.videoActions.getSharedDownloadUrl);
   const getProxyUrl = useAction(api.videoActions.getProxyDownloadUrl);
@@ -108,13 +127,23 @@ export function ShareDownloadSheet({
   );
   const [error, setError] = useState<string | null>(null);
 
-  const allSelected = items.length > 0 && selected.size === items.length;
+  const downloadableItems = useMemo(
+    () =>
+      perItemPricing
+        ? items.filter(
+            (item) => allItemsUnlocked || unlockedItemIds.has(item._id),
+          )
+        : items,
+    [allItemsUnlocked, items, perItemPricing, unlockedItemIds],
+  );
+  const allSelected =
+    downloadableItems.length > 0 && selected.size === downloadableItems.length;
   const totalSize = useMemo(
     () => items.reduce((sum, i) => sum + (i.fileSize ?? 0), 0),
     [items],
   );
 
-  const locked = isPaywalled && !isPaid;
+  const locked = isPaywalled && !perItemPricing && !isPaid;
   const downloadsDisabled = !canDownload && !locked;
 
   const toggle = (id: string) =>
@@ -127,7 +156,9 @@ export function ShareDownloadSheet({
 
   const toggleAll = () =>
     setSelected((prev) =>
-      prev.size === items.length ? new Set() : new Set(items.map((i) => i._id)),
+      prev.size === downloadableItems.length
+        ? new Set()
+        : new Set(downloadableItems.map((item) => item._id)),
     );
 
   const runDownloads = async (ids: string[]) => {
@@ -182,7 +213,7 @@ export function ShareDownloadSheet({
           </SheetDescription>
         </SheetHeader>
 
-        {/* Quality picker — only shown when proxies exist. Original = full file;
+        {/* Quality picker is only shown when proxies exist. Original = full file;
             others = Mux proxy renditions (smaller, faster). Per item, a missing
             proxy quietly falls back to the original. */}
         {availableResolutions.length > 0 ? (
@@ -262,39 +293,71 @@ export function ShareDownloadSheet({
                   type="checkbox"
                   checked={allSelected}
                   onChange={toggleAll}
-                  disabled={downloadsDisabled || locked}
+                  disabled={
+                    downloadsDisabled || locked || downloadableItems.length === 0
+                  }
                   className="h-4 w-4 accent-[#D14E00]"
                 />
                 Select all
               </label>
-              {items.map((item) => (
-                <div key={item._id} className="flex items-center gap-3 px-4 py-2.5">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(item._id)}
-                    onChange={() => toggle(item._id)}
-                    disabled={downloadsDisabled || locked}
-                    className="h-4 w-4 flex-shrink-0 accent-[#D14E00]"
-                    aria-label={`Select ${item.title}`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-[#131315]">
-                      {item.title}
-                    </div>
-                    <div className="text-[11px] text-[#6E6E73]">
-                      {item.fileSize ? formatBytes(item.fileSize) : "Unknown"}
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void runDownloads([item._id])}
-                    disabled={downloading || downloadsDisabled || locked || !grantToken}
+              {items.map((item) => {
+                const itemUnlocked =
+                  !perItemPricing ||
+                  allItemsUnlocked ||
+                  unlockedItemIds.has(item._id);
+                return (
+                  <div
+                    key={item._id}
+                    className="flex flex-wrap items-center gap-3 px-4 py-2.5"
                   >
-                    <Download className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ))}
+                    <input
+                      type="checkbox"
+                      checked={selected.has(item._id)}
+                      onChange={() => toggle(item._id)}
+                      disabled={downloadsDisabled || locked || !itemUnlocked}
+                      className="h-4 w-4 flex-shrink-0 accent-[#D14E00]"
+                      aria-label={`Select ${item.title}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-[#131315]">
+                        {item.title}
+                      </div>
+                      <div className="text-[11px] text-[#6E6E73]">
+                        {item.fileSize ? formatBytes(item.fileSize) : "Unknown"}
+                      </div>
+                    </div>
+                    {perItemPricing && !itemUnlocked ? (
+                      <ItemUnlockControl
+                        priceCents={itemPriceById.get(item._id) ?? null}
+                        unlocked={itemUnlocked}
+                        expanded={purchaseItemId === item._id}
+                        confirming={confirmingItemId === item._id}
+                        busy={checkoutItemId === item._id}
+                        onExpand={() => onExpandItemPurchase(item._id)}
+                        onConfirm={() => onConfirmItemPurchase(item._id)}
+                        className={cn(
+                          purchaseItemId === item._id && "w-full",
+                        )}
+                      />
+                    ) : null}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void runDownloads([item._id])}
+                      disabled={
+                        downloading ||
+                        downloadsDisabled ||
+                        locked ||
+                        !itemUnlocked ||
+                        !grantToken
+                      }
+                      aria-label={`Download ${item.title}`}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -325,17 +388,19 @@ export function ShareDownloadSheet({
             </Button>
             <Button
               className={cn("flex-1")}
-              onClick={() => void runDownloads(items.map((i) => i._id))}
+              onClick={() =>
+                void runDownloads(downloadableItems.map((item) => item._id))
+              }
               disabled={
                 downloading ||
                 downloadsDisabled ||
                 locked ||
-                items.length === 0 ||
+                downloadableItems.length === 0 ||
                 !grantToken
               }
             >
               <Download className="h-4 w-4" />
-              Download all
+              {perItemPricing ? "Download unlocked" : "Download all"}
             </Button>
           </div>
         </div>

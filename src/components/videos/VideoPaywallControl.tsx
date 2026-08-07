@@ -14,8 +14,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { DollarSign, Lock, Unlock, Download, Check } from "lucide-react";
+import { DollarSign, Unlock, Download, Check } from "lucide-react";
 import { triggerDownload } from "@/lib/download";
+import {
+  formatUsdCents,
+  parseUsdDollarsToCents,
+} from "@/lib/money";
+import {
+  computeApplicationFee,
+  computeBuyerTotal,
+  MAX_LINE_ITEM_AMOUNT_CENTS,
+} from "../../../convex/paymentsPolicy";
 
 interface Props {
   videoId: Id<"videos">;
@@ -25,6 +34,7 @@ interface Props {
 }
 
 function formatPrice(cents: number, currency: string): string {
+  if (currency.toLowerCase() === "usd") return formatUsdCents(cents);
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -41,7 +51,7 @@ function formatPrice(cents: number, currency: string): string {
  *   - Agency view (team member): a "Set paywall" badge that opens a modal
  *     to attach / clear a price. They can also download the original.
  *
- *   - External viewer (no team membership): a "Download — $X" button that
+ *   - External viewer (no team membership): a priced download button that
  *     either pays (Stripe Checkout, or simulated in demo mode) or
  *     downloads immediately if they've already paid for this video.
  */
@@ -60,6 +70,7 @@ export function VideoPaywallControl({
   const [busy, setBusy] = useState<null | "pay" | "edit">(null);
   const [error, setError] = useState<string | null>(null);
   const [emailPrompt, setEmailPrompt] = useState("");
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const paywall = unlock?.paywall ?? null;
   const paid = unlock?.paid ?? false;
@@ -85,6 +96,8 @@ export function VideoPaywallControl({
   }
 
   const priceLabel = formatPrice(paywall.priceCents, paywall.currency);
+  const feeCents = computeApplicationFee(paywall.priceCents);
+  const totalCents = computeBuyerTotal(paywall.priceCents);
 
   // Paid (or team member, who bypasses): direct download.
   if (paid) {
@@ -142,7 +155,7 @@ export function VideoPaywallControl({
     );
   }
 
-  // Paywalled and locked — the Canva moment.
+  // Paywalled and locked.
   const stripeReady = demoStatus?.stripeConfigured ?? false;
   const handlePay = async () => {
     setError(null);
@@ -197,13 +210,16 @@ export function VideoPaywallControl({
       <div className="flex items-center gap-2">
         <Button
           size="sm"
-          onClick={() => void handlePay()}
+          onClick={() =>
+            showBreakdown ? void handlePay() : setShowBreakdown(true)
+          }
           disabled={busy !== null}
         >
-          <Lock className="mr-1.5 h-3.5 w-3.5" />
           {busy === "pay"
             ? "Opening checkout…"
-            : `Download · ${priceLabel}`}
+            : showBreakdown
+              ? `Pay ${formatPrice(totalCents, paywall.currency)}`
+              : `Unlock ${priceLabel}`}
         </Button>
         {!stripeReady ? (
           <span className="rounded-full bg-[#F1F1F3] px-2 py-1 text-[11px] font-medium text-[#6E6E73]">
@@ -211,6 +227,22 @@ export function VideoPaywallControl({
           </span>
         ) : null}
       </div>
+      {showBreakdown ? (
+        <dl className="w-64 space-y-1 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-3 text-xs tabular-nums">
+          <div className="flex justify-between gap-4 text-[#6E6E73]">
+            <dt>Price</dt>
+            <dd>{priceLabel}</dd>
+          </div>
+          <div className="flex justify-between gap-4 text-[#6E6E73]">
+            <dt>Snip fee</dt>
+            <dd>{formatPrice(feeCents, paywall.currency)}</dd>
+          </div>
+          <div className="flex justify-between gap-4 font-semibold text-[#131315]">
+            <dt>Total</dt>
+            <dd>{formatPrice(totalCents, paywall.currency)}</dd>
+          </div>
+        </dl>
+      ) : null}
       {!stripeReady ? (
         <Input
           placeholder="your email (optional, for receipt)"
@@ -301,13 +333,19 @@ function PaywallEditor({
 
   const handleSave = async () => {
     setErr(null);
-    const dollars = parseFloat(priceDollars);
-    if (!Number.isFinite(dollars) || dollars < 0.5) {
-      setErr("Price must be at least $0.50.");
+    const priceCents = parseUsdDollarsToCents(priceDollars);
+    if (
+      priceCents === null ||
+      priceCents < 50 ||
+      priceCents > MAX_LINE_ITEM_AMOUNT_CENTS
+    ) {
+      setErr(
+        `$${priceDollars || "0"} is invalid. Use $0.50 to ${formatUsdCents(MAX_LINE_ITEM_AMOUNT_CENTS)}.`,
+      );
       return;
     }
     await onSave({
-      priceCents: Math.round(dollars * 100),
+      priceCents,
       currency: currency.toLowerCase(),
       description: description.trim() || undefined,
     });
@@ -333,9 +371,8 @@ function PaywallEditor({
                 Price
               </div>
               <Input
-                type="number"
-                min={0.5}
-                step={0.5}
+                type="text"
+                inputMode="decimal"
                 placeholder="500"
                 value={priceDollars}
                 onChange={(e) => setPriceDollars(e.target.value)}
@@ -364,8 +401,7 @@ function PaywallEditor({
             />
           </label>
           <p className="text-[11px] text-[#6E6E73]">
-            Snip keeps 5% + 30¢ per paid delivery. The remainder is paid to
-            your connected Stripe account.
+            You receive the listed price. Buyer pays the Snip fee on top.
           </p>
           {err ? (
             <div className="rounded-[11px] bg-[#FFF5F5] px-3 py-2 text-xs text-[#8A2B34]">
@@ -398,7 +434,7 @@ function PaywallEditor({
 }
 
 /**
- * Helper used by `onRequestPrivateDownload` — accepts a presigned URL
+ * Helper used by `onRequestPrivateDownload`. Accepts a presigned URL
  * + filename and triggers the browser download. Re-exported so the
  * video page doesn't have to import lib/download separately.
  */

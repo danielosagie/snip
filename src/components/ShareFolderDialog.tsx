@@ -22,8 +22,11 @@ import {
 import { formatRelativeTime } from "@/lib/utils";
 import { ShareAccessPanel } from "@/components/share/ShareAccessPanel";
 import { publicShareUrl } from "@/lib/publicUrl";
+import { formatUsdCents } from "@/lib/money";
 import {
+  buildSharePaywallConfiguration,
   CreatedLinkPanel,
+  DEFAULT_SHARE_PAYWALL_OPTIONS,
   LinkBadge,
   LinkIconButton,
   SHARE_DIALOG_CONTENT_CLASS,
@@ -44,13 +47,6 @@ interface ShareFolderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const DEFAULT_PAYWALL_OPTIONS: SharePaywallOptions = {
-  priceDollars: "",
-  currency: "usd",
-  clientEmail: "",
-  description: "",
-};
 
 export function ShareFolderDialog({
   folderId,
@@ -88,7 +84,7 @@ export function ShareFolderDialog({
   const [expiresInDays, setExpiresInDays] = useState<number | undefined>();
   const [password, setPassword] = useState("");
   const [paywallOptions, setPaywallOptions] = useState<SharePaywallOptions>(
-    DEFAULT_PAYWALL_OPTIONS,
+    DEFAULT_SHARE_PAYWALL_OPTIONS,
   );
 
   const coverSource = useMemo<ShareCoverSource | null>(
@@ -113,26 +109,18 @@ export function ShareFolderDialog({
 
   const handleCreate = async () => {
     setCreateError(null);
-    let paywall:
-      | { priceCents: number; currency: string; description?: string }
-      | undefined;
-    if (paywallEnabled) {
-      const dollars = Number.parseFloat(paywallOptions.priceDollars);
-      if (!Number.isFinite(dollars) || dollars < 0.5) {
-        setCreateError("Price must be at least $0.50.");
-        return;
-      }
-      if (!paywallOptions.clientEmail.trim()) {
-        setCreateError(
-          "A client email is required for paid links. It identifies the watermark and checkout.",
-        );
-        return;
-      }
-      paywall = {
-        priceCents: Math.round(dollars * 100),
-        currency: paywallOptions.currency || "usd",
-        description: paywallOptions.description || undefined,
-      };
+    let pricing: ReturnType<typeof buildSharePaywallConfiguration>;
+    try {
+      pricing = buildSharePaywallConfiguration(
+        paywallEnabled,
+        paywallOptions,
+        coverPicker.data?.items,
+      );
+    } catch (error) {
+      setCreateError(
+        error instanceof Error ? error.message : "Invalid pricing.",
+      );
+      return;
     }
 
     setIsCreating(true);
@@ -144,7 +132,8 @@ export function ShareFolderDialog({
         expiresInDays,
         allowDownload,
         password: password || undefined,
-        paywall,
+        paywall: pricing.paywall,
+        itemPrices: pricing.itemPrices,
         clientEmail: paywallOptions.clientEmail || undefined,
         generalAccess,
         commentsEnabled,
@@ -185,7 +174,10 @@ export function ShareFolderDialog({
     setSelectedCoverVideoId(null);
     setExpiresInDays(undefined);
     setPassword("");
-    setPaywallOptions(DEFAULT_PAYWALL_OPTIONS);
+    setPaywallOptions({
+      ...DEFAULT_SHARE_PAYWALL_OPTIONS,
+      itemPriceDollars: {},
+    });
   };
 
   return (
@@ -233,6 +225,7 @@ export function ShareFolderDialog({
                 paywallOptions={paywallOptions}
                 onPaywallOptionsChange={setPaywallOptions}
                 paywallProductionReady={paywallProductionReady}
+                items={coverPicker.data?.items}
               />
 
               <ShareLooksSection
@@ -295,7 +288,9 @@ export function ShareFolderDialog({
                             {link.paywall ? (
                               <span className="inline-flex items-center text-[11px] text-[#D14E00]">
                                 <DollarSign className="h-3 w-3" />
-                                {(link.paywall.priceCents / 100).toFixed(2)}
+                                {link.paywall.mode === "per_item"
+                                  ? `${link.itemPrices?.length ?? 0} priced`
+                                  : formatUsdCents(link.paywall.priceCents)}
                               </span>
                             ) : null}
                             {link.isExpired ? (

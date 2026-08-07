@@ -15,11 +15,13 @@ import {
   computeBuyerTotal,
   MAX_LINE_ITEM_AMOUNT_CENTS,
 } from "./paymentsPolicy";
+import { generateUniqueToken } from "./security";
 
 const MAX_MILESTONES = 50;
 const MAX_TITLE_LENGTH = 200;
 const MAX_LABEL_LENGTH = 160;
 const MAX_NOTE_LENGTH = 5_000;
+const PAY_TOKEN_LENGTH = 32;
 
 const milestoneInputValidator = v.object({
   id: v.string(),
@@ -27,6 +29,35 @@ const milestoneInputValidator = v.object({
   amountCents: v.number(),
   dueAt: v.optional(v.number()),
 });
+
+const clientInvoiceValidator = v.union(
+  v.null(),
+  v.object({
+    title: v.string(),
+    clientLabel: v.optional(v.string()),
+    note: v.optional(v.string()),
+    currency: v.string(),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("sent"),
+      v.literal("partially_paid"),
+      v.literal("paid"),
+      v.literal("void"),
+    ),
+    sentAt: v.number(),
+    milestones: v.array(
+      v.object({
+        id: v.string(),
+        label: v.string(),
+        amountCents: v.number(),
+        dueAt: v.optional(v.number()),
+        paidAt: v.optional(v.number()),
+        feeCents: v.optional(v.number()),
+        buyerTotalCents: v.optional(v.number()),
+      }),
+    ),
+  }),
+);
 
 type MilestoneInput = {
   id: string;
@@ -164,6 +195,75 @@ async function validateInvoiceReferences(
 
 function statusFor(invoice: Pick<Doc<"invoices">, "milestones" | "sentAt" | "voidedAt">) {
   return deriveInvoiceStatus(invoice);
+}
+
+type PayTokenInvoiceSource = {
+  payToken?: string;
+  title: string;
+  clientLabel?: string;
+  note?: string;
+  currency: string;
+  status: Doc<"invoices">["status"];
+  sentAt?: number;
+  voidedAt?: number;
+  milestones: Array<{
+    id: string;
+    label: string;
+    amountCents: number;
+    dueAt?: number;
+    paidAt?: number;
+    stripeCheckoutSessionId?: string;
+    stripePaymentIntentId?: string;
+  }>;
+};
+
+export function projectInvoiceForPayToken(
+  invoice: PayTokenInvoiceSource | null,
+  payToken: string,
+) {
+  if (
+    !invoice ||
+    invoice.sentAt === undefined ||
+    invoice.voidedAt !== undefined ||
+    invoice.status === "void" ||
+    invoice.payToken !== payToken
+  ) {
+    return null;
+  }
+
+  return {
+    title: invoice.title,
+    clientLabel: invoice.clientLabel,
+    note: invoice.note,
+    currency: invoice.currency,
+    status: statusFor(invoice),
+    sentAt: invoice.sentAt,
+    milestones: invoice.milestones.map((milestone) => ({
+      id: milestone.id,
+      label: milestone.label,
+      amountCents: milestone.amountCents,
+      dueAt: milestone.dueAt,
+      paidAt: milestone.paidAt,
+      ...(milestone.paidAt === undefined
+        ? {
+            feeCents: computeApplicationFee(milestone.amountCents),
+            buyerTotalCents: computeBuyerTotal(milestone.amountCents),
+          }
+        : {}),
+    })),
+  };
+}
+
+async function generateInvoicePayToken(ctx: MutationCtx) {
+  return await generateUniqueToken(
+    PAY_TOKEN_LENGTH,
+    async (candidate) =>
+      (await ctx.db
+        .query("invoices")
+        .withIndex("by_pay_token", (q) => q.eq("payToken", candidate))
+        .unique()) !== null,
+    5,
+  );
 }
 
 export const create = mutation({
@@ -334,13 +434,32 @@ export const send = mutation({
     if (!invoice) throw new Error("Invoice not found.");
     await requireTeamAccess(ctx, invoice.teamId, "member");
     if (invoice.voidedAt !== undefined) throw new Error("Invoice is void.");
-    if (invoice.sentAt !== undefined) return null;
+    const payToken = invoice.payToken ?? (await generateInvoicePayToken(ctx));
+    if (invoice.sentAt !== undefined) {
+      if (!invoice.payToken) await ctx.db.patch(args.invoiceId, { payToken });
+      return null;
+    }
     normalizeMilestones(invoice.milestones);
     const sentAt = Date.now();
     await ctx.db.patch(args.invoiceId, {
+      payToken,
       sentAt,
       status: deriveInvoiceStatus({ milestones: invoice.milestones, sentAt }),
     });
+    return null;
+  },
+});
+
+export const revokePayLink = mutation({
+  args: { invoiceId: v.id("invoices") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const invoice = await ctx.db.get(args.invoiceId);
+    if (!invoice) throw new Error("Invoice not found.");
+    await requireTeamAccess(ctx, invoice.teamId, "member");
+    if (invoice.payToken !== undefined) {
+      await ctx.db.patch(args.invoiceId, { payToken: undefined });
+    }
     return null;
   },
 });
@@ -388,10 +507,25 @@ export const get = query({
   },
 });
 
-export const lookupMilestoneForCheckout = internalQuery({
-  args: { invoiceId: v.id("invoices"), milestoneId: v.string() },
+export const getByPayToken = query({
+  args: { payToken: v.string() },
+  returns: clientInvoiceValidator,
   handler: async (ctx, args) => {
-    const invoice = await ctx.db.get(args.invoiceId);
+    const invoice = await ctx.db
+      .query("invoices")
+      .withIndex("by_pay_token", (q) => q.eq("payToken", args.payToken))
+      .unique();
+    return projectInvoiceForPayToken(invoice, args.payToken);
+  },
+});
+
+export const lookupMilestoneForCheckout = internalQuery({
+  args: { payToken: v.string(), milestoneId: v.string() },
+  handler: async (ctx, args) => {
+    const invoice = await ctx.db
+      .query("invoices")
+      .withIndex("by_pay_token", (q) => q.eq("payToken", args.payToken))
+      .unique();
     if (!invoice) return null;
     const status = statusFor(invoice);
     if (status !== "sent" && status !== "partially_paid") return null;

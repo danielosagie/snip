@@ -672,6 +672,7 @@ export default defineSchema({
     teamId: v.id("teams"),
     projectId: v.optional(v.id("projects")),
     shareLinkId: v.optional(v.id("shareLinks")),
+    payToken: v.optional(v.string()),
     createdByClerkId: v.string(),
     createdByName: v.string(),
     clientEmail: v.string(),
@@ -702,6 +703,7 @@ export default defineSchema({
   })
     .index("by_team", ["teamId"])
     .index("by_share_link", ["shareLinkId"])
+    .index("by_pay_token", ["payToken"])
     .index("by_client_email", ["teamId", "clientEmail"]),
 
   // Per-transaction payment records. One row per Stripe Checkout Session.

@@ -39,13 +39,14 @@ Fields:
 - `teamId`
 - optional `projectId` and `shareLinkId`
 - `createdByClerkId`, `createdByName`
+- optional revocable `payToken`, generated when the invoice is first sent
 - `clientEmail`, optional `clientLabel`
 - `title`, `currency`
 - `status`: `draft | sent | partially_paid | paid | void`
 - `milestones`: ordered objects containing `id`, `label`, `amountCents`, optional `dueAt`, `paidAt`, `stripeCheckoutSessionId`, and `stripePaymentIntentId`
 - optional `sentAt`, `voidedAt`, and `note`
 
-Indexes are `by_team`, `by_share_link`, and `by_client_email` on `[teamId, clientEmail]`.
+Indexes are `by_team`, `by_share_link`, `by_pay_token`, and `by_client_email` on `[teamId, clientEmail]`.
 
 Stored status is updated only through the shared pure status policy. `void` is explicit; otherwise the status is derived from milestone payment coverage: all unpaid is `draft` before send and `sent` after send, some paid is `partially_paid`, and all paid is `paid`. No write may persist a status that contradicts milestone `paidAt` fields.
 
@@ -76,7 +77,7 @@ All public creator write paths re-check team ownership and `member`-or-higher ro
 
 ### Milestone checkout (`convex/invoicesActions.ts`)
 
-`createMilestoneCheckout(invoiceId, milestoneId, successUrl, cancelUrl)` treats the opaque Convex invoice id as the phase-1 client payment capability. It exposes no invoice management data and uses an internal server lookup to verify that the invoice is sent/partially paid, not void, and the milestone is unpaid. It re-reads the stored amount, computes buyer total and application fee, resolves the team's Connect settlement using the existing paywall pattern, and creates a Stripe Checkout Session prefilled with the stored client email. Metadata includes `kind=invoice_milestone`, `invoiceId`, `milestoneId`, and `teamId`. Phase 2 should replace the bare id capability with a dedicated revocable client token before adding broadly shareable invoice URLs.
+`createMilestoneCheckout(payToken, milestoneId, successUrl, cancelUrl)` resolves the revocable invoice payment token server-side, verifies that the invoice is sent or partially paid, not void, and the milestone is unpaid. It re-reads the stored amount, computes buyer total and application fee, resolves the team's Connect settlement using the existing paywall pattern, and creates a Stripe Checkout Session prefilled with the stored client email. Metadata includes `kind=invoice_milestone`, `invoiceId`, `milestoneId`, and `teamId`. Phase 2 replaced the phase-1 opaque Convex invoice id capability with this dedicated token. Resends preserve an active token, and an authenticated team member can revoke it.
 
 The client never sends an amount. Reusing an already completed milestone is rejected; parallel pending sessions are made harmless by webhook idempotency and milestone payment-intent checks.
 
@@ -117,7 +118,7 @@ Full-charge refunds reverse earnings once. A refunded full-share payment clears 
 
 ## Open questions
 
-1. **Invoice payment access:** should milestone checkout require a signed-in client, an opaque invoice payment token, or a share-link grant? The backend should not expose payment solely by guessable Convex invoice id. Phase 1 can support authenticated team management and share-linked client payment; a dedicated opaque client token is the recommended phase-2 default.
+1. **Invoice payment access (resolved in phase 2):** client payment uses a dedicated, revocable opaque token. Raw Convex invoice ids are never public payment capabilities.
 2. **Invoice delivery:** should `send` only change state, or also send transactional email? Phase 1 only changes state because no email provider/sender contract is specified.
 3. **Tax:** are taxes added through Stripe Tax, included in listed price, or unsupported? Phase 1 does not calculate tax.
 4. **Partial refunds and disputes:** full refunds revoke the corresponding milestone/item in phase 1. How should a partial refund of a multi-item Checkout Session allocate revocation, and should disputes suspend access before they are resolved?

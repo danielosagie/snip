@@ -21,9 +21,13 @@ function boundedInteger(
     : fallback;
 }
 
+function policyEnvironmentValue(name: string): string | undefined {
+  return typeof process === "undefined" ? undefined : process.env[name];
+}
+
 export function platformFeeBasisPoints(): number {
   return boundedInteger(
-    process.env.VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS,
+    policyEnvironmentValue("VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS"),
     DEFAULT_PLATFORM_FEE_BASIS_POINTS,
     5000,
   );
@@ -31,7 +35,7 @@ export function platformFeeBasisPoints(): number {
 
 export function platformFeeFixedCents(): number {
   return boundedInteger(
-    process.env.VIDEOINFRA_PLATFORM_FEE_FIXED_CENTS,
+    policyEnvironmentValue("VIDEOINFRA_PLATFORM_FEE_FIXED_CENTS"),
     DEFAULT_PLATFORM_FEE_FIXED_CENTS,
     1000,
   );
