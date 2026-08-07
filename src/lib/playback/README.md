@@ -52,3 +52,9 @@ controller keeps the same API and switches to the supplied plain `<video>`
 element. Native video then supplies normal audio/video playback and browser
 range behavior.
 
+## Sequence playback
+
+`SequencePlaybackSurface` maps timeline time into each clip's source range and
+keeps two controllers alive. The inactive bank loads and seeks the next clip's
+proxy window while the active bank plays, then the surface swaps banks at the
+cut. A single black frame can still appear during a slow bank swap in M1.

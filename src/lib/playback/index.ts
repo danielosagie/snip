@@ -1,4 +1,13 @@
 export { createPlaybackController } from "./PlaybackController";
+export {
+  clipMediaTimeToTimelineTime,
+  nextSequenceClip,
+  sequenceDuration,
+  sortSequenceClips,
+  timelineTimeToClip,
+  timelineTimeToClipMediaTime,
+} from "./timelineMapping";
+export type { SequencePlaybackClip } from "./timelineMapping";
 export type {
   PlaybackController,
   PlaybackEventMap,
@@ -9,4 +18,3 @@ export type {
   PlaybackOutputs,
   PlaybackSource,
 } from "./types";
-
