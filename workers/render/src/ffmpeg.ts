@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import type { GopSegment } from "./gop";
 import { runProcess } from "./process";
@@ -147,7 +147,7 @@ export async function concatenateSegments(
   await mkdir(dirname(listPath), { recursive: true });
   const directory = dirname(listPath);
   const content = segmentPaths.map((path) => `file '${basename(path)}'`).join("\n");
-  await Bun.write(listPath, `${content}\n`);
+  await writeFile(listPath, `${content}\n`, "utf8");
   await runProcess(
     "ffmpeg",
     [
