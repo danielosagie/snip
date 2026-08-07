@@ -19,21 +19,18 @@ import {
   internalMutation,
   internalQuery,
   mutation,
+  MutationCtx,
   query,
   QueryCtx,
 } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
-import {
-  getUser,
-  identityName,
-  requireProjectAccess,
-  requireTeamAccess,
-} from "./auth";
+import { getUser, identityName, requireProjectAccess, requireTeamAccess } from "./auth";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getS3Client, BUCKET_NAME } from "./s3";
-import { removeSearchableForVideo } from "./search";
+import { indexSearchable, removeSearchableForVideo } from "./search";
+import { trashFolderTree } from "./folders";
 
 const ID_SUFFIX_LEN = 6;
 
@@ -120,6 +117,64 @@ async function resolveProjectByName(
   return match?.project ?? null;
 }
 
+function desktopPathCandidates(
+  teamSlug: string,
+  projectName: string,
+  projectId: Id<"projects">,
+  itemPath: string[],
+): string[] {
+  const suffix = itemPath.filter(Boolean).join("/");
+  const join = (base: string) => (suffix ? `${base}/${suffix}` : base);
+  return [
+    join(`projects/${teamSlug}/${projectId}`),
+    join(`projects/${teamSlug}/${projectName}`),
+    join(`projects/${projectName}`),
+    join(`${teamSlug}/${projectName}`),
+  ];
+}
+
+/** Server-side enforcement for the folder-permission intent table. */
+async function hasDesktopPathAccess(
+  ctx: QueryCtx | MutationCtx,
+  teamId: Id<"teams">,
+  role: string,
+  userSubject: string,
+  candidates: string[],
+  allowAncestor: boolean,
+): Promise<boolean> {
+  const grants = await ctx.db
+    .query("folderPermissions")
+    .withIndex("by_team", (q) => q.eq("teamId", teamId))
+    .collect();
+  if (grants.length === 0) return true;
+
+  for (const rawCandidate of candidates) {
+    const candidate = rawCandidate.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+    const exactMatches = grants
+      .filter((grant) => {
+        const prefix = grant.pathPrefix.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+        return candidate === prefix.replace(/\/$/, "") || candidate.startsWith(prefix);
+      })
+      .sort((a, b) => b.pathPrefix.length - a.pathPrefix.length);
+    if (exactMatches.length > 0) {
+      const best = exactMatches[0];
+      return best.allowedRoles.includes(role) || best.allowedClerkIds.includes(userSubject);
+    }
+    if (allowAncestor) {
+      const ancestorPrefix = candidate.endsWith("/") ? candidate : `${candidate}/`;
+      const visibleDescendant = grants.some((grant) => {
+        const prefix = grant.pathPrefix.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+        return (
+          prefix.startsWith(ancestorPrefix) &&
+          (grant.allowedRoles.includes(role) || grant.allowedClerkIds.includes(userSubject))
+        );
+      });
+      if (visibleDescendant) return true;
+    }
+  }
+  return false;
+}
+
 // ── Proxy-vs-original resolution for the drive ───────────────────────────────
 //
 // Proxy-first editing is what makes the drive LucidLink-fast AND cheap: the
@@ -195,6 +250,7 @@ type VideoListEntry = {
   size: number;
   contentType: string;
   updatedAt: number;
+  etag: string;
   isReady: boolean;
   hasS3Key: boolean;
   isProxy: boolean;
@@ -205,12 +261,26 @@ function buildVideoEntries(
   preferProxy: boolean,
 ): VideoListEntry[] {
   const live = videos.filter((vd) => !vd.deletedAt);
+  // Match the web project view: a version stack is one logical file. Without
+  // this the mounted drive could show hundreds of historical versions while
+  // the app showed one (or appeared empty after filtering).
+  const byLineage = new Map<string, Doc<"videos">[]>();
+  for (const video of live) {
+    const key = String(video.lineageId ?? video._id);
+    const group = byLineage.get(key) ?? [];
+    group.push(video);
+    byLineage.set(key, group);
+  }
+  const visible = Array.from(byLineage.values()).map((group) => {
+    group.sort((a, b) => b._creationTime - a._creationTime);
+    return group.find((video) => video.isCurrentVersion === true) ?? group[0];
+  });
   // Items are content-type agnostic — the `videos` table doubles as the
   // generic file table (PDFs, images, audio, .ai, .psd, anything). The
   // backend's markUploadComplete already routes non-video MIME types
   // through markAsReadyAsFile, so the desktop drive just surfaces whatever
   // landed.
-  const rows = live.map((vd) => {
+  const rows = visible.map((vd) => {
     // Keep the ORIGINAL name+extension even when serving a proxy — the drive
     // exposes one logical file per video whose bytes flip with proxy mode.
     const ext = extractExt(vd.s3Key ?? undefined) ?? extractExt(vd.title);
@@ -236,7 +306,8 @@ function buildVideoEntries(
       // when present + enabled, else original) so PROPFIND == GET bytes.
       size: obj.size,
       contentType: obj.contentType,
-      updatedAt: r.video._creationTime,
+      updatedAt: r.video.driveModifiedAt ?? r.video._creationTime,
+      etag: `"${r.video._id}-${r.video.driveVersion ?? 1}"`,
       isReady: r.video.status === "ready",
       hasS3Key: Boolean(obj.key),
       isProxy: obj.isProxy,
@@ -277,6 +348,7 @@ type FolderListEntry = {
   folderId: Id<"folders">;
   displayName: string;
   updatedAt: number;
+  etag: string;
 };
 
 // Subfolders directly under `parentFolderId` (project root when undefined).
@@ -296,7 +368,8 @@ async function listSubfolders(
   return rows.map((f) => ({
     folderId: f._id,
     displayName: f.name,
-    updatedAt: f._creationTime,
+    updatedAt: f.driveModifiedAt ?? f._creationTime,
+    etag: `"${f._id}-${f.driveVersion ?? 1}"`,
   }));
 }
 
@@ -390,8 +463,24 @@ export const listProjectsForDesktop = query({
       .withIndex("by_team", (q) => q.eq("teamId", team._id))
       .collect();
     const live = projects.filter((p) => !p.deletedAt);
+    const visible = (
+      await Promise.all(
+        live.map(async (project) =>
+          (await hasDesktopPathAccess(
+            ctx,
+            team._id,
+            membership.role,
+            user.subject,
+            desktopPathCandidates(args.teamSlug, project.name, project._id, []),
+            true,
+          ))
+            ? project
+            : null,
+        ),
+      )
+    ).filter((project): project is Doc<"projects"> => Boolean(project));
     const disambig = disambiguate(
-      live.map((p) => ({ _id: p._id as string, rawName: p.name, project: p })),
+      visible.map((p) => ({ _id: p._id as string, rawName: p.name, project: p })),
     );
     const withCounts = await Promise.all(
       disambig.map(async (r) => {
@@ -436,7 +525,7 @@ export const browsePathForDesktop = query({
     v.object({
       type: v.literal("folder"),
       folders: v.array(
-        v.object({ displayName: v.string(), updatedAt: v.number() }),
+        v.object({ displayName: v.string(), updatedAt: v.number(), etag: v.string() }),
       ),
       videos: v.array(
         v.object({
@@ -445,6 +534,7 @@ export const browsePathForDesktop = query({
           size: v.number(),
           contentType: v.string(),
           updatedAt: v.number(),
+          etag: v.string(),
           isReady: v.boolean(),
         }),
       ),
@@ -455,6 +545,7 @@ export const browsePathForDesktop = query({
       size: v.number(),
       contentType: v.string(),
       updatedAt: v.number(),
+      etag: v.string(),
     }),
   ),
   handler: async (ctx, args) => {
@@ -465,7 +556,7 @@ export const browsePathForDesktop = query({
     await requireTeamAccess(ctx, team._id);
     const project = await resolveProjectByName(ctx, team._id, args.projectName);
     if (!project) return null;
-    await requireProjectAccess(ctx, project._id);
+    const { membership } = await requireProjectAccess(ctx, project._id);
 
     const preferProxy = args.preferProxy ?? true;
     const names = args.folderPath ?? [];
@@ -473,22 +564,84 @@ export const browsePathForDesktop = query({
 
     // Whole path resolved to folders (or it's the project root) → directory.
     if (walk.matched === names.length) {
+      if (
+        !(await hasDesktopPathAccess(
+          ctx,
+          team._id,
+          membership.role,
+          user.subject,
+          desktopPathCandidates(args.teamSlug, project.name, project._id, names),
+          true,
+        ))
+      ) {
+        return null;
+      }
       const [folders, videos] = await Promise.all([
         listSubfolders(ctx, project._id, walk.folderId),
         listVideosInFolder(ctx, project._id, walk.folderId, preferProxy),
       ]);
+      const visibleFolders = (
+        await Promise.all(
+          folders.map(async (folder) =>
+            (await hasDesktopPathAccess(
+              ctx,
+              team._id,
+              membership.role,
+              user.subject,
+              desktopPathCandidates(
+                args.teamSlug,
+                project.name,
+                project._id,
+                [...names, folder.displayName],
+              ),
+              true,
+            ))
+              ? folder
+              : null,
+          ),
+        )
+      ).filter((folder): folder is FolderListEntry => Boolean(folder));
+      const visibleVideos = (
+        await Promise.all(
+          videos.map(async (video) => {
+            const row = await ctx.db.get(video.videoId);
+            if (!row) return null;
+            const candidates = [
+              ...(row.s3Key ? [row.s3Key] : []),
+              ...desktopPathCandidates(
+                args.teamSlug,
+                project.name,
+                project._id,
+                [...names, video.displayName],
+              ),
+            ];
+            return (await hasDesktopPathAccess(
+              ctx,
+              team._id,
+              membership.role,
+              user.subject,
+              candidates,
+              false,
+            ))
+              ? video
+              : null;
+          }),
+        )
+      ).filter((video): video is VideoListEntry => Boolean(video));
       return {
         type: "folder" as const,
-        folders: folders.map((f) => ({
+        folders: visibleFolders.map((f) => ({
           displayName: f.displayName,
           updatedAt: f.updatedAt,
+          etag: f.etag,
         })),
-        videos: videos.map((vd) => ({
+        videos: visibleVideos.map((vd) => ({
           displayName: vd.displayName,
           ext: vd.ext,
           size: vd.size,
           contentType: vd.contentType,
           updatedAt: vd.updatedAt,
+          etag: vd.etag,
           isReady: vd.isReady,
         })),
       };
@@ -504,14 +657,32 @@ export const browsePathForDesktop = query({
         walk.folderId,
         preferProxy,
       );
-      const match = videos.find((vd) => vd.displayName === fileName);
+      const match = videos.find(
+        (vd) => vd.displayName.toLowerCase() === fileName.toLowerCase(),
+      );
       if (match) {
+        const row = await ctx.db.get(match.videoId);
+        const allowed =
+          row &&
+          (await hasDesktopPathAccess(
+            ctx,
+            team._id,
+            membership.role,
+            user.subject,
+            [
+              ...(row.s3Key ? [row.s3Key] : []),
+              ...desktopPathCandidates(args.teamSlug, project.name, project._id, names),
+            ],
+            false,
+          ));
+        if (!allowed) return null;
         return {
           type: "file" as const,
           displayName: match.displayName,
           size: match.size,
           contentType: match.contentType,
           updatedAt: match.updatedAt,
+          etag: match.etag,
         };
       }
     }
@@ -552,6 +723,18 @@ export const resolveUploadTargetForDesktop = query({
     const names = args.folderPath ?? [];
     const walk = await walkFolderPath(ctx, project._id, names);
     if (walk.matched !== names.length) return null;
+    if (
+      !(await hasDesktopPathAccess(
+        ctx,
+        team._id,
+        membership.role,
+        user.subject,
+        desktopPathCandidates(args.teamSlug, project.name, project._id, names),
+        false,
+      ))
+    ) {
+      return null;
+    }
     return {
       projectId: project._id,
       role: membership.role,
@@ -596,7 +779,7 @@ export const resolveVideoForDesktop = query({
     await requireTeamAccess(ctx, team._id);
     const project = await resolveProjectByName(ctx, team._id, args.projectName);
     if (!project) return null;
-    await requireProjectAccess(ctx, project._id);
+    const { membership } = await requireProjectAccess(ctx, project._id);
     const preferProxy = args.preferProxy ?? true;
     const names = args.folderPath ?? [];
     const walk = await walkFolderPath(ctx, project._id, names);
@@ -607,10 +790,32 @@ export const resolveVideoForDesktop = query({
       walk.folderId,
       preferProxy,
     );
-    const match = videos.find((vd) => vd.displayName === args.fileName);
+    const match = videos.find(
+      (vd) => vd.displayName.toLowerCase() === args.fileName.toLowerCase(),
+    );
     if (!match) return null;
     const video = await ctx.db.get(match.videoId);
     if (!video) return null;
+    if (
+      !(await hasDesktopPathAccess(
+        ctx,
+        team._id,
+        membership.role,
+        user.subject,
+        [
+          ...(video.s3Key ? [video.s3Key] : []),
+          ...desktopPathCandidates(
+            args.teamSlug,
+            project.name,
+            project._id,
+            [...names, args.fileName],
+          ),
+        ],
+        false,
+      ))
+    ) {
+      return null;
+    }
     const obj = pickDriveObject(video, preferProxy);
     if (!obj.key) return null;
     return {
@@ -694,9 +899,10 @@ export const getDownloadUrlForDesktop = action({
 });
 
 /**
- * Create a video row + a presigned PUT URL for the desktop WebDAV server to
- * stream the request body straight into S3. The actual finalize (Mux ingest,
- * status flip) happens via `completeUploadForDesktop` once the PUT lands.
+ * Begin a desktop upload without mutating the live file row. Every PUT lands
+ * at a unique candidate key; `commitUploadForDesktop` HEAD-verifies those bytes
+ * before atomically creating/swapping the row. A cancelled request can therefore
+ * delete the candidate without touching the existing file.
  */
 export const createUploadForDesktop = action({
   args: {
@@ -708,14 +914,22 @@ export const createUploadForDesktop = action({
     contentType: v.string(),
   },
   returns: v.object({
-    videoId: v.id("videos"),
+    mode: v.union(v.literal("create"), v.literal("overwrite")),
+    videoId: v.union(v.id("videos"), v.null()),
+    previousS3Key: v.union(v.string(), v.null()),
     uploadUrl: v.string(),
     s3Key: v.string(),
   }),
   handler: async (
     ctx,
     args,
-  ): Promise<{ videoId: Id<"videos">; uploadUrl: string; s3Key: string }> => {
+  ): Promise<{
+    mode: "create" | "overwrite";
+    videoId: Id<"videos"> | null;
+    previousS3Key: string | null;
+    uploadUrl: string;
+    s3Key: string;
+  }> => {
     const target: {
       projectId: Id<"projects">;
       role: string;
@@ -740,82 +954,17 @@ export const createUploadForDesktop = action({
     if (target.role === "viewer") {
       throw new Error("Viewer role can't upload to this project.");
     }
-    // A PUT to an existing path is an OVERWRITE, never a sibling row (WebDAV
-    // semantics). Three cases, all converging on one row per path:
-    //  1. Row still "uploading" → an rclone retry of an in-flight drop (it
-    //     can't always confirm the upload "took"). Reuse row + object key.
-    //  2. Completed row, same byte count → near-certainly the same bytes
-    //     re-PUT after completion (the gap the in-flight-only matcher
-    //     missed — each of these minted a fresh duplicate). Reuse row + key;
-    //     completeUploadForDesktop sees a non-"uploading" row and skips
-    //     re-ingest, so no second Mux asset is billed. (A genuinely new file
-    //     with the exact same byte count slips through as "identical" — the
-    //     raw object still updates, only the encoded ladder goes stale.)
-    //  3. Completed row, different byte count → genuinely new content saved
-    //     over the file. Re-key, reset playback state, re-process, and GC
-    //     the replaced assets in the background.
     const existing = await ctx.runQuery(
       internal.desktopBrowse.findUploadTarget,
       {
         projectId: target.projectId,
         folderId: target.folderId ?? undefined,
-        title: args.fileName,
+        fileName: args.fileName,
       },
     );
-    if (existing) {
-      const reuseKey =
-        existing.s3Key &&
-        (existing.status === "uploading" || existing.fileSize === args.size)
-          ? existing.s3Key
-          : null;
-      if (reuseKey) {
-        const reuseUrl = await getSignedUrl(
-          getS3Client(),
-          new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: reuseKey,
-            ContentType: args.contentType,
-          }),
-          { expiresIn: 3600 },
-        );
-        return {
-          videoId: existing.videoId,
-          uploadUrl: reuseUrl,
-          s3Key: reuseKey,
-        };
-      }
-      const overwriteExt = extractExt(args.fileName) ?? "bin";
-      const overwriteKey = `projects/${args.teamSlug}/${target.projectId}/originals/${existing.videoId}/${Date.now()}.${overwriteExt}`;
-      await ctx.runMutation(internal.desktopBrowse.resetVideoForOverwrite, {
-        videoId: existing.videoId,
-        s3Key: overwriteKey,
-        fileSize: args.size,
-        contentType: args.contentType,
-      });
-      const overwriteUrl = await getSignedUrl(
-        getS3Client(),
-        new PutObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: overwriteKey,
-          ContentType: args.contentType,
-        }),
-        { expiresIn: 3600 },
-      );
-      return {
-        videoId: existing.videoId,
-        uploadUrl: overwriteUrl,
-        s3Key: overwriteKey,
-      };
-    }
-    const videoId: Id<"videos"> = await ctx.runMutation(api.videos.create, {
-      projectId: target.projectId,
-      title: args.fileName,
-      fileSize: args.size,
-      contentType: args.contentType,
-      folderId: target.folderId ?? undefined,
-    });
     const ext = extractExt(args.fileName) ?? "bin";
-    const key = `projects/${args.teamSlug}/${target.projectId}/originals/${videoId}/${Date.now()}.${ext}`;
+    const candidateId = crypto.randomUUID();
+    const key = `projects/${args.teamSlug}/${target.projectId}/originals/desktop-pending/${candidateId}.${ext}`;
     const s3 = getS3Client();
     const cmd = new PutObjectCommand({
       Bucket: BUCKET_NAME,
@@ -823,13 +972,13 @@ export const createUploadForDesktop = action({
       ContentType: args.contentType,
     });
     const uploadUrl = await getSignedUrl(s3, cmd, { expiresIn: 3600 });
-    await ctx.runMutation(internal.videos.setUploadInfo, {
-      videoId,
+    return {
+      mode: existing ? "overwrite" : "create",
+      videoId: existing?.videoId ?? null,
+      previousS3Key: existing?.s3Key ?? null,
+      uploadUrl,
       s3Key: key,
-      fileSize: args.size,
-      contentType: args.contentType,
-    });
-    return { videoId, uploadUrl, s3Key: key };
+    };
   },
 });
 
@@ -843,14 +992,12 @@ export const findUploadTarget = internalQuery({
   args: {
     projectId: v.id("projects"),
     folderId: v.optional(v.id("folders")),
-    title: v.string(),
+    fileName: v.string(),
   },
   returns: v.union(
     v.object({
       videoId: v.id("videos"),
       s3Key: v.union(v.string(), v.null()),
-      status: v.string(),
-      fileSize: v.union(v.number(), v.null()),
     }),
     v.null(),
   ),
@@ -864,21 +1011,24 @@ export const findUploadTarget = internalQuery({
           .query("videos")
           .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
           .collect();
-    const match = rows
-      .filter(
-        (vd) =>
-          vd.projectId === args.projectId &&
-          (args.folderId ? vd.folderId === args.folderId : !vd.folderId) &&
-          vd.title === args.title &&
-          !vd.deletedAt,
-      )
-      .sort((a, b) => a._creationTime - b._creationTime)[0];
+    const scoped = rows.filter(
+      (vd) =>
+        vd.projectId === args.projectId &&
+        (args.folderId ? vd.folderId === args.folderId : !vd.folderId) &&
+        !vd.deletedAt,
+    );
+    // Match the exact display name produced by the mount, not the raw title.
+    // Web uploads store a title without an extension while drive uploads store
+    // the original file name; buildVideoEntries normalizes both representations.
+    const displayed = buildVideoEntries(scoped, false);
+    const hit = displayed.find(
+      (entry) => entry.displayName.toLowerCase() === args.fileName.toLowerCase(),
+    );
+    const match = hit ? scoped.find((vd) => vd._id === hit.videoId) : null;
     return match
       ? {
           videoId: match._id,
           s3Key: typeof match.s3Key === "string" ? match.s3Key : null,
-          status: match.status,
-          fileSize: typeof match.fileSize === "number" ? match.fileSize : null,
         }
       : null;
   },
@@ -891,9 +1041,10 @@ export const findUploadTarget = internalQuery({
 // best-effort in the background — a leaked object is a COGS leak, not a
 // correctness bug. Comments/timelines stay attached to the row, same as any
 // filesystem overwrite.
-export const resetVideoForOverwrite = internalMutation({
+export const commitVideoOverwrite = internalMutation({
   args: {
     videoId: v.id("videos"),
+    previousS3Key: v.union(v.string(), v.null()),
     s3Key: v.string(),
     fileSize: v.number(),
     contentType: v.string(),
@@ -902,6 +1053,10 @@ export const resetVideoForOverwrite = internalMutation({
   handler: async (ctx, args) => {
     const vd = await ctx.db.get(args.videoId);
     if (!vd) throw new Error("Video row vanished mid-overwrite.");
+    const currentKey = typeof vd.s3Key === "string" ? vd.s3Key : null;
+    if (currentKey !== args.previousS3Key) {
+      throw new Error("The destination changed while the replacement was uploading. Retry it.");
+    }
     const replacedObjectKeys = [
       ...(typeof vd.s3Key === "string" && vd.s3Key !== args.s3Key
         ? [vd.s3Key]
@@ -939,6 +1094,8 @@ export const resetVideoForOverwrite = internalMutation({
       thumbnailUrl: undefined,
       imagePreviewS3Key: undefined,
       imagePreviewStatus: undefined,
+      driveModifiedAt: Date.now(),
+      driveVersion: (vd.driveVersion ?? 0) + 1,
     });
     if (
       replacedObjectKeys.length > 0 ||
@@ -954,6 +1111,24 @@ export const resetVideoForOverwrite = internalMutation({
           streamUid: replacedStreamUid,
         },
       );
+    }
+    return null;
+  },
+});
+
+/** Roll back the tiny create→setUploadInfo window if publishing a new row fails. */
+export const rollbackNewDesktopUpload = internalMutation({
+  args: { videoId: v.id("videos"), s3Key: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const video = await ctx.db.get(args.videoId);
+    if (
+      video &&
+      video.status === "uploading" &&
+      (!video.s3Key || video.s3Key === args.s3Key)
+    ) {
+      await removeSearchableForVideo(ctx, video._id).catch(() => {});
+      await ctx.db.delete(video._id);
     }
     return null;
   },
@@ -1168,7 +1343,12 @@ export const listStuckDriveUploads = internalQuery({
     const cutoff = Date.now() - (args.olderThanMs ?? 30 * 60 * 1000);
     const rows = await ctx.db.query("videos").take(args.limit ?? 8000);
     return rows
-      .filter((vd) => vd.status === "uploading" && vd._creationTime < cutoff)
+      .filter(
+        (vd) =>
+          vd.status === "uploading" &&
+          !vd.encodingDeferred &&
+          (vd.driveModifiedAt ?? vd._creationTime) < cutoff,
+      )
       .map((vd) => ({
         videoId: vd._id,
         s3Key: vd.s3Key ?? null,
@@ -1305,9 +1485,26 @@ export const ensureFolderForDesktop = mutation({
     await requireTeamAccess(ctx, team._id);
     const project = await resolveProjectByName(ctx, team._id, args.projectName);
     if (!project) throw new Error(`No project "${args.projectName}".`);
-    await requireProjectAccess(ctx, project._id, "member");
+    const { membership } = await requireProjectAccess(ctx, project._id, "member");
 
     if (args.folderPath.length === 0) throw new Error("Folder name required.");
+    if (
+      !(await hasDesktopPathAccess(
+        ctx,
+        team._id,
+        membership.role,
+        user.subject,
+        desktopPathCandidates(
+          args.teamSlug,
+          project.name,
+          project._id,
+          args.folderPath,
+        ),
+        false,
+      ))
+    ) {
+      throw new Error("Folder path is not writable.");
+    }
     const parentNames = args.folderPath.slice(0, -1);
     const rawName = args.folderPath[args.folderPath.length - 1];
 
@@ -1332,6 +1529,7 @@ export const ensureFolderForDesktop = mutation({
       return { ok: true, created: false };
     }
 
+    const now = Date.now();
     await ctx.db.insert("folders", {
       projectId: project._id,
       parentFolderId: walk.folderId,
@@ -1341,313 +1539,260 @@ export const ensureFolderForDesktop = mutation({
         (user as { name?: string; email?: string }).name ??
         (user as { email?: string }).email ??
         "Unknown",
+      driveModifiedAt: now,
+      driveVersion: 1,
     });
     return { ok: true, created: true };
   },
 });
 
-// ── Resolve a WebDAV path to the concrete folder/file it names ───────────────
-//
-// DELETE and MOVE both need the same name → ID walk the read paths use, but
-// from a MutationCtx so they can write. `names` is the segment list AFTER the
-// project name (i.e. folderPath, where the last element may be a file). We
-// return the deepest matched folder plus, when the path resolved to a file, the
-// matching video doc. A `kind: "none"` result means the path didn't resolve and
-// the caller should answer 404 — never silently fall through.
+type DesktopResolvedItem =
+  | { type: "folder"; folder: Doc<"folders"> }
+  | { type: "file"; video: Doc<"videos">; displayName: string };
 
-type DesktopTargetContext = {
-  team: Doc<"teams">;
-  project: Doc<"projects">;
-  role: string;
-};
-
-// Look up team + project + the member's role, mirroring the upload path's
-// authorization (createUploadForDesktop → resolveUploadTargetForDesktop):
-// member or above may write; viewers are rejected by the caller. Returns null
-// when the team/project can't be resolved so the caller answers 404.
-async function resolveProjectForDesktopWrite(
-  ctx: QueryCtx,
-  teamSlug: string,
-  projectName: string,
-): Promise<DesktopTargetContext | null> {
-  const user = await getUser(ctx);
-  if (!user) return null;
-  const team = await resolveTeamBySlug(ctx, teamSlug);
-  if (!team) return null;
-  await requireTeamAccess(ctx, team._id);
-  const project = await resolveProjectByName(ctx, team._id, projectName);
-  if (!project) return null;
-  const { membership } = await requireProjectAccess(ctx, project._id);
-  return { team, project, role: membership.role };
-}
-
-type DesktopPathTarget =
-  | { kind: "none" }
-  | { kind: "folder"; folder: Doc<"folders"> | null }
-  | { kind: "file"; video: Doc<"videos"> };
-
-// Resolve `names` (segments after the project) within a resolved project to a
-// folder or a file. Folder match: the whole path walks to existing folders
-// (null folder = project root). File match: all but the last segment walk to
-// folders and the last names a live video in that folder. This mirrors
-// browsePathForDesktop's folder-vs-file disambiguation so DELETE/MOVE hit the
-// SAME node the listing shows.
-async function resolveDesktopPathTarget(
-  ctx: QueryCtx,
+async function resolveDesktopItem(
+  ctx: QueryCtx | MutationCtx,
   projectId: Id<"projects">,
-  names: string[],
-): Promise<DesktopPathTarget> {
-  // The project root itself ("/team/project") is never a deletable/movable
-  // target through the drive — that's a project-level operation.
-  if (names.length === 0) return { kind: "folder", folder: null };
-
-  const walk = await walkFolderPath(ctx, projectId, names);
-  if (walk.matched === names.length) {
-    // Whole path resolved to folders → the deepest one is the target.
-    if (!walk.folderId) return { kind: "folder", folder: null };
+  itemPath: string[],
+): Promise<DesktopResolvedItem | null> {
+  if (itemPath.length === 0) return null;
+  const walk = await walkFolderPath(ctx, projectId, itemPath);
+  if (walk.matched === itemPath.length && walk.folderId) {
     const folder = await ctx.db.get(walk.folderId);
-    return folder ? { kind: "folder", folder } : { kind: "none" };
+    return folder ? { type: "folder", folder } : null;
   }
-  if (walk.matched === names.length - 1) {
-    // All but the last segment matched → the last names a file in the deepest
-    // matched folder. Use the SAME display-name disambiguation the listing
-    // uses so the name Finder shows resolves deterministically.
-    const fileName = names[names.length - 1];
-    const entries = await listVideosInFolder(
-      ctx,
-      projectId,
-      walk.folderId,
-      // preferProxy is irrelevant for delete/move (we never read bytes), but
-      // listVideosInFolder needs a value; pass true to match the read paths.
-      true,
-    );
-    const match = entries.find((e) => e.displayName === fileName);
-    if (!match) return { kind: "none" };
-    const video = await ctx.db.get(match.videoId);
-    return video && !video.deletedAt
-      ? { kind: "file", video }
-      : { kind: "none" };
-  }
-  return { kind: "none" };
+  if (walk.matched !== itemPath.length - 1) return null;
+  const rows = walk.folderId
+    ? await ctx.db
+        .query("videos")
+        .withIndex("by_folder", (q) => q.eq("folderId", walk.folderId))
+        .collect()
+    : await ctx.db
+        .query("videos")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect();
+  const scoped = rows.filter(
+    (vd) =>
+      vd.projectId === projectId &&
+      (walk.folderId ? vd.folderId === walk.folderId : !vd.folderId) &&
+      !vd.deletedAt,
+  );
+  const wanted = itemPath[itemPath.length - 1].toLowerCase();
+  const entry = buildVideoEntries(scoped, false).find(
+    (candidate) => candidate.displayName.toLowerCase() === wanted,
+  );
+  if (!entry) return null;
+  const video = scoped.find((vd) => vd._id === entry.videoId);
+  return video ? { type: "file", video, displayName: entry.displayName } : null;
 }
 
-/**
- * Delete a file or folder named by a WebDAV path. Backs the WebDAV DELETE that
- * Finder issues when a file/folder is dragged to the Trash.
- *
- *  - File → SOFT delete (sets `deletedAt` + `deletedByName`, drops the search
- *    index), exactly like the web app's `videos.remove`, so a Finder mistake is
- *    recoverable from the "Recently deleted" page rather than gone for good.
- *  - Folder → mirrors `folders.remove`: hard-deletes the `folders` row but only
- *    when it's empty, refusing otherwise so we never orphan or destroy the
- *    videos inside it.
- *
- * Authorization mirrors the upload path (createUploadForDesktop): the desktop's
- * paired Convex identity must be a member or above on the project; viewers are
- * rejected. Returns a discriminated status the WebDAV layer maps to
- * 204 / 404 / 409 / 403.
- */
-export const removePathForDesktop = mutation({
+function cleanDesktopFileName(raw: string): string {
+  const name = raw.normalize("NFC");
+  if (!name || name === "." || name === "..") throw new Error("File name is required.");
+  if (name.includes("/") || name.includes("\0")) throw new Error("Invalid file name.");
+  if (name.length > 255) throw new Error("File name is too long.");
+  return name;
+}
+
+export const deletePathForDesktop = mutation({
   args: {
     teamSlug: v.string(),
     projectName: v.string(),
-    folderPath: v.optional(v.array(v.string())),
+    itemPath: v.array(v.string()),
   },
-  returns: v.object({
-    status: v.union(
-      v.literal("deleted"),
-      v.literal("not_found"),
-      v.literal("not_empty"),
-      v.literal("forbidden"),
-    ),
-  }),
+  returns: v.object({ type: v.union(v.literal("file"), v.literal("folder")) }),
   handler: async (ctx, args) => {
-    const ctxInfo = await resolveProjectForDesktopWrite(
-      ctx,
-      args.teamSlug,
-      args.projectName,
-    );
-    if (!ctxInfo) return { status: "not_found" as const };
-    if (ctxInfo.role === "viewer") {
-      return { status: "forbidden" as const };
+    const team = await resolveTeamBySlug(ctx, args.teamSlug);
+    if (!team) throw new Error("Team not found.");
+    const project = await resolveProjectByName(ctx, team._id, args.projectName);
+    if (!project) throw new Error("Project not found.");
+    const { user, membership } = await requireProjectAccess(ctx, project._id, "member");
+    const item = await resolveDesktopItem(ctx, project._id, args.itemPath);
+    if (!item) throw new Error("File or folder not found.");
+    const candidates = [
+      ...(item.type === "file" && item.video.s3Key ? [item.video.s3Key] : []),
+      ...desktopPathCandidates(args.teamSlug, project.name, project._id, args.itemPath),
+    ];
+    if (
+      !(await hasDesktopPathAccess(
+        ctx,
+        team._id,
+        membership.role,
+        user.subject,
+        candidates,
+        false,
+      ))
+    ) {
+      throw new Error("Path is not writable.");
     }
-
-    const names = args.folderPath ?? [];
-    const target = await resolveDesktopPathTarget(ctx, ctxInfo.project._id, names);
-
-    if (target.kind === "none") return { status: "not_found" as const };
-
-    if (target.kind === "file") {
-      const user = await getUser(ctx);
-      await ctx.db.patch(target.video._id, {
+    if (item.type === "file") {
+      await ctx.db.patch(item.video._id, {
         deletedAt: Date.now(),
-        deletedByName: user ? identityName(user) : undefined,
+        deletedByName: identityName(user),
+        driveModifiedAt: Date.now(),
+        driveVersion: (item.video.driveVersion ?? 0) + 1,
       });
-      // Drop the video + its frame-caption rows from search so trashed items
-      // don't surface in ⌘K — same as videos.remove.
-      try {
-        await removeSearchableForVideo(ctx, target.video._id);
-      } catch (e) {
-        console.error("search index (desktop remove) failed", e);
-      }
-      return { status: "deleted" as const };
+      await removeSearchableForVideo(ctx, item.video._id).catch(() => {});
+      return { type: "file" as const };
     }
-
-    // Folder. Deleting the project root via the drive is not allowed.
-    if (!target.folder) return { status: "forbidden" as const };
-
-    const sub = await ctx.db
-      .query("folders")
-      .withIndex("by_project_and_parent", (q) =>
-        q
-          .eq("projectId", target.folder!.projectId)
-          .eq("parentFolderId", target.folder!._id),
-      )
-      .first();
-    const vid = await ctx.db
-      .query("videos")
-      .withIndex("by_folder", (q) => q.eq("folderId", target.folder!._id))
-      .first();
-    if (sub || (vid && !vid.deletedAt)) {
-      return { status: "not_empty" as const };
-    }
-    await ctx.db.delete(target.folder._id);
-    return { status: "deleted" as const };
+    await trashFolderTree(ctx, item.folder, identityName(user));
+    return { type: "folder" as const };
   },
 });
 
-/**
- * Move/rename a file or folder. Backs the WebDAV MOVE that Finder issues on a
- * rename (same parent, new name) or a drag between folders (new parent). The
- * destination is given as path segments after the project name, with the last
- * segment being the new file/folder name and the rest the destination folder.
- *
- *  - File → reparent (`folderId`) and/or retitle (`title`), mirroring
- *    `folders.moveVideoToFolder` + `videos.update`.
- *  - Folder → reparent and/or rename, mirroring `folders.moveFolder` +
- *    `folders.rename` (sibling-name + cycle guards included).
- *
- * Source and destination must live in the SAME team/project — Finder can only
- * MOVE within one mounted volume, and cross-project moves would need a fresh
- * upload, not a metadata patch. Same member+ authorization as DELETE.
- */
 export const movePathForDesktop = mutation({
   args: {
     teamSlug: v.string(),
     projectName: v.string(),
-    // Segments after the project name for the SOURCE (last may be a file).
-    sourcePath: v.array(v.string()),
-    // Segments after the project name for the DESTINATION (last = new name).
-    destPath: v.array(v.string()),
+    itemPath: v.array(v.string()),
+    destinationTeamSlug: v.string(),
+    destinationProjectName: v.string(),
+    destinationPath: v.array(v.string()),
+    overwrite: v.boolean(),
   },
   returns: v.object({
-    status: v.union(
-      v.literal("moved"),
-      v.literal("not_found"),
-      v.literal("conflict"),
-      v.literal("forbidden"),
-    ),
+    type: v.union(v.literal("file"), v.literal("folder")),
+    overwritten: v.boolean(),
   }),
   handler: async (ctx, args) => {
-    const ctxInfo = await resolveProjectForDesktopWrite(
+    if (args.destinationPath.length === 0) throw new Error("Destination name is required.");
+    const sourceTeam = await resolveTeamBySlug(ctx, args.teamSlug);
+    const destinationTeam = await resolveTeamBySlug(ctx, args.destinationTeamSlug);
+    if (!sourceTeam || !destinationTeam) throw new Error("Team not found.");
+    const sourceProject = await resolveProjectByName(ctx, sourceTeam._id, args.projectName);
+    const destinationProject = await resolveProjectByName(
       ctx,
-      args.teamSlug,
-      args.projectName,
+      destinationTeam._id,
+      args.destinationProjectName,
     );
-    if (!ctxInfo) return { status: "not_found" as const };
-    if (ctxInfo.role === "viewer") {
-      return { status: "forbidden" as const };
-    }
-    const projectId = ctxInfo.project._id;
-
-    if (args.destPath.length === 0) return { status: "not_found" as const };
-    const newName = args.destPath[args.destPath.length - 1];
-    const destParentNames = args.destPath.slice(0, -1);
-
-    // Resolve the destination's PARENT folder (must already exist; Finder
-    // MKCOLs new folders before moving into them, same as upload).
-    const destWalk = await walkFolderPath(ctx, projectId, destParentNames);
-    if (destWalk.matched !== destParentNames.length) {
-      return { status: "not_found" as const };
-    }
-    const destParentId = destWalk.folderId; // undefined = project root
-
-    const source = await resolveDesktopPathTarget(
+    if (!sourceProject || !destinationProject) throw new Error("Project not found.");
+    const sourceAccess = await requireProjectAccess(ctx, sourceProject._id, "member");
+    const destinationAccess = await requireProjectAccess(
       ctx,
-      projectId,
-      args.sourcePath,
+      destinationProject._id,
+      "member",
     );
-    if (source.kind === "none") return { status: "not_found" as const };
-
-    if (source.kind === "file") {
-      const video = source.video;
-      // Reparent if the destination folder differs.
-      if ((video.folderId ?? undefined) !== (destParentId ?? undefined)) {
-        await ctx.db.patch(video._id, { folderId: destParentId });
-      }
-      // Retitle if the leaf name changed. The drive's display name is the
-      // video title (with collision suffix); we set the raw title to the new
-      // leaf so the rename round-trips.
-      if (newName !== video.title) {
-        await ctx.db.patch(video._id, { title: newName });
-        try {
-          await removeSearchableForVideo(ctx, video._id);
-        } catch (e) {
-          console.error("search index (desktop move) drop failed", e);
-        }
-      }
-      return { status: "moved" as const };
-    }
-
-    // Folder move/rename. The project root can't be moved.
-    if (!source.folder) return { status: "forbidden" as const };
-    const folder = source.folder;
-    const cleanName = newName.trim().replace(/\s+/g, " ").slice(0, 120);
-    if (!cleanName) return { status: "forbidden" as const };
-    if (/[\\/:*?"<>|]/.test(cleanName)) return { status: "forbidden" as const };
-
-    const nextParent = destParentId ?? undefined;
-    const currentParent = folder.parentFolderId ?? undefined;
-
-    // Cycle guard: a folder can't become its own descendant (mirrors
-    // folders.moveFolder).
-    if (nextParent !== currentParent && destParentId) {
-      if (destParentId === folder._id) return { status: "forbidden" as const };
-      let cursor: Id<"folders"> | undefined = destParentId;
-      const seen = new Set<string>();
-      while (cursor) {
-        if (cursor === folder._id) return { status: "forbidden" as const };
-        if (seen.has(cursor)) break;
-        seen.add(cursor);
-        const next: Doc<"folders"> | null = await ctx.db.get(cursor);
-        cursor = next?.parentFolderId ?? undefined;
-      }
-    }
-
-    // Reject a sibling-name collision in the destination parent (case-
-    // insensitive), mirroring folders.rename / moveFolder.
-    const siblings = await ctx.db
-      .query("folders")
-      .withIndex("by_project_and_parent", (q) =>
-        q.eq("projectId", projectId).eq("parentFolderId", nextParent),
-      )
-      .collect();
-    const lower = cleanName.toLowerCase();
+    const source = await resolveDesktopItem(ctx, sourceProject._id, args.itemPath);
+    if (!source) throw new Error("Source not found.");
     if (
-      siblings.some((s) => s._id !== folder._id && s.name.toLowerCase() === lower)
+      !(await hasDesktopPathAccess(
+        ctx,
+        sourceTeam._id,
+        sourceAccess.membership.role,
+        sourceAccess.user.subject,
+        [
+          ...(source.type === "file" && source.video.s3Key ? [source.video.s3Key] : []),
+          ...desktopPathCandidates(
+            args.teamSlug,
+            sourceProject.name,
+            sourceProject._id,
+            args.itemPath,
+          ),
+        ],
+        false,
+      ))
     ) {
-      return { status: "conflict" as const };
+      throw new Error("Source path is not writable.");
     }
 
-    const patch: Partial<{
-      parentFolderId: Id<"folders"> | undefined;
-      name: string;
-    }> = {};
-    if (nextParent !== currentParent) patch.parentFolderId = nextParent;
-    if (cleanName !== folder.name) patch.name = cleanName;
-    if (Object.keys(patch).length > 0) {
-      await ctx.db.patch(folder._id, patch);
+    const destinationName = cleanDesktopFileName(
+      args.destinationPath[args.destinationPath.length - 1],
+    );
+    const destinationParents = args.destinationPath.slice(0, -1);
+    const parentWalk = await walkFolderPath(ctx, destinationProject._id, destinationParents);
+    if (parentWalk.matched !== destinationParents.length) {
+      throw new Error("Destination folder not found.");
     }
-    return { status: "moved" as const };
+    const destination = await resolveDesktopItem(
+      ctx,
+      destinationProject._id,
+      args.destinationPath,
+    );
+    if (
+      !(await hasDesktopPathAccess(
+        ctx,
+        destinationTeam._id,
+        destinationAccess.membership.role,
+        destinationAccess.user.subject,
+        [
+          ...(destination?.type === "file" && destination.video.s3Key
+            ? [destination.video.s3Key]
+            : []),
+          ...desktopPathCandidates(
+            args.destinationTeamSlug,
+            destinationProject.name,
+            destinationProject._id,
+            args.destinationPath,
+          ),
+        ],
+        false,
+      ))
+    ) {
+      throw new Error("Destination path is not writable.");
+    }
+    if (
+      destination &&
+      ((source.type === "file" && destination.type === "file" && source.video._id === destination.video._id) ||
+        (source.type === "folder" && destination.type === "folder" && source.folder._id === destination.folder._id))
+    ) {
+      return { type: source.type, overwritten: false };
+    }
+
+    if (source.type === "folder") {
+      if (sourceProject._id !== destinationProject._id) {
+        throw new Error("Folders can only be moved within the same project.");
+      }
+      if (destination) throw new Error("A file or folder already exists at the destination.");
+      if (parentWalk.folderId === source.folder._id) {
+        throw new Error("Can't move a folder into itself.");
+      }
+      let cursor = parentWalk.folderId;
+      while (cursor) {
+        if (cursor === source.folder._id) {
+          throw new Error("Can't move a folder into one of its descendants.");
+        }
+        const parent: Doc<"folders"> | null = await ctx.db.get(cursor);
+        cursor = parent?.parentFolderId;
+      }
+      await ctx.db.patch(source.folder._id, {
+        parentFolderId: parentWalk.folderId,
+        name: destinationName,
+        driveModifiedAt: Date.now(),
+        driveVersion: (source.folder.driveVersion ?? 0) + 1,
+      });
+      return { type: "folder" as const, overwritten: false };
+    }
+
+    let overwritten = false;
+    if (destination) {
+      if (destination.type !== "file") throw new Error("A folder already exists at the destination.");
+      if (!args.overwrite) throw new Error("Destination already exists and overwrite is disabled.");
+      await ctx.db.patch(destination.video._id, {
+        deletedAt: Date.now(),
+        driveModifiedAt: Date.now(),
+        driveVersion: (destination.video.driveVersion ?? 0) + 1,
+      });
+      await removeSearchableForVideo(ctx, destination.video._id).catch(() => {});
+      overwritten = true;
+    }
+    const now = Date.now();
+    await ctx.db.patch(source.video._id, {
+      projectId: destinationProject._id,
+      folderId: parentWalk.folderId,
+      title: destinationName,
+      driveModifiedAt: now,
+      driveVersion: (source.video.driveVersion ?? 0) + 1,
+    });
+    await indexSearchable(ctx, {
+      kind: "video",
+      refId: source.video._id,
+      teamId: destinationProject.teamId,
+      projectId: destinationProject._id,
+      videoId: source.video._id,
+      title: destinationName,
+      contextLabel: `${destinationProject.name} · ${source.video.contentType ?? "file"}`,
+      text: `${destinationName} ${source.video.description ?? ""}`,
+    }).catch(() => {});
+    return { type: "file" as const, overwritten };
   },
 });

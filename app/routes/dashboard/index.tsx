@@ -58,7 +58,7 @@ function DashboardProjectCard({
 
   return (
     <Card
-      className="group cursor-pointer hover:bg-[#e8e8e0] transition-colors"
+      className="group cursor-pointer transition-colors hover:bg-[#FAFAFA]"
       onClick={onOpen}
       {...prewarmIntentHandlers}
     >
@@ -71,9 +71,9 @@ function DashboardProjectCard({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex items-center justify-between text-xs font-mono text-[#888] group-hover:text-[#1a1a1a] transition-colors">
+        <div className="flex items-center justify-between text-xs text-[#6E6E73] transition-colors group-hover:text-[#131315]">
           <span className="truncate">{project.teamName}</span>
-          <span>open →</span>
+          <span>Open →</span>
         </div>
       </CardContent>
     </Card>
@@ -227,8 +227,8 @@ export default function DashboardPage() {
           )}
         >
           <div className="flex items-center gap-2 mb-3">
-            <Briefcase className="h-4 w-4 text-[#888]" />
-            <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888]">
+            <Briefcase className="h-4 w-4 text-[#A0A0A5]" />
+            <h2 className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Projects
             </h2>
           </div>
@@ -237,18 +237,15 @@ export default function DashboardPage() {
             // affordance you get inside a project. Drop files anywhere
             // on the page to upload (the layout-level handler picks
             // them up); use the button if you'd rather pick.
-            <div className="border-2 border-dashed border-[#1a1a1a] bg-[#f0f0e8] flex flex-col items-center justify-center text-center px-8 py-16 min-h-[320px]">
-              <div className="w-14 h-14 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center justify-center mb-4">
-                <Folder className="h-7 w-7 text-[#888]" />
+            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-[14px] border border-[#E8E8EC] bg-white px-8 py-16 text-center">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#F1F1F3]">
+                <Folder className="h-7 w-7 text-[#A0A0A5]" />
               </div>
-              <h3 className="font-black text-xl tracking-tight text-[#1a1a1a]">
+              <h3 className="text-xl font-semibold tracking-tight text-[#131315]">
                 No projects yet
               </h3>
-              <p className="text-sm text-[#666] mt-2 max-w-md">
-                Drop files anywhere on this page to upload, or start a
-                project from scratch with the button above. Everything
-                you upload lands in a project — projects act like
-                folders for the rest of your team.
+              <p className="mt-2 max-w-md text-sm text-[#6E6E73]">
+                Drop files here, or create a project.
               </p>
             </div>
           ) : (
@@ -269,7 +266,7 @@ export default function DashboardPage() {
         </div>
 
         {showDemoControls ? (
-          <div className="max-w-2xl text-xs text-[#888] font-mono flex items-start gap-2 border-2 border-dashed border-[#1a1a1a] p-3">
+          <div className="flex max-w-2xl items-start gap-2 rounded-[11px] border border-[#E8E8EC] bg-white p-3 text-xs text-[#6E6E73]">
             <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
             <div>
               Demo controls are visible because Stripe + Mux + Storage are

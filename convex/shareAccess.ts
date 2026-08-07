@@ -91,6 +91,26 @@ export function shareCapabilities(
   };
 }
 
+/**
+ * Payment gate shared by playback and download paths. Missing paywall mode is
+ * the legacy all-or-nothing model. A paidAt grant with no item list remains a
+ * full-share unlock even if the link is later switched to per-item pricing.
+ */
+export function isShareVideoUnlocked(
+  grant: Pick<Doc<"shareAccessGrants">, "paidAt" | "unlockedVideoIds">,
+  shareLink: Pick<Doc<"shareLinks">, "paywall">,
+  videoId: Id<"videos">,
+): boolean {
+  if (!shareLink.paywall) return true;
+  if (shareLink.paywall.mode !== "per_item") {
+    return grant.paidAt !== undefined;
+  }
+  if (grant.paidAt !== undefined && grant.unlockedVideoIds === undefined) {
+    return true;
+  }
+  return grant.unlockedVideoIds?.includes(videoId) ?? false;
+}
+
 export async function resolveActiveShareGrant(
   ctx: ReadCtx,
   grantToken: string,

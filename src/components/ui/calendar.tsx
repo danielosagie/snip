@@ -6,7 +6,7 @@ import { DayPicker } from "react-day-picker";
 import { cn } from "@/lib/utils";
 
 /**
- * shadcn-style Calendar, themed to snip's brutalist palette.
+ * shadcn-style Calendar, themed to snip's soft palette.
  *
  * Wraps `react-day-picker` v10 so we get keyboard nav, multi-month
  * support, range selection, etc. without rebuilding the calendar
@@ -25,35 +25,39 @@ function Calendar({
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
-      className={cn("p-2", className)}
+      className={cn(
+        "rounded-[10px] border border-[#E8E8EC] bg-white p-3 text-[#131315]",
+        className
+      )}
       classNames={{
         months: "flex flex-col sm:flex-row gap-2",
         month: "flex flex-col gap-3",
         month_caption: "flex justify-center pt-1 relative items-center",
-        caption_label: "text-sm font-black tracking-tight uppercase",
+        caption_label: "text-sm font-semibold",
         nav: "flex items-center gap-1 absolute right-1 top-1",
         button_previous: cn(
-          "inline-flex h-6 w-6 items-center justify-center border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors",
+          "inline-flex h-7 w-7 items-center justify-center rounded-full text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#131315]",
         ),
         button_next: cn(
-          "inline-flex h-6 w-6 items-center justify-center border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors",
+          "inline-flex h-7 w-7 items-center justify-center rounded-full text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#131315]",
         ),
         month_grid: "w-full border-collapse",
         weekdays: "flex",
         weekday:
-          "text-[#888] w-8 font-mono font-bold text-[10px] uppercase tracking-wider",
+          "w-8 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]",
         week: "flex w-full mt-1",
         day: cn(
-          "relative p-0 text-center text-sm h-8 w-8 font-mono font-bold",
+          "relative h-8 w-8 p-0 text-center text-[13px] font-normal",
         ),
         day_button: cn(
-          "h-8 w-8 p-0 inline-flex items-center justify-center hover:bg-[#e8e8e0] focus:outline-none focus:ring-1 focus:ring-[#1a1a1a]",
+          "inline-flex h-8 w-8 items-center justify-center rounded-full p-0 transition-colors hover:bg-[#F1F1F3] focus-visible:!ring-[3px] focus-visible:!ring-[rgba(255,102,0,0.12)] focus-visible:outline-none",
         ),
         selected:
-          "[&_button]:bg-[#FF6600] [&_button]:text-[#f0f0e8] [&_button]:hover:bg-[#FF7A1F]",
-        today: "[&_button]:underline [&_button]:underline-offset-2",
-        outside: "[&_button]:text-[#bbb]",
-        disabled: "[&_button]:text-[#bbb] [&_button]:line-through [&_button]:cursor-not-allowed",
+          "[&_button]:bg-[#FFF0E6] [&_button]:font-medium [&_button]:text-[#D14E00] [&_button]:hover:bg-[#FFF0E6]",
+        today: "[&_button]:font-semibold [&_button]:text-[#131315]",
+        outside: "[&_button]:text-[#A0A0A5]",
+        disabled:
+          "[&_button]:cursor-not-allowed [&_button]:text-[#A0A0A5] [&_button]:line-through",
         hidden: "invisible",
         ...classNames,
       }}

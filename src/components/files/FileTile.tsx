@@ -9,6 +9,7 @@ import {
   Download,
   Trash2,
   ExternalLink,
+  Check,
   FolderPlus,
 } from "lucide-react";
 import {
@@ -21,6 +22,41 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { triggerDownload } from "@/lib/download";
 import { fileTypeFromContent, formatBytes } from "@/lib/fileTypes";
 import { FloatingImagePreview } from "@/components/FloatingImagePreview";
+import {
+  SNIP_VIDEO_DRAG_TYPE,
+  setDraggedVideoData,
+} from "@/lib/projectDrag";
+
+/**
+ * Signed original-file URLs, shared across every tile in the session.
+ *
+ * Tiles now mount and unmount as the windowed grid scrolls, so without this
+ * a scroll through a folder of images re-requests the same URLs on every
+ * pass. Mirrors the `previewSessions` cache in MediaHoverPreview; a failed
+ * request is evicted so it can be retried.
+ */
+const originalUrlRequests = new Map<string, Promise<{ url: string }>>();
+
+function getOriginalUrlCached(
+  videoId: Id<"videos">,
+  fetcher: (args: { videoId: Id<"videos"> }) => Promise<{ url: string }>,
+) {
+  const key = String(videoId);
+  let request = originalUrlRequests.get(key);
+  if (!request) {
+    request = fetcher({ videoId });
+    originalUrlRequests.set(key, request);
+  }
+  return request.catch((error) => {
+    originalUrlRequests.delete(key);
+    throw error;
+  });
+}
+
+const SOFT_MENU_CONTENT =
+  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
+const SOFT_MENU_ITEM =
+  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
 
 /**
  * Google-Drive-style tile for non-video files in the project grid.
@@ -44,6 +80,17 @@ interface FileTileProps {
   status: string;
   canDelete?: boolean;
   draggable?: boolean;
+  selected?: boolean;
+  selectionMode?: boolean;
+  /** Getter, not a value: the selection Set changes identity on every
+   *  click, and reading it at dragstart keeps it out of the render path. */
+  getSelectedVideoIds?: () => readonly Id<"videos">[];
+  onDragSelectOnly?: () => void;
+  onSelectToggle?: (event: {
+    metaKey: boolean;
+    ctrlKey: boolean;
+    shiftKey: boolean;
+  }) => void;
   onDelete?: () => void;
   /** When set, clicking the tile body opens the focused view instead of
    *  downloading (used for image/gif/pdf, which have a real detail view).
@@ -64,6 +111,11 @@ export function FileTile({
   status,
   canDelete,
   draggable,
+  selected,
+  selectionMode,
+  getSelectedVideoIds,
+  onDragSelectOnly,
+  onSelectToggle,
   onDelete,
   onOpen,
   onCombine,
@@ -79,7 +131,7 @@ export function FileTile({
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
   const isReady = status === "ready";
-  const isImage = contentType?.startsWith("image/") ?? false;
+  const isImage = meta.kind === "image";
 
   // Fetch a signed URL for image files so the tile renders the actual
   // image as a thumbnail instead of a generic icon. Best-effort — we
@@ -87,7 +139,7 @@ export function FileTile({
   useEffect(() => {
     if (!isImage || !isReady) return;
     let cancelled = false;
-    getOriginalPlaybackUrl({ videoId })
+    getOriginalUrlCached(videoId, getOriginalPlaybackUrl)
       .then(({ url }) => {
         if (!cancelled) setThumbnailSrc(url);
       })
@@ -115,18 +167,39 @@ export function FileTile({
 
   return (
     <article
-      onClick={() => (onOpen ? onOpen() : void handleDownload())}
+      // Marks this as a measurable cell for the project grid's windowing
+      // (src/lib/useGridWindow.ts). Harmless anywhere else.
+      data-grid-cell=""
+      onClick={(e) => {
+        if (
+          onSelectToggle &&
+          (selectionMode || e.metaKey || e.ctrlKey || e.shiftKey)
+        ) {
+          e.preventDefault();
+          onSelectToggle({
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+          });
+          return;
+        }
+        if (onOpen) onOpen();
+        else void handleDownload();
+      }}
       onContextMenu={(e) => e.stopPropagation()}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("application/x-snip-video", videoId);
+        if (selectionMode && !selected) onDragSelectOnly?.();
+        const selection = getSelectedVideoIds?.() ?? [];
+        const draggedIds =
+          selected && selection.length > 1 ? selection : [videoId];
+        setDraggedVideoData(e.dataTransfer, videoId, draggedIds);
       }}
       onDragOver={
         onCombine
           ? (e) => {
-              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
                 return;
               e.preventDefault();
               e.stopPropagation();
@@ -139,13 +212,13 @@ export function FileTile({
       onDrop={
         onCombine
           ? (e) => {
-              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
                 return;
               e.preventDefault();
               e.stopPropagation();
               setCombineActive(false);
               const draggedId = e.dataTransfer.getData(
-                "application/x-snip-video",
+                SNIP_VIDEO_DRAG_TYPE,
               );
               if (draggedId && draggedId !== videoId) {
                 onCombine(draggedId as Id<"videos">);
@@ -154,20 +227,35 @@ export function FileTile({
           : undefined
       }
       className={cn(
-        "group flex flex-col cursor-pointer",
+        "group relative flex cursor-pointer flex-col overflow-hidden rounded-[12px] border border-[#E8E8EC] bg-white transition-[border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm",
         !isReady && "opacity-70",
+        selected &&
+          "after:pointer-events-none after:absolute after:inset-0 after:z-20 after:rounded-[12px] after:shadow-[inset_0_0_0_1.5px_#FF6600]",
       )}
     >
       <div
         className={cn(
-          "relative aspect-video overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all flex items-center justify-center",
-          combineActive && "ring-2 ring-[#FF6600] ring-offset-2 ring-offset-[#f0f0e8]",
+          "relative flex aspect-video items-center justify-center overflow-hidden bg-[#FAFAFA]",
+          combineActive && "ring-[1.5px] ring-inset ring-[#FF6600]",
         )}
         style={{ background: meta.tileBg }}
         onMouseEnter={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
         onMouseMove={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
         onMouseLeave={() => setHoverPos(null)}
       >
+        {selectionMode || selected ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute left-2 top-2 z-30 flex h-5 w-5 items-center justify-center rounded-full",
+              selected
+                ? "bg-[#FF6600] text-white"
+                : "border border-[#D8D8DE] bg-white text-transparent",
+            )}
+          >
+            {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+          </span>
+        ) : null}
         {thumbnailSrc ? (
           <img
             src={thumbnailSrc}
@@ -187,33 +275,41 @@ export function FileTile({
             Swaps to the orange "New folder" combine cue while a video is
             being dragged over this tile. */}
         {combineActive ? (
-          <div className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-[#FF6600] text-[#f0f0e8] border-2 border-[#1a1a1a]">
+          <div className="absolute left-9 top-2 inline-flex items-center gap-1 rounded-[6px] bg-[#FFF0E6] px-2 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[10px] font-medium uppercase tracking-widest text-[#D14E00]">
             <FolderPlus className="h-3 w-3" />
             New folder
           </div>
         ) : (
-          <div className="absolute top-2 left-2 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-[#1a1a1a] text-[#f0f0e8]">
+          <div
+            className={cn(
+              "absolute top-2 rounded-[6px] bg-[#131315] px-2 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[10px] font-medium uppercase tracking-widest text-white",
+              selectionMode || selected ? "left-9" : "left-2",
+            )}
+          >
             {meta.label}
           </div>
         )}
 
         {/* Status chip when not ready */}
         {!isReady ? (
-          <div className="absolute bottom-2 left-2 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider bg-[#b45309] text-[#f0f0e8]">
+          <div className="absolute bottom-2 left-2 rounded-[6px] bg-[#D39329] px-2 py-0.5 font-['Geist_Mono',system-ui,sans-serif] text-[10px] font-medium uppercase tracking-widest text-white">
             {status}
           </div>
         ) : null}
 
         {/* Download / more menu, top-right (visible on hover) */}
         <div
-          className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+          className={cn(
+            "absolute top-2 right-2 gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity",
+            selectionMode ? "hidden" : "flex",
+          )}
           onClick={(e) => e.stopPropagation()}
         >
           <button
             type="button"
             onClick={() => void handleDownload()}
             disabled={!isReady || downloading}
-            className="p-1 bg-[#f0f0e8] border-2 border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] disabled:opacity-40"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E8E8EC] bg-white text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315] disabled:opacity-40"
             title="Download"
           >
             <Download className="h-3.5 w-3.5" />
@@ -222,20 +318,21 @@ export function FileTile({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="p-1 bg-[#f0f0e8] border-2 border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E8E8EC] bg-white text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
                 onClick={(e) => e.stopPropagation()}
+                aria-label="File actions"
               >
                 <MoreVertical className="h-3.5 w-3.5" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => void handleDownload()}>
+            <DropdownMenuContent align="end" className={SOFT_MENU_CONTENT}>
+              <DropdownMenuItem className={SOFT_MENU_ITEM} onClick={() => void handleDownload()}>
                 <Download className="mr-2 h-4 w-4" />
                 Download
               </DropdownMenuItem>
-              <DropdownMenuItem disabled>
+              <DropdownMenuItem className={SOFT_MENU_ITEM} disabled>
                 <ExternalLink className="mr-2 h-4 w-4" />
-                Preview (coming soon)
+                Preview unavailable
               </DropdownMenuItem>
               {canDelete && onDelete ? (
                 <DropdownMenuItem
@@ -243,7 +340,10 @@ export function FileTile({
                     e.stopPropagation();
                     onDelete();
                   }}
-                  className="text-[#dc2626] focus:text-[#dc2626]"
+                  className={cn(
+                    SOFT_MENU_ITEM,
+                    "text-[#D8434F] hover:bg-[#FFF5F5] focus:bg-[#FFF5F5] focus:text-[#D8434F]",
+                  )}
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete
@@ -254,11 +354,11 @@ export function FileTile({
         </div>
       </div>
 
-      <div className="mt-3 px-0.5">
-        <h3 className="font-bold text-sm text-[#1a1a1a] truncate group-hover:underline">
+      <div className="px-3 pb-3 pt-2.5">
+        <h3 className="truncate text-sm font-semibold text-[#131315]">
           {title}
         </h3>
-        <div className="flex items-center gap-2 mt-1 text-[11px] text-[#888] font-mono">
+        <div className="mt-1 flex items-center gap-2 font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
           <span className="truncate">{uploaderName}</span>
           <span>·</span>
           <span className="flex-shrink-0">{formatRelativeTime(createdAt)}</span>
@@ -270,7 +370,7 @@ export function FileTile({
           ) : null}
         </div>
         {error ? (
-          <div className="text-[11px] text-[#dc2626] mt-1">{error}</div>
+          <div className="mt-1 text-[11px] text-[#D8434F]">{error}</div>
         ) : null}
       </div>
     </article>
@@ -292,6 +392,11 @@ export function FileListRow({
   status,
   canDelete,
   draggable,
+  selected,
+  selectionMode,
+  getSelectedVideoIds,
+  onDragSelectOnly,
+  onSelectToggle,
   onDelete,
   onOpen,
   onCombine,
@@ -306,12 +411,12 @@ export function FileListRow({
   const meta = fileTypeFromContent(contentType, title);
   const { Icon } = meta;
   const isReady = status === "ready";
-  const isImage = contentType?.startsWith("image/") ?? false;
+  const isImage = meta.kind === "image";
 
   useEffect(() => {
     if (!isImage || !isReady) return;
     let cancelled = false;
-    getOriginalPlaybackUrl({ videoId })
+    getOriginalUrlCached(videoId, getOriginalPlaybackUrl)
       .then(({ url }) => {
         if (!cancelled) setThumbnailSrc(url);
       })
@@ -336,18 +441,36 @@ export function FileListRow({
 
   return (
     <div
-      onClick={() => (onOpen ? onOpen() : void handleDownload())}
+      onClick={(e) => {
+        if (
+          onSelectToggle &&
+          (selectionMode || e.metaKey || e.ctrlKey || e.shiftKey)
+        ) {
+          e.preventDefault();
+          onSelectToggle({
+            metaKey: e.metaKey,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+          });
+          return;
+        }
+        if (onOpen) onOpen();
+        else void handleDownload();
+      }}
       onContextMenu={(e) => e.stopPropagation()}
       draggable={draggable}
       onDragStart={(e) => {
         if (!draggable) return;
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("application/x-snip-video", videoId);
+        if (selectionMode && !selected) onDragSelectOnly?.();
+        const selection = getSelectedVideoIds?.() ?? [];
+        const draggedIds =
+          selected && selection.length > 1 ? selection : [videoId];
+        setDraggedVideoData(e.dataTransfer, videoId, draggedIds);
       }}
       onDragOver={
         onCombine
           ? (e) => {
-              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
                 return;
               e.preventDefault();
               e.stopPropagation();
@@ -360,13 +483,13 @@ export function FileListRow({
       onDrop={
         onCombine
           ? (e) => {
-              if (!e.dataTransfer.types.includes("application/x-snip-video"))
+              if (!e.dataTransfer.types.includes(SNIP_VIDEO_DRAG_TYPE))
                 return;
               e.preventDefault();
               e.stopPropagation();
               setCombineActive(false);
               const draggedId = e.dataTransfer.getData(
-                "application/x-snip-video",
+                SNIP_VIDEO_DRAG_TYPE,
               );
               if (draggedId && draggedId !== videoId) {
                 onCombine(draggedId as Id<"videos">);
@@ -375,13 +498,27 @@ export function FileListRow({
           : undefined
       }
       className={cn(
-        "group flex items-center gap-3 px-3 py-2 border-b border-[#ccc] hover:bg-[#e8e8e0] cursor-pointer",
+        "group relative flex min-h-12 cursor-pointer items-center gap-3 border-b border-[#F1F1F3] bg-white px-3 py-2 transition-[background-color,box-shadow] hover:bg-[#FAFAFA]",
+        selected && "bg-[#FFF0E6] shadow-[inset_0_0_0_1.5px_#FF6600]",
         combineActive &&
-          "bg-[#FFEDD5] ring-2 ring-inset ring-[#FF6600]",
+          "bg-[#FFF0E6] ring-[1.5px] ring-inset ring-[#FF6600]",
       )}
     >
+      {selectionMode || selected ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+            selected
+              ? "bg-[#FF6600] text-white"
+              : "border border-[#D8D8DE] bg-white text-transparent",
+          )}
+        >
+          {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+        </span>
+      ) : null}
       <div
-        className="flex-shrink-0 w-9 h-9 flex items-center justify-center border-2 border-[#1a1a1a] overflow-hidden"
+        className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-[8px] border border-[#E8E8EC] bg-[#FAFAFA]"
         style={{ background: meta.tileBg, cursor: thumbnailSrc ? "zoom-in" : undefined }}
         onMouseEnter={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
         onMouseMove={(e) => isImage && thumbnailSrc && setHoverPos({ x: e.clientX, y: e.clientY })}
@@ -395,20 +532,20 @@ export function FileListRow({
       </div>
       <FloatingImagePreview src={thumbnailSrc} alt={title} pos={hoverPos} />
       <div className="flex-1 min-w-0">
-        <div className="font-bold text-sm text-[#1a1a1a] truncate">{title}</div>
+        <div className="truncate text-sm font-semibold text-[#131315]">{title}</div>
         {combineActive ? (
-          <div className="inline-flex items-center gap-1 text-[11px] font-mono font-bold uppercase tracking-wider text-[#FF6600]">
+          <div className="inline-flex items-center gap-1 font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#D14E00]">
             <FolderPlus className="h-3 w-3" />
             New folder
           </div>
         ) : (
-          <div className="text-[11px] text-[#888] font-mono">
+          <div className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
             {meta.label} · {uploaderName} · {formatRelativeTime(createdAt)}
             {fileSize != null ? ` · ${formatBytes(fileSize)}` : ""}
           </div>
         )}
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
+      <div className={cn("items-center gap-1 flex-shrink-0", selectionMode ? "hidden" : "flex")}>
         <button
           type="button"
           onClick={(e) => {
@@ -416,7 +553,7 @@ export function FileListRow({
             void handleDownload();
           }}
           disabled={!isReady || downloading}
-          className="p-1.5 border-2 border-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] disabled:opacity-40 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E8E8EC] bg-white text-[#6E6E73] opacity-0 transition-opacity hover:bg-[#F1F1F3] hover:text-[#131315] group-hover:opacity-100 disabled:opacity-40"
           title="Download"
         >
           <Download className="h-3.5 w-3.5" />
@@ -428,7 +565,7 @@ export function FileListRow({
               e.stopPropagation();
               onDelete();
             }}
-            className="p-1.5 border-2 border-[#1a1a1a] text-[#dc2626] hover:bg-[#dc2626] hover:text-[#f0f0e8] opacity-0 group-hover:opacity-100 transition-opacity"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#E8E8EC] bg-white text-[#D8434F] opacity-0 transition-opacity hover:bg-[#FFF5F5] group-hover:opacity-100"
             title="Delete"
           >
             <Trash2 className="h-3.5 w-3.5" />

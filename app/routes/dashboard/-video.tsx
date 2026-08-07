@@ -505,7 +505,7 @@ export default function VideoPage() {
   if (context === undefined || video === undefined || shouldCanonicalize) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Loading...</div>
+        <div className="text-[#6E6E73]">Loading...</div>
       </div>
     );
   }
@@ -513,7 +513,7 @@ export default function VideoPage() {
   if (context === null || video === null || !resolvedProjectId || !resolvedVideoId) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Video not found</div>
+        <div className="text-[#6E6E73]">Video not found</div>
       </div>
     );
   }
@@ -531,7 +531,7 @@ export default function VideoPage() {
             to={projectPath(resolvedTeamSlug, resolvedProjectId)}
             preload="intent"
             {...prewarmProjectIntentHandlers}
-            className="inline-flex items-center gap-1 px-3 h-9 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider bg-[#f0f0e8] text-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] active:translate-y-[2px] active:translate-x-[2px] transition-all flex-shrink-0"
+            className="inline-flex h-9 flex-shrink-0 items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-3 text-xs font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
             title="Back to project"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
@@ -542,7 +542,7 @@ export default function VideoPage() {
               <Input
                 value={editedTitle}
                 onChange={(e) => setEditedTitle(e.target.value)}
-                className="w-40 sm:w-64 h-9 text-base font-black tracking-tighter uppercase font-mono"
+                className="title-field h-9 w-40 text-base font-semibold tracking-tight sm:w-64"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSaveTitle();
@@ -563,7 +563,7 @@ export default function VideoPage() {
             </div>
           ) : (
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-base font-black tracking-tighter text-[#1a1a1a] truncate max-w-[200px] sm:max-w-[360px]">
+              <span className="max-w-[200px] truncate text-base font-semibold tracking-tight text-[#131315] sm:max-w-[360px]">
                 {video.title}
               </span>
               {canEdit && (
@@ -670,7 +670,7 @@ export default function VideoPage() {
       {/* Main content - horizontal split */}
       <div className="flex-1 flex overflow-hidden">
         {/* Video player area — full black, Frame.io style */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-black">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#0A0A0B]">
           {isSequenceItem && !activePlaybackUrl ? (
             <ImageSequenceFrameGrid frames={sequenceFrames} />
           ) : isImageItem ? (
@@ -685,7 +685,7 @@ export default function VideoPage() {
             ) : (
               <div className="flex-1 flex items-center justify-center text-center">
                 {video.status === "failed" ? (
-                  <p className="text-[#dc2626]">This file failed to process</p>
+                  <p className="text-[#D8434F]">This file failed to process</p>
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-white">
                     <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
@@ -706,7 +706,7 @@ export default function VideoPage() {
             ) : (
               <div className="flex-1 flex items-center justify-center text-center">
                 {video.status === "failed" ? (
-                  <p className="text-[#dc2626]">This file failed to process</p>
+                  <p className="text-[#D8434F]">This file failed to process</p>
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-white">
                     <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
@@ -722,20 +722,20 @@ export default function VideoPage() {
             // as the contract editor but stripped of wizard / signing
             // chrome. View-only for now; the round-trip back to .docx
             // / plain-text is in the share menu instead of inline.
-            <div className="flex-1 overflow-y-auto bg-[#1a1a1a] py-10">
-              <div className="mx-auto max-w-3xl bg-white border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_#000] p-10 sm:p-14">
+            <div className="flex-1 overflow-y-auto bg-[#0A0A0B] py-10">
+              <div className="mx-auto max-w-3xl rounded-[14px] border border-[#E8E8EC] bg-white p-10 sm:p-14">
                 {docError ? (
-                  <p className="text-[#dc2626] text-sm font-mono">
+                  <p className="text-sm text-[#D8434F]">
                     {docError}
                   </p>
                 ) : docHtml === null ? (
-                  <div className="flex flex-col items-center gap-3 text-[#888]">
-                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#1a1a1a]/15 border-t-[#1a1a1a]/60" />
+                  <div className="flex flex-col items-center gap-3 text-[#6E6E73]">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#131315]/15 border-t-[#131315]/60" />
                     <p className="text-sm font-medium">Loading document…</p>
                   </div>
                 ) : (
                   <article
-                    className="prose prose-sm max-w-none text-[#1a1a1a]"
+                    className="prose prose-sm max-w-none text-[#131315]"
                     dangerouslySetInnerHTML={{ __html: sanitizeHtml(docHtml) }}
                   />
                 )}
@@ -744,7 +744,7 @@ export default function VideoPage() {
           ) : (
             <>
               {video.status === "processing" && isUsingOriginalFallback && activePlaybackUrl ? (
-                <div className="flex-shrink-0 flex items-center gap-2 bg-[#1a1a1a] px-4 py-2 text-sm text-white">
+                <div className="flex-shrink-0 flex items-center gap-2 border-b border-[#26262A] bg-[#161618] px-4 py-2 text-sm text-white">
                   <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#FF6600]" />
                   <span className="font-semibold">Original playback active.</span>
                   <span className="text-white/60">720p stream is still encoding.</span>
@@ -816,7 +816,7 @@ export default function VideoPage() {
                         </p>
                       )}
                       {video.status === "failed" && (
-                        <p className="text-[#dc2626]">Processing failed</p>
+                        <p className="text-[#D8434F]">Processing failed</p>
                       )}
                     </div>
                   )}
@@ -826,24 +826,23 @@ export default function VideoPage() {
           )}
         </div>
 
-        {/* Comments sidebar — desktop */}
-        <aside className="hidden lg:flex w-80 xl:w-96 border-l-2 border-[#1a1a1a] flex-col bg-[#f0f0e8]">
-          {/* Tabs: Comments | Transcript. Brutalist: 2px border on the
-              active tab, cream bg, no rounded corners. */}
-          <div className="flex-shrink-0 border-b-2 border-[#1a1a1a] grid grid-cols-2">
+        {/* Comments sidebar */}
+        <aside className="hidden w-80 flex-col border-l border-[#E8E8EC] bg-[#FAFAFA] lg:flex xl:w-96">
+          {/* Comments and transcript tabs. */}
+          <div className="grid flex-shrink-0 grid-cols-2 border-b border-[#E8E8EC] bg-white p-1.5">
             <button
               type="button"
               onClick={() => setSidebarTab("comments")}
               className={cn(
-                "h-10 text-xs font-bold uppercase tracking-wider border-r-2 border-[#1a1a1a] transition-colors",
+                "h-9 rounded-full text-xs font-medium transition-colors",
                 sidebarTab === "comments"
-                  ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5]",
+                  ? "bg-[#FFF0E6] text-[#D14E00]"
+                  : "bg-white text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
               )}
             >
               Comments
               {comments && comments.length > 0 && (
-                <span className="ml-2 text-[#C2410C]">{comments.length}</span>
+                <span className="ml-2 text-current">{comments.length}</span>
               )}
             </button>
             <button
@@ -851,16 +850,16 @@ export default function VideoPage() {
               onClick={() => setSidebarTab("transcript")}
               disabled={!transcriptCues || transcriptCues.length === 0}
               className={cn(
-                "h-10 text-xs font-bold uppercase tracking-wider transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                "h-9 rounded-full text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                 sidebarTab === "transcript"
-                  ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5]",
+                  ? "bg-[#FFF0E6] text-[#D14E00]"
+                  : "bg-white text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
               )}
               title={!transcriptCues || transcriptCues.length === 0 ? "No transcript yet" : "Transcript"}
             >
               Transcript
               {transcriptCues && transcriptCues.length > 0 && (
-                <span className="ml-2 text-[#C2410C]">{transcriptCues.length}</span>
+                <span className="ml-2 text-current">{transcriptCues.length}</span>
               )}
             </button>
           </div>
@@ -877,7 +876,7 @@ export default function VideoPage() {
                 />
               </div>
               {canComment && (
-                <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8]">
+                <div className="flex-shrink-0 border-t border-[#E8E8EC] bg-white">
                   <CommentInput
                     videoId={resolvedVideoId}
                     timestampSeconds={isTimeBasedItem ? currentTime : 0}
@@ -890,21 +889,21 @@ export default function VideoPage() {
           ) : (
             <div className="flex-1 overflow-y-auto">
               {transcriptCues && transcriptCues.length > 0 ? (
-                <ul className="divide-y divide-[#1a1a1a]/10">
+                <ul className="divide-y divide-[#F1F1F3]">
                   {transcriptCues.map((cue) => (
                     <li key={`${cue.start}`}>
                       <button
                         type="button"
                         onClick={() => handleTimestampClick(cue.start)}
                         className={cn(
-                          "w-full text-left px-4 py-3 hover:bg-[#FFEDD5] transition-colors",
-                          Math.abs(currentTime - cue.start) < 45 && "bg-[#FFEDD5]",
+                          "w-full px-4 py-3 text-left transition-colors hover:bg-[#FAFAFA]",
+                          Math.abs(currentTime - cue.start) < 45 && "bg-[#FFF0E6]",
                         )}
                       >
-                        <div className="text-[11px] font-mono font-bold text-[#C2410C]">
+                        <div className="font-mono text-[11px] font-medium text-[#D14E00]">
                           {formatDuration(cue.start)}
                         </div>
-                        <div className="text-sm text-[#1a1a1a] mt-1 leading-snug">
+                        <div className="mt-1 text-sm leading-snug text-[#131315]">
                           {cue.text}
                         </div>
                       </button>
@@ -912,9 +911,8 @@ export default function VideoPage() {
                   ))}
                 </ul>
               ) : (
-                <div className="p-6 text-center text-sm text-[#888]">
-                  No transcript yet. Mux auto-transcribes audio when it ingests
-                  a video — it should appear shortly after upload.
+                <div className="p-6 text-center text-sm text-[#6E6E73]">
+                  No transcript yet.
                 </div>
               )}
             </div>
@@ -924,12 +922,12 @@ export default function VideoPage() {
 
       {/* Comments overlay — mobile */}
       {mobileCommentsOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex flex-col bg-[#f0f0e8]">
-          <div className="flex-shrink-0 px-5 py-4 border-b-2 border-[#1a1a1a] flex items-center justify-between">
-            <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2 text-[#1a1a1a]">
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#FAFAFA] lg:hidden">
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-[#E8E8EC] bg-white px-5 py-4">
+            <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-[#131315]">
               Discussion
               {comments && comments.length > 0 && (
-                <span className="text-[11px] font-medium text-[#888] bg-[#1a1a1a]/5 px-2 py-0.5 rounded-full">
+                <span className="rounded-full bg-[#F1F1F3] px-2 py-0.5 text-[11px] font-medium text-[#6E6E73]">
                   {comments.length}
                 </span>
               )}
@@ -957,7 +955,7 @@ export default function VideoPage() {
             />
           </div>
           {canComment && (
-            <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#f0f0e8]">
+            <div className="flex-shrink-0 border-t border-[#E8E8EC] bg-white">
               <CommentInput
                 videoId={resolvedVideoId}
                 timestampSeconds={isTimeBasedItem ? currentTime : 0}

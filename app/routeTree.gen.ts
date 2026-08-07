@@ -22,6 +22,7 @@ import { Route as SignTokenRouteImport } from './routes/sign.$token'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
+import { Route as PayTokenRouteImport } from './routes/pay.$token'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 import { Route as ForVideoEditorsRouteImport } from './routes/for.video-editors'
 import { Route as ForAgenciesRouteImport } from './routes/for.agencies'
@@ -35,11 +36,13 @@ import { Route as CompareFrameioRouteImport } from './routes/compare.frameio'
 import { Route as CTokenRouteImport } from './routes/c.$token'
 import { Route as DashboardTeamSlugIndexRouteImport } from './routes/dashboard/$teamSlug.index'
 import { Route as DashboardTeamSlugSettingsRouteImport } from './routes/dashboard/$teamSlug.settings'
+import { Route as DashboardTeamSlugInvoicesRouteImport } from './routes/dashboard/$teamSlug.invoices'
 import { Route as DashboardTeamSlugProjectIdRouteImport } from './routes/dashboard/$teamSlug.$projectId'
 import { Route as DashboardTeamSlugSettingsIndexRouteImport } from './routes/dashboard/$teamSlug.settings.index'
 import { Route as DashboardTeamSlugProjectIdIndexRouteImport } from './routes/dashboard/$teamSlug.$projectId.index'
 import { Route as DashboardTeamSlugSettingsPayoutsRouteImport } from './routes/dashboard/$teamSlug.settings.payouts'
 import { Route as DashboardTeamSlugSettingsFoldersRouteImport } from './routes/dashboard/$teamSlug.settings.folders'
+import { Route as DashboardTeamSlugInvoicesInvoiceIdRouteImport } from './routes/dashboard/$teamSlug.invoices_.$invoiceId'
 import { Route as DashboardTeamSlugProjectIdPlaybackLabRouteImport } from './routes/dashboard/$teamSlug.$projectId.playback-lab'
 import { Route as DashboardTeamSlugProjectIdEditorRouteImport } from './routes/dashboard/$teamSlug.$projectId.editor'
 import { Route as DashboardTeamSlugProjectIdContractRouteImport } from './routes/dashboard/$teamSlug.$projectId.contract'
@@ -112,6 +115,11 @@ const ShareTokenRoute = ShareTokenRouteImport.update({
   path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayTokenRoute = PayTokenRouteImport.update({
+  id: '/pay/$token',
+  path: '/pay/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InviteTokenRoute = InviteTokenRouteImport.update({
   id: '/invite/$token',
   path: '/invite/$token',
@@ -178,6 +186,12 @@ const DashboardTeamSlugSettingsRoute =
     path: '/settings',
     getParentRoute: () => DashboardTeamSlugRoute,
   } as any)
+const DashboardTeamSlugInvoicesRoute =
+  DashboardTeamSlugInvoicesRouteImport.update({
+    id: '/invoices',
+    path: '/invoices',
+    getParentRoute: () => DashboardTeamSlugRoute,
+  } as any)
 const DashboardTeamSlugProjectIdRoute =
   DashboardTeamSlugProjectIdRouteImport.update({
     id: '/$projectId',
@@ -207,6 +221,12 @@ const DashboardTeamSlugSettingsFoldersRoute =
     id: '/folders',
     path: '/folders',
     getParentRoute: () => DashboardTeamSlugSettingsRoute,
+  } as any)
+const DashboardTeamSlugInvoicesInvoiceIdRoute =
+  DashboardTeamSlugInvoicesInvoiceIdRouteImport.update({
+    id: '/invoices_/$invoiceId',
+    path: '/invoices/$invoiceId',
+    getParentRoute: () => DashboardTeamSlugRoute,
   } as any)
 const DashboardTeamSlugProjectIdPlaybackLabRoute =
   DashboardTeamSlugProjectIdPlaybackLabRouteImport.update({
@@ -264,6 +284,7 @@ export interface FileRoutesByFullPath {
   '/for/agencies': typeof ForAgenciesRoute
   '/for/video-editors': typeof ForVideoEditorsRoute
   '/invite/$token': typeof InviteTokenRoute
+  '/pay/$token': typeof PayTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -271,12 +292,14 @@ export interface FileRoutesByFullPath {
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdRouteWithChildren
+  '/dashboard/$teamSlug/invoices': typeof DashboardTeamSlugInvoicesRoute
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
   '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
   '/dashboard/$teamSlug/$projectId/editor': typeof DashboardTeamSlugProjectIdEditorRoute
   '/dashboard/$teamSlug/$projectId/playback-lab': typeof DashboardTeamSlugProjectIdPlaybackLabRoute
+  '/dashboard/$teamSlug/invoices/$invoiceId': typeof DashboardTeamSlugInvoicesInvoiceIdRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
@@ -301,17 +324,20 @@ export interface FileRoutesByTo {
   '/for/agencies': typeof ForAgenciesRoute
   '/for/video-editors': typeof ForVideoEditorsRoute
   '/invite/$token': typeof InviteTokenRoute
+  '/pay/$token': typeof PayTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/sign/$token': typeof SignTokenRoute
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard': typeof DashboardIndexRoute
+  '/dashboard/$teamSlug/invoices': typeof DashboardTeamSlugInvoicesRoute
   '/dashboard/$teamSlug': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
   '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
   '/dashboard/$teamSlug/$projectId/editor': typeof DashboardTeamSlugProjectIdEditorRoute
   '/dashboard/$teamSlug/$projectId/playback-lab': typeof DashboardTeamSlugProjectIdPlaybackLabRoute
+  '/dashboard/$teamSlug/invoices/$invoiceId': typeof DashboardTeamSlugInvoicesInvoiceIdRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdIndexRoute
@@ -339,6 +365,7 @@ export interface FileRoutesById {
   '/for/agencies': typeof ForAgenciesRoute
   '/for/video-editors': typeof ForVideoEditorsRoute
   '/invite/$token': typeof InviteTokenRoute
+  '/pay/$token': typeof PayTokenRoute
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
@@ -346,12 +373,14 @@ export interface FileRoutesById {
   '/watch/$publicId': typeof WatchPublicIdRoute
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/$teamSlug/$projectId': typeof DashboardTeamSlugProjectIdRouteWithChildren
+  '/dashboard/$teamSlug/invoices': typeof DashboardTeamSlugInvoicesRoute
   '/dashboard/$teamSlug/settings': typeof DashboardTeamSlugSettingsRouteWithChildren
   '/dashboard/$teamSlug/': typeof DashboardTeamSlugIndexRoute
   '/dashboard/$teamSlug/$projectId/$videoId': typeof DashboardTeamSlugProjectIdVideoIdRoute
   '/dashboard/$teamSlug/$projectId/contract': typeof DashboardTeamSlugProjectIdContractRoute
   '/dashboard/$teamSlug/$projectId/editor': typeof DashboardTeamSlugProjectIdEditorRoute
   '/dashboard/$teamSlug/$projectId/playback-lab': typeof DashboardTeamSlugProjectIdPlaybackLabRoute
+  '/dashboard/$teamSlug/invoices_/$invoiceId': typeof DashboardTeamSlugInvoicesInvoiceIdRoute
   '/dashboard/$teamSlug/settings/folders': typeof DashboardTeamSlugSettingsFoldersRoute
   '/dashboard/$teamSlug/settings/payouts': typeof DashboardTeamSlugSettingsPayoutsRoute
   '/dashboard/$teamSlug/$projectId/': typeof DashboardTeamSlugProjectIdIndexRoute
@@ -380,6 +409,7 @@ export interface FileRouteTypes {
     | '/for/agencies'
     | '/for/video-editors'
     | '/invite/$token'
+    | '/pay/$token'
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -387,12 +417,14 @@ export interface FileRouteTypes {
     | '/watch/$publicId'
     | '/dashboard/'
     | '/dashboard/$teamSlug/$projectId'
+    | '/dashboard/$teamSlug/invoices'
     | '/dashboard/$teamSlug/settings'
     | '/dashboard/$teamSlug/'
     | '/dashboard/$teamSlug/$projectId/$videoId'
     | '/dashboard/$teamSlug/$projectId/contract'
     | '/dashboard/$teamSlug/$projectId/editor'
     | '/dashboard/$teamSlug/$projectId/playback-lab'
+    | '/dashboard/$teamSlug/invoices/$invoiceId'
     | '/dashboard/$teamSlug/settings/folders'
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
@@ -417,17 +449,20 @@ export interface FileRouteTypes {
     | '/for/agencies'
     | '/for/video-editors'
     | '/invite/$token'
+    | '/pay/$token'
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/sign/$token'
     | '/watch/$publicId'
     | '/dashboard'
+    | '/dashboard/$teamSlug/invoices'
     | '/dashboard/$teamSlug'
     | '/dashboard/$teamSlug/$projectId/$videoId'
     | '/dashboard/$teamSlug/$projectId/contract'
     | '/dashboard/$teamSlug/$projectId/editor'
     | '/dashboard/$teamSlug/$projectId/playback-lab'
+    | '/dashboard/$teamSlug/invoices/$invoiceId'
     | '/dashboard/$teamSlug/settings/folders'
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId'
@@ -454,6 +489,7 @@ export interface FileRouteTypes {
     | '/for/agencies'
     | '/for/video-editors'
     | '/invite/$token'
+    | '/pay/$token'
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
@@ -461,12 +497,14 @@ export interface FileRouteTypes {
     | '/watch/$publicId'
     | '/dashboard/'
     | '/dashboard/$teamSlug/$projectId'
+    | '/dashboard/$teamSlug/invoices'
     | '/dashboard/$teamSlug/settings'
     | '/dashboard/$teamSlug/'
     | '/dashboard/$teamSlug/$projectId/$videoId'
     | '/dashboard/$teamSlug/$projectId/contract'
     | '/dashboard/$teamSlug/$projectId/editor'
     | '/dashboard/$teamSlug/$projectId/playback-lab'
+    | '/dashboard/$teamSlug/invoices_/$invoiceId'
     | '/dashboard/$teamSlug/settings/folders'
     | '/dashboard/$teamSlug/settings/payouts'
     | '/dashboard/$teamSlug/$projectId/'
@@ -490,6 +528,7 @@ export interface RootRouteChildren {
   ForAgenciesRoute: typeof ForAgenciesRoute
   ForVideoEditorsRoute: typeof ForVideoEditorsRoute
   InviteTokenRoute: typeof InviteTokenRoute
+  PayTokenRoute: typeof PayTokenRoute
   ShareTokenRoute: typeof ShareTokenRoute
   SignTokenRoute: typeof SignTokenRoute
   WatchPublicIdRoute: typeof WatchPublicIdRoute
@@ -588,6 +627,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pay/$token': {
+      id: '/pay/$token'
+      path: '/pay/$token'
+      fullPath: '/pay/$token'
+      preLoaderRoute: typeof PayTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/invite/$token': {
       id: '/invite/$token'
       path: '/invite/$token'
@@ -679,6 +725,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardTeamSlugSettingsRouteImport
       parentRoute: typeof DashboardTeamSlugRoute
     }
+    '/dashboard/$teamSlug/invoices': {
+      id: '/dashboard/$teamSlug/invoices'
+      path: '/invoices'
+      fullPath: '/dashboard/$teamSlug/invoices'
+      preLoaderRoute: typeof DashboardTeamSlugInvoicesRouteImport
+      parentRoute: typeof DashboardTeamSlugRoute
+    }
     '/dashboard/$teamSlug/$projectId': {
       id: '/dashboard/$teamSlug/$projectId'
       path: '/$projectId'
@@ -713,6 +766,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/dashboard/$teamSlug/settings/folders'
       preLoaderRoute: typeof DashboardTeamSlugSettingsFoldersRouteImport
       parentRoute: typeof DashboardTeamSlugSettingsRoute
+    }
+    '/dashboard/$teamSlug/invoices_/$invoiceId': {
+      id: '/dashboard/$teamSlug/invoices_/$invoiceId'
+      path: '/invoices/$invoiceId'
+      fullPath: '/dashboard/$teamSlug/invoices/$invoiceId'
+      preLoaderRoute: typeof DashboardTeamSlugInvoicesInvoiceIdRouteImport
+      parentRoute: typeof DashboardTeamSlugRoute
     }
     '/dashboard/$teamSlug/$projectId/playback-lab': {
       id: '/dashboard/$teamSlug/$projectId/playback-lab'
@@ -813,14 +873,19 @@ const DashboardTeamSlugSettingsRouteWithChildren =
 
 interface DashboardTeamSlugRouteChildren {
   DashboardTeamSlugProjectIdRoute: typeof DashboardTeamSlugProjectIdRouteWithChildren
+  DashboardTeamSlugInvoicesRoute: typeof DashboardTeamSlugInvoicesRoute
   DashboardTeamSlugSettingsRoute: typeof DashboardTeamSlugSettingsRouteWithChildren
   DashboardTeamSlugIndexRoute: typeof DashboardTeamSlugIndexRoute
+  DashboardTeamSlugInvoicesInvoiceIdRoute: typeof DashboardTeamSlugInvoicesInvoiceIdRoute
 }
 
 const DashboardTeamSlugRouteChildren: DashboardTeamSlugRouteChildren = {
   DashboardTeamSlugProjectIdRoute: DashboardTeamSlugProjectIdRouteWithChildren,
+  DashboardTeamSlugInvoicesRoute: DashboardTeamSlugInvoicesRoute,
   DashboardTeamSlugSettingsRoute: DashboardTeamSlugSettingsRouteWithChildren,
   DashboardTeamSlugIndexRoute: DashboardTeamSlugIndexRoute,
+  DashboardTeamSlugInvoicesInvoiceIdRoute:
+    DashboardTeamSlugInvoicesInvoiceIdRoute,
 }
 
 const DashboardTeamSlugRouteWithChildren =
@@ -883,6 +948,7 @@ const rootRouteChildren: RootRouteChildren = {
   ForAgenciesRoute: ForAgenciesRoute,
   ForVideoEditorsRoute: ForVideoEditorsRoute,
   InviteTokenRoute: InviteTokenRoute,
+  PayTokenRoute: PayTokenRoute,
   ShareTokenRoute: ShareTokenRoute,
   SignTokenRoute: SignTokenRoute,
   WatchPublicIdRoute: WatchPublicIdRoute,

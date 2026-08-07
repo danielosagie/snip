@@ -10,6 +10,14 @@ export function teamSettingsPath(teamSlug: string) {
   return `/dashboard/${teamSlug}/settings`;
 }
 
+export function teamInvoicesPath(teamSlug: string) {
+  return `/dashboard/${teamSlug}/invoices`;
+}
+
+export function invoicePath(teamSlug: string, invoiceId: string) {
+  return `${teamInvoicesPath(teamSlug)}/${invoiceId}`;
+}
+
 export function projectPath(teamSlug: string, projectId: string) {
   return `/dashboard/${teamSlug}/${projectId}`;
 }

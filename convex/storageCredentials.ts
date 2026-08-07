@@ -248,7 +248,7 @@ export const getScopedStorageCredentials = action({
       });
     }
 
-    // The drive is available on EVERY tier, including free (50 GB). It used to
+    // The drive is available on EVERY tier, including free (25 GB). It used to
     // be a paid-only upgrade trigger, but free workspaces now get it too — the
     // per-plan storage quota (enforced at upload in videos.create →
     // assertTeamCanStoreBytes) is the cost lever, not drive access itself.

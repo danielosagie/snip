@@ -21,7 +21,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "member");
     // Creation isn't gated on a subscription — every team gets the
-    // free tier (50 GB). Uploads enforce the quota at the video
+    // free tier (25 GB). Uploads enforce the quota at the video
     // mutation boundary via assertTeamCanStoreBytes.
 
     return await ctx.db.insert("projects", {
@@ -452,6 +452,9 @@ export const restoreContract = mutation({
   handler: async (ctx, args) => {
     const trashed = await ctx.db.get(args.trashedContractId);
     if (!trashed) throw new Error("Trashed contract not found.");
+    if (trashed.trashPurgeStartedAt) {
+      throw new Error("This item has passed its 30-day recovery window and is being permanently deleted.");
+    }
     const { project } = await requireProjectAccess(
       ctx,
       trashed.projectId,
@@ -479,6 +482,25 @@ export const purgeContract = mutation({
     const trashed = await ctx.db.get(args.trashedContractId);
     if (!trashed) return;
     await requireProjectAccess(ctx, trashed.projectId, "admin");
+    const contract = trashed.contract as {
+      docxS3Key?: string;
+      signablePdfS3Key?: string;
+      signedPdfS3Key?: string;
+      signedPackageS3Key?: string;
+    };
+    await ctx.scheduler.runAfter(
+      0,
+      internal.retentionActions.purgeReplacedAssets,
+      {
+        s3Keys: [
+          contract.docxS3Key,
+          contract.signablePdfS3Key,
+          contract.signedPdfS3Key,
+          contract.signedPackageS3Key,
+        ].filter((key): key is string => Boolean(key)),
+        muxAssetIds: [],
+      },
+    );
     await ctx.db.delete(args.trashedContractId);
   },
 });
@@ -567,6 +589,10 @@ export const restore = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
     await requireProjectAccess(ctx, args.projectId, "admin");
+    const project = await ctx.db.get(args.projectId);
+    if (project?.trashPurgeStartedAt) {
+      throw new Error("This project has passed its 30-day recovery window and is being permanently deleted.");
+    }
     await ctx.db.patch(args.projectId, {
       deletedAt: undefined,
       deletedByName: undefined,
@@ -593,6 +619,33 @@ export const purge = mutation({
       .collect();
 
     for (const video of videos) {
+      const sourceRefs = video.s3Key
+        ? await ctx.db
+            .query("videos")
+            .withIndex("by_s3_key", (q) => q.eq("s3Key", video.s3Key))
+            .collect()
+        : [];
+      const sourceIsProjectLocal = sourceRefs.every(
+        (ref) => ref.projectId === args.projectId,
+      );
+      await ctx.scheduler.runAfter(
+        0,
+        internal.retentionActions.purgeReplacedAssets,
+        {
+          s3Keys: [
+            ...(video.s3Key && sourceIsProjectLocal ? [video.s3Key] : []),
+            ...(video.imagePreviewS3Key ? [video.imagePreviewS3Key] : []),
+            ...(video.sequenceFrameKeys ?? []),
+            ...(video.staticRenditions ?? [])
+              .map((rendition) => rendition.r2Key)
+              .filter((key): key is string => Boolean(key)),
+          ],
+          muxAssetIds: [video.muxAssetId, video.muxPreviewAssetId].filter(
+            (id): id is string => Boolean(id),
+          ),
+          streamUid: video.streamUid,
+        },
+      );
       const comments = await ctx.db
         .query("comments")
         .withIndex("by_video", (q) => q.eq("videoId", video._id))

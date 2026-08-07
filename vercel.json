@@ -1,30 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "bun run build",
-  "outputDirectory": "dist/client",
-  "routes": [
-    { "handle": "filesystem" },
+  "redirects": [
     {
-      "src": "/downloads/snip-desktop\\.pkg",
-      "status": 302,
-      "headers": {
-        "Location": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop.pkg"
-      }
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "snipfilm.vercel.app" }],
+      "destination": "https://www.snip.film/:path*",
+      "permanent": false
     },
     {
-      "src": "/downloads/snip-desktop\\.dmg",
-      "status": 302,
-      "headers": {
-        "Location": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop.dmg"
-      }
+      "source": "/downloads/snip-desktop.pkg",
+      "destination": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop.pkg",
+      "permanent": false
     },
     {
-      "src": "/downloads/snip-desktop-x64\\.dmg",
-      "status": 302,
-      "headers": {
-        "Location": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop-x64.dmg"
-      }
+      "source": "/downloads/snip-desktop.dmg",
+      "destination": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop.dmg",
+      "permanent": false
     },
-    { "src": "/(.*)", "dest": "/_shell.html" }
-  ]
+    {
+      "source": "/downloads/snip-desktop-x64.dmg",
+      "destination": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop-x64.dmg",
+      "permanent": false
+    }
+  ],
+  "rewrites": [{ "source": "/:path*", "destination": "/_shell.html" }]
 }

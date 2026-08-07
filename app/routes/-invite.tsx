@@ -40,19 +40,19 @@ export default function InvitePage() {
 
   if (invite === undefined || !isLoaded) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center">
-        <div className="text-[#888]">Loading...</div>
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA]">
+        <div className="text-[#6E6E73]">Loading…</div>
       </div>
     );
   }
 
   if (invite === null) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
-              <AlertCircle className="h-6 w-6 text-[#dc2626]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
+              <AlertCircle className="h-6 w-6 text-[#8A2B34]" />
             </div>
             <CardTitle>Invalid or expired invite</CardTitle>
             <CardDescription>
@@ -74,11 +74,11 @@ export default function InvitePage() {
   // User not signed in
   if (!user) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <Users className="h-6 w-6 text-[#888]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <Users className="h-6 w-6 text-[#6E6E73]" />
             </div>
             <CardTitle>You&apos;re invited to {invite.team?.name}</CardTitle>
             <CardDescription>
@@ -86,14 +86,14 @@ export default function InvitePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="p-3 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center gap-3">
-              <Mail className="h-5 w-5 text-[#888]" />
+            <div className="flex items-center gap-3 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-3">
+              <Mail className="h-5 w-5 text-[#6E6E73]" />
               <div>
-                <p className="text-sm text-[#888]">Invited email</p>
-                <p className="font-bold text-[#1a1a1a]">{invite.email}</p>
+                <p className="text-sm text-[#6E6E73]">Invited email</p>
+                <p className="font-semibold text-[#131315]">{invite.email}</p>
               </div>
             </div>
-            <p className="text-sm text-[#888] text-center">
+            <p className="text-center text-sm text-[#6E6E73]">
               Sign in with the email address above to accept this invite.
             </p>
             <a href={`/sign-in?redirect_url=${encodeURIComponent(`/invite/${token}`)}`} className="block">
@@ -108,11 +108,11 @@ export default function InvitePage() {
   // User signed in but with different email
   if (user.primaryEmailAddress?.emailAddress !== invite.email) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#ca8a04]/10 flex items-center justify-center mb-4 border-2 border-[#ca8a04]">
-              <AlertCircle className="h-6 w-6 text-[#ca8a04]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF9EC]">
+              <AlertCircle className="h-6 w-6 text-[#74521D]" />
             </div>
             <CardTitle>Different email address</CardTitle>
             <CardDescription>
@@ -121,7 +121,7 @@ export default function InvitePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-[#888] text-center">
+            <p className="text-center text-sm text-[#6E6E73]">
               Please sign in with the correct email address to accept this invite.
             </p>
             <a href={`/sign-in?redirect_url=${encodeURIComponent(`/invite/${token}`)}`} className="block">
@@ -137,11 +137,11 @@ export default function InvitePage() {
 
   // User signed in with correct email
   return (
-    <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
       <Card className="max-w-md w-full">
         <CardHeader className="text-center">
-          <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-            <Users className="h-6 w-6 text-[#888]" />
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+            <Users className="h-6 w-6 text-[#6E6E73]" />
           </div>
           <CardTitle>Join {invite.team?.name}</CardTitle>
           <CardDescription>
@@ -151,7 +151,7 @@ export default function InvitePage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
-            <div className="p-3 bg-[#dc2626]/10 text-[#dc2626] border-2 border-[#dc2626] text-sm">
+            <div className="rounded-[11px] bg-[#FFF5F5] p-3 text-sm text-[#8A2B34]">
               {error}
             </div>
           )}
@@ -161,7 +161,7 @@ export default function InvitePage() {
             disabled={isAccepting}
           >
             {isAccepting ? (
-              "Joining..."
+              "Joining…"
             ) : (
               <>
                 <Check className="mr-2 h-4 w-4" />

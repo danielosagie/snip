@@ -3,18 +3,18 @@ import { SnipMark } from "@/components/SnipMark";
 
 export function MarketingFooter() {
   return (
-    <footer className="border-t-2 border-[#1a1a1a] px-6 py-16 bg-[#1a1a1a] text-[#f0f0e8]">
+    <footer className="border-t border-[#E8E8EC] bg-white px-6 py-16 text-[#131315]">
       <div className="max-w-7xl mx-auto">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-12 mb-16">
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Product
             </h3>
-            <ul className="space-y-3 text-sm font-bold">
+            <ul className="space-y-3 text-sm font-medium">
               <li>
                 <Link
                   to="/pricing"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   Pricing
                 </Link>
@@ -22,7 +22,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/sign-up"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   Start free trial
                 </Link>
@@ -30,7 +30,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/sign-in"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   Sign in
                 </Link>
@@ -38,14 +38,14 @@ export function MarketingFooter() {
             </ul>
           </div>
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Compare
             </h3>
-            <ul className="space-y-3 text-sm font-bold">
+            <ul className="space-y-3 text-sm font-medium">
               <li>
                 <Link
                   to="/compare/frameio"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   snip vs Frame.io
                 </Link>
@@ -53,7 +53,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/compare/wipster"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   snip vs Wipster
                 </Link>
@@ -61,7 +61,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/compare/lucidlink"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   snip vs LucidLink
                 </Link>
@@ -69,14 +69,14 @@ export function MarketingFooter() {
             </ul>
           </div>
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Use cases
             </h3>
-            <ul className="space-y-3 text-sm font-bold">
+            <ul className="space-y-3 text-sm font-medium">
               <li>
                 <Link
                   to="/for/video-editors"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   For video editors
                 </Link>
@@ -84,7 +84,7 @@ export function MarketingFooter() {
               <li>
                 <Link
                   to="/for/agencies"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   For agencies
                 </Link>
@@ -92,16 +92,16 @@ export function MarketingFooter() {
             </ul>
           </div>
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-[#888] mb-4">
+            <h3 className="mb-4 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Open source
             </h3>
-            <ul className="space-y-3 text-sm font-bold">
+            <ul className="space-y-3 text-sm font-medium">
               <li>
                 <a
                   href="https://github.com/danielosagie/snip"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hover:text-[#FFB380] transition-colors"
+                  className="transition-colors hover:text-[#D14E00]"
                 >
                   GitHub
                 </a>
@@ -109,12 +109,14 @@ export function MarketingFooter() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-[#333] pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex flex-col items-center justify-between gap-4 border-t border-[#F1F1F3] pt-8 md:flex-row">
           <div className="flex items-center gap-3">
-            <SnipMark size={32} />
-            <span className="font-black text-3xl tracking-tighter">snip.</span>
+            <span className="inline-flex overflow-hidden rounded-[9px]">
+              <SnipMark size={32} />
+            </span>
+            <span className="text-3xl font-bold tracking-[-0.03em]">snip.</span>
           </div>
-          <span className="text-sm text-[#888]">
+          <span className="text-sm text-[#6E6E73]">
             Video review for creative teams.
           </span>
         </div>

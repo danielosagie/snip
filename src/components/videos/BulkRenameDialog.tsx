@@ -13,6 +13,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { ArrowRight } from "lucide-react";
+import {
+  softButton,
+  softButtonPrimary,
+  softInput,
+} from "@/components/soft";
 
 /**
  * Bulk rename for the selected videos. Three modes — Add Text (prefix/suffix),
@@ -45,14 +51,14 @@ function splitExt(name: string): [string, string] {
 
 const TAB_CLASS = (active: boolean) =>
   cn(
-    "flex-1 px-3 py-1.5 text-sm font-bold transition-colors",
+    "flex-1 rounded-[8px] border px-3 py-1.5 text-[13px] font-medium transition-colors",
     active
-      ? "bg-[#f0f0e8] text-[#1a1a1a] border-2 border-[#1a1a1a]"
-      : "text-[#888] hover:text-[#1a1a1a]",
+      ? "border-[#E8E8EC] bg-white text-[#131315] shadow-sm"
+      : "border-transparent text-[#6E6E73] hover:bg-white/60 hover:text-[#131315]",
   );
 
 const SELECT_CLASS =
-  "h-9 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-sm font-bold text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#C2410C]";
+  "h-10 rounded-[10px] border border-[#E8E8EC] bg-white px-3 text-sm font-medium text-[#131315] outline-none focus:border-[#FF6600]";
 
 export function BulkRenameDialog({ open, onOpenChange, items, onDone }: Props) {
   const bulkSetTitles = useMutation(api.videos.bulkSetTitles);
@@ -132,18 +138,20 @@ export function BulkRenameDialog({ open, onOpenChange, items, onDone }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="surface-soft max-w-2xl rounded-[14px] border border-[#E8E8EC] bg-white text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]">
         <DialogHeader>
-          <DialogTitle>Bulk rename</DialogTitle>
+          <DialogTitle className="text-lg font-semibold normal-case tracking-[-0.01em] text-[#131315]">
+            Bulk rename
+          </DialogTitle>
         </DialogHeader>
 
         {/* Tabs */}
-        <div className="flex border-2 border-[#1a1a1a] bg-[#e8e8e0] p-1 gap-1">
+        <div className="flex gap-1 rounded-[10px] bg-[#F1F1F3] p-1">
           <button type="button" className={TAB_CLASS(mode === "add")} onClick={() => setMode("add")}>
-            Add Text
+            Add text
           </button>
           <button type="button" className={TAB_CLASS(mode === "replace")} onClick={() => setMode("replace")}>
-            Replace Text
+            Replace text
           </button>
           <button type="button" className={TAB_CLASS(mode === "format")} onClick={() => setMode("format")}>
             Format
@@ -158,7 +166,7 @@ export function BulkRenameDialog({ open, onOpenChange, items, onDone }: Props) {
               placeholder="Text to add"
               value={addText}
               onChange={(e) => setAddText(e.target.value)}
-              className="flex-1"
+              className={cn(softInput, "flex-1")}
             />
             <select
               aria-label="Position"
@@ -177,13 +185,13 @@ export function BulkRenameDialog({ open, onOpenChange, items, onDone }: Props) {
               placeholder="Find"
               value={findText}
               onChange={(e) => setFindText(e.target.value)}
-              className="flex-1"
+              className={cn(softInput, "flex-1")}
             />
             <Input
               placeholder="Replace with"
               value={replaceText}
               onChange={(e) => setReplaceText(e.target.value)}
-              className="flex-1"
+              className={cn(softInput, "flex-1")}
             />
           </div>
         ) : (
@@ -195,7 +203,7 @@ export function BulkRenameDialog({ open, onOpenChange, items, onDone }: Props) {
                 onChange={(e) => setFormatKind(e.target.value as FormatKind)}
                 className={SELECT_CLASS}
               >
-                <option value="nameCounter">Name and Counter</option>
+                <option value="nameCounter">Name and counter</option>
                 <option value="counter">Counter only</option>
               </select>
               {formatKind === "nameCounter" && !customFormat.trim() ? (
@@ -211,41 +219,41 @@ export function BulkRenameDialog({ open, onOpenChange, items, onDone }: Props) {
               ) : null}
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              <label className="text-sm font-bold text-[#1a1a1a]">
-                Custom Format:
+              <label className="text-sm font-medium text-[#6E6E73]">
+                Custom format
               </label>
               <Input
                 placeholder="e.g., shot_"
                 value={customFormat}
                 onChange={(e) => setCustomFormat(e.target.value)}
-                className="flex-1 min-w-[160px]"
+                className={cn(softInput, "min-w-[160px] flex-1")}
               />
-              <label className="text-sm font-bold text-[#1a1a1a]">
-                Start at:
+              <label className="text-sm font-medium text-[#6E6E73]">
+                Start at
               </label>
               <Input
                 type="number"
                 value={startAt}
                 onChange={(e) => setStartAt(Number(e.target.value) || 1)}
-                className="w-20"
+                className={cn(softInput, "w-20")}
               />
             </div>
           </div>
         )}
 
         {/* Preview */}
-        <div className="max-h-64 overflow-y-auto border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
+        <div className="max-h-64 divide-y divide-[#F1F1F3] overflow-y-auto rounded-[11px] border border-[#E8E8EC] bg-white">
           {previews.map((p) => (
             <div
               key={p._id}
               className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2 text-sm"
             >
-              <span className="truncate text-[#888]">{p.title}</span>
-              <span className="text-[#888]">→</span>
+              <span className="truncate text-[#6E6E73]">{p.title}</span>
+              <ArrowRight className="h-4 w-4 text-[#A0A0A5]" />
               <span
                 className={cn(
                   "truncate font-medium",
-                  p.next !== p.title ? "text-[#1a1a1a]" : "text-[#888]",
+                  p.next !== p.title ? "text-[#131315]" : "text-[#A0A0A5]",
                 )}
               >
                 {p.next}
@@ -254,13 +262,22 @@ export function BulkRenameDialog({ open, onOpenChange, items, onDone }: Props) {
           ))}
         </div>
 
-        {error ? <p className="text-xs text-[#dc2626]">{error}</p> : null}
+        {error ? <p className="text-xs text-[#D8434F]">{error}</p> : null}
 
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button
+            variant="outline"
+            className={softButton}
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+          >
             Cancel
           </Button>
-          <Button onClick={() => void handleRename()} disabled={busy || changedCount === 0}>
+          <Button
+            className={softButtonPrimary}
+            onClick={() => void handleRename()}
+            disabled={busy || changedCount === 0}
+          >
             {busy
               ? "Renaming…"
               : `Rename ${changedCount} ${changedCount === 1 ? "item" : "items"}`}

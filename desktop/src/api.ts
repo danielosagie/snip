@@ -97,6 +97,7 @@ export interface UpdateState {
   version: string | null;
   percent: number;
   error: string | null;
+  requiresManualInstall: boolean;
 }
 
 export interface ResolveStatus {
@@ -119,7 +120,7 @@ interface DesktopApi {
   update: {
     state: () => Promise<UpdateState>;
     check: () => Promise<{ ok: boolean; reason?: string }>;
-    install: () => Promise<{ ok: boolean; reason?: string }>;
+    install: () => Promise<{ ok: boolean; reason?: string; manual?: boolean }>;
     onStatus: (handler: (state: UpdateState) => void) => () => void;
   };
   settings: {

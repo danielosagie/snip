@@ -4,7 +4,15 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import {
+  softButton,
+  softButtonDanger,
+  softButtonPrimary,
+  softCard,
+  softHelperText,
+  softInput,
+  SoftPill,
+} from "@/components/soft";
 import {
   Trash2,
   Pencil,
@@ -15,6 +23,13 @@ import {
   ChevronDown,
 } from "lucide-react";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -22,7 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { dashboardHomePath, teamHomePath } from "@/lib/routes";
-import { getInitials } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { useSettingsData } from "./-settings.data";
 import { prewarmTeam } from "./-team.data";
@@ -93,6 +108,10 @@ export default function TeamSettingsPage() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const prewarmTeamIntentHandlers = useRoutePrewarmIntent(() => {
     if (!team?.slug) return;
     return prewarmTeam(convex, { teamSlug: team.slug });
@@ -117,16 +136,16 @@ export default function TeamSettingsPage() {
 
   if (context === undefined) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Loading…</div>
+      <div className="surface-soft flex h-full items-center justify-center bg-[#FAFAFA]">
+        <div className="text-sm text-[#6E6E73]">Loading…</div>
       </div>
     );
   }
 
   if (context === null) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-[#888]">Team not found</div>
+      <div className="surface-soft flex h-full items-center justify-center bg-[#FAFAFA]">
+        <div className="text-sm text-[#6E6E73]">Team not found</div>
       </div>
     );
   }
@@ -144,21 +163,22 @@ export default function TeamSettingsPage() {
     }
   };
 
+  // window.confirm() can only return OK/Cancel — it cannot collect the
+  // team name it was asking for, so the old second prompt was satisfied
+  // by a second OK. Deleting every project, video and member needs a
+  // real typed confirmation and a visible failure.
   const handleDeleteTeam = async () => {
-    if (
-      !confirm(
-        "Delete this team? Every project, video, and member is removed permanently.",
-      )
-    ) {
-      return;
-    }
-    if (!confirm(`Type the team name to confirm: ${team.name}`)) return;
-
+    if (deleteConfirmName.trim() !== team.name) return;
+    setDeleteError(null);
+    setDeleting(true);
     try {
       await deleteTeam({ teamId: team._id });
       navigate({ to: dashboardHomePath() });
     } catch (error) {
-      console.error("Failed to delete team:", error);
+      setDeleteError(
+        error instanceof Error ? error.message : "Could not delete this team.",
+      );
+      setDeleting(false);
     }
   };
 
@@ -244,35 +264,38 @@ export default function TeamSettingsPage() {
             href: teamHomePath(team.slug),
             prewarmIntentHandlers: prewarmTeamIntentHandlers,
           },
-          { label: "members" },
+          { label: "Members" },
         ]}
       />
 
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-3xl mx-auto px-6 lg:px-8 py-8 space-y-10">
+      <div className="surface-soft flex-1 overflow-auto bg-[#FAFAFA] text-[#131315]">
+        <div className="w-full max-w-[1120px] space-y-3.5 px-4 py-8 sm:px-8 lg:px-14 lg:py-10">
           {/* ── Team identity ── */}
-          <section>
-            <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1">
-              Workspace · members
-            </p>
+          <section className={softCard}>
+            <SoftPill>Workspace</SoftPill>
             {isEditingName ? (
               <div className="flex items-center gap-2">
                 <Input
                   value={editedName}
                   onChange={(e) => setEditedName(e.target.value)}
-                  className="text-3xl font-black tracking-tight h-auto py-1 px-2"
+                  className="h-auto px-2 py-1 text-[22px] font-semibold tracking-[-0.02em]"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void handleSaveName();
                     if (e.key === "Escape") setIsEditingName(false);
                   }}
                 />
-                <Button size="sm" onClick={() => void handleSaveName()}>
+                <Button
+                  size="sm"
+                  className={softButtonPrimary}
+                  onClick={() => void handleSaveName()}
+                >
                   Save
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
+                  className={softButton}
                   onClick={() => setIsEditingName(false)}
                 >
                   Cancel
@@ -280,7 +303,7 @@ export default function TeamSettingsPage() {
               </div>
             ) : (
               <div className="flex items-baseline gap-3 group">
-                <h1 className="text-3xl lg:text-4xl font-black tracking-tight text-[#1a1a1a]">
+                <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">
                   {team.name}
                 </h1>
                 {isAdmin && (
@@ -289,18 +312,20 @@ export default function TeamSettingsPage() {
                       setEditedName(team.name);
                       setIsEditingName(true);
                     }}
-                    className="text-[#888] hover:text-[#1a1a1a] transition-colors opacity-0 group-hover:opacity-100"
+                    className="text-[#A0A0A5] transition-colors hover:text-[#131315] opacity-0 group-hover:opacity-100"
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                 )}
               </div>
             )}
-            <p className="text-sm text-[#666] mt-2 max-w-prose">
-              Invite collaborators, set roles, and manage who has access to
-              this workspace's projects.
-            </p>
-            <p className="text-xs font-mono text-[#888] mt-3">
+            {team.onboarding ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <SoftPill>{team.onboarding.makes}</SoftPill>
+                <SoftPill>{team.onboarding.size}</SoftPill>
+              </div>
+            ) : null}
+            <p className={cn(softHelperText, "mt-3 break-all")}>
               {typeof window !== "undefined"
                 ? `${window.location.origin}${teamHomePath(team.slug)}`
                 : teamHomePath(team.slug)}
@@ -309,10 +334,10 @@ export default function TeamSettingsPage() {
 
           {/* ── Invite member (inline, no dialog) ── */}
           {isAdmin ? (
-            <section className="border-2 border-[#1a1a1a] p-5 bg-[#f0f0e8]">
-              <div className="flex items-center gap-2 mb-3">
-                <UserPlus className="h-4 w-4" />
-                <h2 className="font-black text-sm uppercase tracking-tight">
+            <section className={softCard}>
+              <div className="mb-3 flex items-center gap-2">
+                <UserPlus className="h-4 w-4 text-[#6E6E73]" />
+                <h2 className="text-base font-semibold leading-[22px]">
                   Invite a member
                 </h2>
               </div>
@@ -326,7 +351,7 @@ export default function TeamSettingsPage() {
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   disabled={inviting}
-                  className="flex-1"
+                  className={cn(softInput, "flex-1")}
                 />
                 <RolePicker
                   value={inviteRole}
@@ -335,12 +360,12 @@ export default function TeamSettingsPage() {
                 />
                 <Button
                   type="submit"
+                  className={softButtonPrimary}
                   disabled={
                     inviting ||
                     !inviteEmail.trim() ||
                     (scopeRestricted && scopedProjectIds.size === 0)
                   }
-                  className="bg-[#FF6600] hover:bg-[#FF7A1F]"
                 >
                   <Mail className="h-4 w-4 mr-1.5" />
                   {inviting ? "Sending…" : "Invite"}
@@ -350,8 +375,8 @@ export default function TeamSettingsPage() {
               {/* Optional storage scope: restrict the invitee to specific
                   projects. Off → full team access (the efficient default). */}
               {projects && projects.length > 0 ? (
-                <div className="mt-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
-                  <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider cursor-pointer">
+                <div className="mt-3 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-3.5">
+                  <label className="flex cursor-pointer items-center gap-2 text-[13px] font-medium leading-[18px] text-[#6E6E73]">
                     <input
                       type="checkbox"
                       checked={scopeRestricted}
@@ -359,7 +384,7 @@ export default function TeamSettingsPage() {
                       disabled={inviting}
                       className="h-4 w-4 accent-[#FF6600]"
                     />
-                    Restrict to specific projects
+                    Project access
                   </label>
                   {scopeRestricted ? (
                     <div className="mt-2 max-h-40 overflow-auto space-y-1">
@@ -386,26 +411,25 @@ export default function TeamSettingsPage() {
                         </label>
                       ))}
                       {scopedProjectIds.size === 0 ? (
-                        <p className="text-xs font-bold text-[#dc2626]">
-                          Pick at least one project, or untick to grant full
-                          access.
+                        <p className="text-[13px] leading-[18px] text-[#D8434F]">
+                          Pick a project, or clear the restriction.
                         </p>
                       ) : null}
                     </div>
                   ) : (
-                    <p className="text-xs text-[#666] mt-1">
+                    <p className={cn(softHelperText, "mt-1")}>
                       Full access to all current and future team projects.
                     </p>
                   )}
                 </div>
               ) : null}
               {inviteError ? (
-                <div className="text-xs font-bold text-[#dc2626] mt-2">
+                <div className="mt-2 text-[13px] leading-[18px] text-[#D8434F]">
                   {inviteError}
                 </div>
               ) : null}
               {lastInviteLink ? (
-                <div className="mt-3 border-2 border-[#1a1a1a] bg-[#e8e8e0] p-2 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-2 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-2.5">
                   <code className="flex-1 text-xs font-mono truncate">
                     {lastInviteLink}
                   </code>
@@ -413,6 +437,7 @@ export default function TeamSettingsPage() {
                     type="button"
                     size="sm"
                     variant="outline"
+                    className={softButton}
                     onClick={() => void copyInviteLink()}
                   >
                     {copied ? (
@@ -429,7 +454,7 @@ export default function TeamSettingsPage() {
                   </Button>
                 </div>
               ) : null}
-              <p className="text-xs text-[#666] mt-3">
+              <p className={cn(softHelperText, "mt-3")}>
                 {ROLE_HELP[inviteRole]}
               </p>
             </section>
@@ -438,27 +463,25 @@ export default function TeamSettingsPage() {
           {/* ── Pending invites ── */}
           {invites && invites.length > 0 ? (
             <section>
-              <h2 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
+              <h2 className="mb-2 text-base font-semibold leading-[22px]">
                 Pending invites ({invites.length})
               </h2>
-              <div className="border-2 border-[#1a1a1a] divide-y divide-[#ccc] bg-[#f0f0e8]">
+              <div className="divide-y divide-[#F1F1F3] rounded-[14px] border border-[#E8E8EC] bg-white">
                 {invites.map((inv) => (
                   <div
                     key={inv._id}
                     className="flex items-center gap-3 px-4 py-3"
                   >
-                    <Mail className="h-4 w-4 text-[#888] flex-shrink-0" />
+                    <Mail className="h-4 w-4 flex-shrink-0 text-[#A0A0A5]" />
                     <div className="flex-1 min-w-0">
-                      <div className="font-bold text-sm text-[#1a1a1a] truncate">
+                      <div className="truncate text-sm font-medium leading-5 text-[#131315]">
                         {inv.email}
                       </div>
-                      <div className="text-xs font-mono text-[#888]">
-                        Invited as {ROLE_LABEL[inv.role as Role] ?? inv.role}{" "}
-                        ·{" "}
+                      <div className="text-[13px] leading-[18px] text-[#A0A0A5]">
+                        Invited as {ROLE_LABEL[inv.role as Role] ?? inv.role},{" "}
                         {inv.folderScope && inv.folderScope.length > 0
                           ? `scoped to ${inv.folderScope.length} project${inv.folderScope.length === 1 ? "" : "s"}`
-                          : "full access"}{" "}
-                        · expires{" "}
+                          : "full access"}, expires{" "}
                         {new Date(inv.expiresAt).toLocaleDateString()}
                       </div>
                     </div>
@@ -466,6 +489,7 @@ export default function TeamSettingsPage() {
                       <Button
                         size="sm"
                         variant="outline"
+                        className={softButton}
                         onClick={() => void handleRevoke(inv._id)}
                       >
                         Revoke
@@ -479,14 +503,14 @@ export default function TeamSettingsPage() {
 
           {/* ── Members list ── */}
           <section>
-            <h2 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
+            <h2 className="mb-2 text-base font-semibold leading-[22px]">
               Members ({members?.length ?? 0})
             </h2>
-            <div className="border-2 border-[#1a1a1a] divide-y divide-[#ccc] bg-[#f0f0e8]">
+            <div className="divide-y divide-[#F1F1F3] rounded-[14px] border border-[#E8E8EC] bg-white">
               {members === undefined ? (
-                <div className="px-4 py-3 text-sm text-[#888]">Loading…</div>
+                <div className="px-4 py-3 text-sm text-[#6E6E73]">Loading…</div>
               ) : members.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-[#888]">
+                <div className="px-4 py-3 text-sm text-[#6E6E73]">
                   No members yet.
                 </div>
               ) : (
@@ -510,13 +534,13 @@ export default function TeamSettingsPage() {
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
-                        <div className="font-bold text-sm text-[#1a1a1a] truncate flex items-center gap-2">
+                        <div className="flex items-center gap-2 truncate text-sm font-medium leading-5 text-[#131315]">
                           {member.userName}
                           {isTeamOwner ? (
-                            <Badge variant="secondary">Owner</Badge>
+                            <SoftPill>Owner</SoftPill>
                           ) : null}
                         </div>
-                        <div className="text-xs text-[#888] truncate">
+                        <div className="truncate text-[13px] leading-[18px] text-[#A0A0A5]">
                           {member.userEmail}
                         </div>
                       </div>
@@ -532,7 +556,7 @@ export default function TeamSettingsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="text-[#dc2626] hover:text-[#dc2626]"
+                            className={softButtonDanger}
                             onClick={() =>
                               void handleRemoveMember(
                                 member._id,
@@ -545,9 +569,9 @@ export default function TeamSettingsPage() {
                           </Button>
                         </>
                       ) : (
-                        <Badge variant="secondary">
+                        <SoftPill>
                           {ROLE_LABEL[member.role as Role] ?? member.role}
-                        </Badge>
+                        </SoftPill>
                       )}
                     </div>
                   );
@@ -558,23 +582,78 @@ export default function TeamSettingsPage() {
 
           {/* ── Danger zone ── */}
           {isOwner ? (
-            <section className="border-t-2 border-[#dc2626]/30 pt-6 flex items-center justify-between">
+            <section className="flex items-center justify-between border-t border-[#F0D2D4] pt-6">
               <div>
-                <p className="text-sm font-bold text-[#1a1a1a]">Delete team</p>
-                <p className="text-xs text-[#888] mt-0.5">
+                <p className="text-sm font-semibold text-[#131315]">Delete team</p>
+                <p className="mt-0.5 text-sm text-[#6E6E73]">
                   Permanently remove this team, all projects, and videos.
                 </p>
               </div>
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => void handleDeleteTeam()}
+                className={softButtonDanger}
+                onClick={() => {
+                  setDeleteConfirmName("");
+                  setDeleteError(null);
+                  setDeleteOpen(true);
+                }}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete
               </Button>
             </section>
           ) : null}
+
+          <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <DialogContent className="surface-soft max-w-md rounded-[14px] border border-[#E8E8EC] bg-white p-6 text-[#131315] shadow-none">
+              <DialogHeader>
+                <DialogTitle className="text-base font-semibold">
+                  Delete {team.name}?
+                </DialogTitle>
+                <DialogDescription className="text-sm text-[#6E6E73]">
+                  This removes every project, video, folder and member in this
+                  team. It cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <label
+                htmlFor="delete-confirm"
+                className="mt-4 block text-sm text-[#6E6E73]"
+              >
+                Type <span className="font-medium text-[#131315]">{team.name}</span> to confirm
+              </label>
+              <Input
+                id="delete-confirm"
+                value={deleteConfirmName}
+                autoComplete="off"
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                className={cn(softInput, "mt-1.5")}
+              />
+              {deleteError ? (
+                <p className="mt-2 text-sm text-[#D8434F]">{deleteError}</p>
+              ) : null}
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={softButton}
+                  onClick={() => setDeleteOpen(false)}
+                  disabled={deleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className={softButtonDanger}
+                  disabled={deleting || deleteConfirmName.trim() !== team.name}
+                  onClick={() => void handleDeleteTeam()}
+                >
+                  {deleting ? "Deleting…" : "Delete team"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>
@@ -598,24 +677,28 @@ function RolePicker({
         <button
           type="button"
           disabled={disabled}
-          className={
-            "inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] " +
-            (compact ? "px-2 py-1" : "px-3 py-2")
-          }
+          className={cn(
+            softButton,
+            "inline-flex items-center gap-1",
+            compact ? "px-2 py-1" : "px-3 py-2",
+          )}
         >
           {ROLE_LABEL[value]}
           <ChevronDown className="h-3 w-3" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[180px]">
+      <DropdownMenuContent
+        align="end"
+        className="surface-soft min-w-[180px] rounded-[11px] border border-[#E8E8EC] bg-white p-1 shadow-none"
+      >
         {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
           <DropdownMenuItem
             key={r}
             onClick={() => onChange(r)}
-            className="flex-col items-start gap-0.5"
+            className="flex-col items-start gap-0.5 rounded-[10px]"
           >
-            <span className="font-bold">{ROLE_LABEL[r]}</span>
-            <span className="text-[10px] text-[#888] normal-case font-normal">
+            <span className="font-medium">{ROLE_LABEL[r]}</span>
+            <span className="text-[13px] font-normal leading-[18px] text-[#A0A0A5]">
               {ROLE_HELP[r]}
             </span>
           </DropdownMenuItem>

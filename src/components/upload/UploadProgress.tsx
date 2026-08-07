@@ -1,97 +1,192 @@
 "use client";
 
+import { memo } from "react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  Pause,
+  Play,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/utils";
-import { X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-export type UploadStatus = "pending" | "uploading" | "processing" | "complete" | "error";
+export type UploadStatus =
+  | "pending"
+  | "uploading"
+  | "paused"
+  | "cancelling"
+  | "processing"
+  | "complete"
+  | "error";
 
-function formatSpeed(bytesPerSecond: number): string {
-  if (bytesPerSecond === 0) return "—";
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
-function formatTimeRemaining(seconds: number | null): string {
-  if (seconds === null || seconds <= 0) return "";
-  if (seconds < 60) return `${seconds}s`;
+export function formatTransferTime(seconds: number | null | undefined) {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return "";
+  if (seconds < 60) return `${Math.max(1, Math.ceil(seconds))}s`;
   if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
-  return `${Math.ceil(seconds / 3600)}h`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 interface UploadProgressProps {
   fileName: string;
   fileSize: number;
+  bytesUploaded: number;
   progress: number;
   status: UploadStatus;
   error?: string;
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
+  resumable?: boolean;
   onCancel?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
+  onRetry?: () => void;
+  onDismiss?: () => void;
 }
 
-export function UploadProgress({
+const STATUS_LABEL: Record<UploadStatus, string> = {
+  pending: "Queued",
+  uploading: "Uploading",
+  paused: "Paused",
+  cancelling: "Cancelling",
+  processing: "Preparing",
+  complete: "Complete",
+  error: "Needs attention",
+};
+
+export const UploadProgress = memo(function UploadProgress({
   fileName,
   fileSize,
+  bytesUploaded,
   progress,
   status,
   error,
   bytesPerSecond = 0,
   estimatedSecondsRemaining = null,
+  resumable = false,
   onCancel,
+  onPause,
+  onResume,
+  onRetry,
+  onDismiss,
 }: UploadProgressProps) {
-  return (
-    <div className="border-2 border-[#1a1a1a] p-4 bg-[#f0f0e8]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-[#1a1a1a] truncate text-sm">{fileName}</p>
-          <p className="text-xs text-[#888] mt-0.5">{formatBytes(fileSize)}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {status === "complete" && (
-            <CheckCircle className="h-5 w-5 text-[#FF6600]" />
-          )}
-          {status === "error" && (
-            <AlertCircle className="h-5 w-5 text-[#dc2626]" />
-          )}
-          {status === "processing" && (
-            <Loader2 className="h-5 w-5 text-[#FF6600] animate-spin" />
-          )}
-          {(status === "pending" || status === "uploading") && onCancel && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onCancel}
-              className="h-7 w-7 text-[#888] hover:text-[#1a1a1a]"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      </div>
+  const isTransferring = status === "uploading" || status === "pending";
+  const time = formatTransferTime(estimatedSecondsRemaining);
+  const detail =
+    status === "uploading"
+      ? `${formatBytes(Math.min(bytesUploaded, fileSize))} of ${formatBytes(fileSize)}`
+      : status === "processing"
+        ? "Upload finished, preparing file"
+        : status === "paused"
+          ? `${formatBytes(Math.min(bytesUploaded, fileSize))} uploaded`
+          : status === "error"
+            ? error ?? "Transfer interrupted"
+            : status === "complete"
+              ? formatBytes(fileSize)
+              : STATUS_LABEL[status];
 
-      {status === "uploading" && (
-        <div className="mt-3 space-y-1.5">
-          <Progress value={progress} />
-          <div className="flex justify-between text-xs text-[#888] font-mono">
-            <span>{formatSpeed(bytesPerSecond)}</span>
-            <span>
-              {progress}%
-              {estimatedSecondsRemaining !== null && estimatedSecondsRemaining > 0 && (
-                <span className="text-[#888]"> · {formatTimeRemaining(estimatedSecondsRemaining)} left</span>
-              )}
+  return (
+    <li className="group px-3 py-2.5 bg-[var(--surface)]" aria-label={`${fileName}: ${STATUS_LABEL[status]}`}>
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="relative grid h-8 w-8 shrink-0 place-items-center bg-[var(--surface-alt)] text-[var(--foreground-muted)]">
+          {status === "complete" ? (
+            <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
+          ) : status === "error" ? (
+            <AlertCircle className="h-4 w-4 text-[var(--destructive)]" />
+          ) : status === "paused" ? (
+            <Pause className="h-4 w-4 text-[var(--warning)]" />
+          ) : (
+            <Loader2 className={cn("h-4 w-4 text-[var(--accent)]", status !== "pending" && "animate-spin motion-reduce:animate-none")} />
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline justify-between gap-3">
+            <p className="truncate text-sm font-semibold text-[var(--foreground)]">{fileName}</p>
+            <span className="shrink-0 font-mono text-[11px] tabular-nums text-[var(--foreground-muted)]">
+              {status === "uploading" ? `${progress}%` : STATUS_LABEL[status]}
             </span>
           </div>
+          <div className="mt-0.5 flex min-w-0 items-center justify-between gap-3 font-mono text-[10px] tabular-nums text-[var(--foreground-muted)]">
+            <span className={cn("truncate", status === "error" && "text-[var(--destructive)]")}>{detail}</span>
+            {status === "uploading" ? (
+              <span className="shrink-0">
+                {bytesPerSecond > 0 ? `${formatBytes(bytesPerSecond)}/s` : "Starting"}
+                {time ? ` · ${time} left` : ""}
+              </span>
+            ) : null}
+          </div>
+          {isTransferring || status === "paused" ? (
+            <Progress
+              value={status === "pending" ? 0 : progress}
+              className="mt-2 h-1.5"
+              aria-label={`${progress}% uploaded`}
+            />
+          ) : null}
         </div>
-      )}
 
-      {status === "processing" && (
-        <p className="text-xs text-[#888] mt-2">Processing video...</p>
-      )}
+        <div className="flex shrink-0 items-center">
+          {status === "uploading" && resumable && onPause ? (
+            <TransferButton label="Pause this upload" onClick={onPause}>
+              <Pause className="h-4 w-4" />
+            </TransferButton>
+          ) : null}
+          {status === "paused" && onResume ? (
+            <TransferButton label="Resume this upload" onClick={onResume}>
+              <Play className="h-4 w-4" />
+            </TransferButton>
+          ) : null}
+          {status === "error" && onRetry ? (
+            <TransferButton label="Retry this upload" onClick={onRetry}>
+              <RotateCcw className="h-4 w-4" />
+            </TransferButton>
+          ) : null}
+          {(status === "pending" || status === "uploading" || status === "paused") && onCancel ? (
+            <TransferButton label="Cancel only this upload" onClick={onCancel} destructive>
+              <X className="h-4 w-4" />
+            </TransferButton>
+          ) : null}
+          {(status === "complete" || status === "error") && onDismiss ? (
+            <TransferButton label="Dismiss transfer" onClick={onDismiss}>
+              <X className="h-4 w-4" />
+            </TransferButton>
+          ) : null}
+        </div>
+      </div>
+    </li>
+  );
+});
 
-      {status === "error" && error && (
-        <p className="text-xs text-[#dc2626] mt-2">{error}</p>
+function TransferButton({
+  label,
+  onClick,
+  destructive = false,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={cn(
+        "grid h-10 w-10 place-items-center text-[var(--foreground-muted)] transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.96] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--ring)]",
+        destructive
+          ? "hover:bg-[var(--destructive-subtle)] hover:text-[var(--destructive)]"
+          : "hover:bg-[var(--surface-alt)] hover:text-[var(--foreground)]",
       )}
-    </div>
+    >
+      {children}
+    </button>
   );
 }

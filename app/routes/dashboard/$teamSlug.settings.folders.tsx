@@ -5,10 +5,23 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Trash2, FolderTree } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { seoHead } from "@/lib/seo";
 import { useSettingsData } from "./-settings.data";
+import {
+  softFieldLabel,
+  softButton,
+  softButtonPrimary,
+  softHelperText,
+  softInput,
+  SoftCard,
+  SoftCardHeading,
+  SoftField,
+  SoftPage,
+  SoftPill,
+  SoftRow,
+} from "@/components/soft";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute(
   "/dashboard/$teamSlug/settings/folders",
@@ -70,8 +83,8 @@ function FolderPermissionsRoute() {
 
   if (!team) {
     return (
-      <main className="max-w-3xl mx-auto p-6">
-        <p className="text-sm text-[#666]">Loading team…</p>
+      <main className="surface-soft flex-1 bg-[#FAFAFA] p-6 font-sans">
+        <p className="text-sm text-[#6E6E73]">Loading team…</p>
       </main>
     );
   }
@@ -115,111 +128,81 @@ function FolderPermissionsRoute() {
   };
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-6">
-      <div>
-        <div className="flex items-center gap-2 text-[#888] text-xs font-bold uppercase tracking-wider">
-          <FolderTree className="h-3.5 w-3.5" />
-          snip Desktop · {team.name}
-        </div>
-        <h1 className="text-4xl font-black text-[#1a1a1a] mt-1">
-          Folder permissions
-        </h1>
-        <p className="text-[#666] mt-1 text-sm">
-          Scope a path prefix in your team's bucket to a set of roles or
-          specific people. snip Desktop applies these as an{" "}
-          <code>rclone --filter-from</code> at mount time and (when
-          configured) restricts the vended object-storage credentials
-          to the matching prefixes. Members not covered by any grant
-          retain default-allow access; add a grant to start gating.
-        </p>
-      </div>
-
-      <section className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-6">
-        <h2 className="font-black text-lg tracking-tight mb-3">
-          Active grants
-        </h2>
+    <SoftPage title="Folder permissions">
+      <SoftCard>
+        <SoftCardHeading title="Active grants" />
+        <div className="mt-3.5">
         {grants === undefined ? (
-          <p className="text-sm text-[#666]">Loading…</p>
+          <p className="text-sm text-[#6E6E73]">Loading…</p>
         ) : grants.length === 0 ? (
-          <p className="text-sm text-[#666]">
-            No grants yet — every team member can see every folder. Add
-            your first grant below to start scoping access.
+          <p className={softHelperText}>
+            No grants yet. Every member can access every folder.
           </p>
         ) : (
-          <ul className="space-y-2">
+          <div>
             {grants.map((g) => (
-              <li
-                key={g._id}
-                className="border-2 border-[#1a1a1a] bg-white p-3 flex flex-col sm:flex-row gap-3 sm:items-start"
-              >
+              <SoftRow key={g._id} className="flex-col sm:flex-row sm:items-start">
                 <div className="flex-1 min-w-0">
-                  <div className="font-mono text-sm font-bold break-all">
+                  <div className="break-all text-sm font-medium leading-5 text-[#131315]">
                     {g.pathPrefix}
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {g.allowedRoles.length > 0 ? (
                       g.allowedRoles.map((r) => (
-                        <Badge key={r} variant="secondary">
-                          {r}
-                        </Badge>
+                        <SoftPill key={r}>{r}</SoftPill>
                       ))
                     ) : (
-                      <span className="text-xs text-[#888]">
-                        no role grants
+                      <span className={softHelperText}>
+                        No role grants
                       </span>
                     )}
                   </div>
                   {g.allowedClerkIds.length > 0 ? (
-                    <div className="mt-1.5 text-xs text-[#666] font-mono break-all">
+                    <div className={cn(softHelperText, "mt-1.5 break-all")}>
                       + {g.allowedClerkIds.length} explicit user
                       {g.allowedClerkIds.length === 1 ? "" : "s"}
                     </div>
                   ) : null}
                   {g.note ? (
-                    <div className="mt-1.5 text-xs text-[#666]">{g.note}</div>
+                    <div className={cn(softHelperText, "mt-1.5")}>{g.note}</div>
                   ) : null}
                 </div>
                 <Button
                   variant="outline"
                   size="sm"
+                  className={softButton}
                   onClick={() => void deleteGrant(g._id)}
                   disabled={busy}
                 >
                   <Trash2 className="h-3.5 w-3.5 mr-1" />
                   Remove
                 </Button>
-              </li>
+              </SoftRow>
             ))}
-          </ul>
+          </div>
         )}
-      </section>
+        </div>
+      </SoftCard>
 
-      <section className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-6">
-        <h2 className="font-black text-lg tracking-tight mb-3">Add grant</h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
-              Path prefix
-            </label>
+      <SoftCard>
+        <SoftCardHeading title="Add grant" />
+        <div className="mt-4 space-y-4">
+          <SoftField label="Path prefix">
             <Input
               placeholder="projects/red-bull-spring/raw/"
               value={draft.pathPrefix}
               onChange={(e) =>
                 setDraft((d) => ({ ...d, pathPrefix: e.target.value }))
               }
-              className="font-mono"
+              className={softInput}
             />
-            <p className="text-xs text-[#666] mt-1">
-              Relative to your bucket root. A trailing slash is added
-              automatically so <code>projects/foo</code> can't match{" "}
-              <code>projects/foobar</code>.
+            <p className={cn(softHelperText, "mt-1")}>
+              Relative to the bucket root. A trailing slash is added automatically.
             </p>
-          </div>
+          </SoftField>
 
           <div>
-            <label className="block text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
-              Roles with access
-            </label>
+            <span className={softFieldLabel}>Roles</span>
             <div className="flex flex-wrap gap-3">
               {ROLE_OPTIONS.map((role) => (
                 <label
@@ -246,19 +229,17 @@ function FolderPermissionsRoute() {
           </div>
 
           <div>
-            <label className="block text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
-              Specific people (optional)
-            </label>
+            <span className={softFieldLabel}>People</span>
             {members === undefined ? (
-              <p className="text-xs text-[#666]">Loading members…</p>
+              <p className={softHelperText}>Loading members…</p>
             ) : members.length === 0 ? (
-              <p className="text-xs text-[#666]">No members in this team.</p>
+              <p className={softHelperText}>No team members.</p>
             ) : (
-              <div className="max-h-40 overflow-y-auto border-2 border-[#1a1a1a] bg-white">
+              <div className="max-h-40 overflow-y-auto rounded-[11px] border border-[#E8E8EC] bg-white">
                 {members.map((m) => (
                   <label
                     key={m.userClerkId}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-[#FFEDD5] border-b border-[#eee] last:border-b-0"
+                    className="flex cursor-pointer items-center gap-2 border-t border-[#F1F1F3] px-3.5 py-3 text-sm first:border-t-0 hover:bg-[#FAFAFA]"
                   >
                     <input
                       type="checkbox"
@@ -278,38 +259,37 @@ function FolderPermissionsRoute() {
                     <span className="flex-1 min-w-0 truncate">
                       {m.userName || m.userEmail || m.userClerkId}
                     </span>
-                    <Badge variant="secondary">{m.role}</Badge>
+                    <SoftPill>{m.role}</SoftPill>
                   </label>
                 ))}
               </div>
             )}
           </div>
 
-          <div>
-            <label className="block text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
-              Note (optional)
-            </label>
+          <SoftField label="Note">
             <Input
-              placeholder="Raw masters — sound team only"
+              placeholder="Raw masters, sound team only"
               value={draft.note}
               onChange={(e) =>
                 setDraft((d) => ({ ...d, note: e.target.value }))
               }
+              className={softInput}
             />
-          </div>
+          </SoftField>
 
           {err ? (
-            <p className="text-sm text-[#7f1d1d] font-mono">{err}</p>
+            <p className="text-[13px] leading-[18px] text-[#D8434F]">{err}</p>
           ) : null}
 
           <Button
+            className={softButtonPrimary}
             onClick={() => void add()}
             disabled={busy || !draft.pathPrefix.trim()}
           >
             {busy ? "Saving…" : "Add grant"}
           </Button>
         </div>
-      </section>
-    </main>
+      </SoftCard>
+    </SoftPage>
   );
 }

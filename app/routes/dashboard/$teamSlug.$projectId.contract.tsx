@@ -30,6 +30,7 @@ import {
   Printer,
   PanelLeft,
   PanelLeftClose,
+  X,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -61,7 +62,7 @@ export const Route = createFileRoute("/dashboard/$teamSlug/$projectId/contract")
 
 const DEFAULT_HTML = `<h1>Statement of Work</h1>
 <h2>Scope</h2>
-<p>Describe what the agency will deliver. Keep it tight — videos to be produced, length, format, platforms.</p>
+<p>Describe what the agency will deliver. Keep it tight: videos to be produced, length, format, platforms.</p>
 <h2>Deliverables</h2>
 <ul>
   <li>1× hero 60s edit, ProRes 422, 1920×1080</li>
@@ -381,14 +382,14 @@ function ContractFullPage() {
 
   if (project === undefined) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center text-[#888]">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] text-[#6E6E73]">
         Loading contract…
       </div>
     );
   }
   if (!project) {
     return (
-      <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center text-[#888]">
+      <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] text-[#6E6E73]">
         Project not found.
       </div>
     );
@@ -603,17 +604,17 @@ function ContractFullPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f0f0e8] flex flex-col">
+    <div className="surface-soft flex min-h-screen flex-col bg-[#FAFAFA]">
       {/* Slim top bar — breadcrumb on the left, doc-level actions
           on the right. Everything saves automatically; there's no
           longer a Save button (autosave fires on edit + on blur).
           The autosave status sits inline so the user gets confidence
           their work is persisted without having to look for it. */}
-      <header className="flex-shrink-0 bg-[#f0f0e8] border-b-2 border-[#1a1a1a] px-4 sm:px-6 py-2 flex items-center gap-3 flex-wrap">
+      <header className="flex flex-shrink-0 flex-wrap items-center gap-3 border-b border-[#E8E8EC] bg-white px-4 py-2 sm:px-6">
         <button
           type="button"
           onClick={toggleSidebar}
-          className="hidden md:inline-flex items-center justify-center w-8 h-8 -ml-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors flex-shrink-0"
+          className="-ml-1 hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315] md:inline-flex"
           title={collapsed ? "Open sidebar" : "Close sidebar"}
           aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
         >
@@ -625,14 +626,14 @@ function ContractFullPage() {
         </button>
         <Link
           to={projectPath(teamSlug, projectId as Id<"projects">)}
-          className="inline-flex items-center gap-1 text-[#888] hover:text-[#1a1a1a] text-sm font-bold"
+          className="inline-flex items-center gap-1 text-sm font-medium text-[#6E6E73] hover:text-[#131315]"
           title="Back to project"
         >
           <ArrowLeft className="h-4 w-4" />
           {project.name}
         </Link>
-        <span className="text-[#888]">/</span>
-        <div className="text-[#1a1a1a] font-black tracking-tight text-sm uppercase">
+        <span className="text-[#A0A0A5]">/</span>
+        <div className="text-sm font-semibold tracking-[-0.01em] text-[#131315]">
           Contract
         </div>
         {isSigned ? (
@@ -689,7 +690,7 @@ function ContractFullPage() {
             <Printer className="h-3.5 w-3.5" />
           </TopBarIconButton>
 
-          <span className="h-6 w-px bg-[#1a1a1a]/30 mx-1" aria-hidden />
+          <span className="mx-1 h-6 w-px bg-[#E8E8EC]" aria-hidden />
 
           {/* Right-side panels (Versions, Comments) — same h-9 chrome
               as every other control. */}
@@ -714,7 +715,7 @@ function ContractFullPage() {
               Only Share stays as a top-bar primary action since it's
               the most-used outbound flow. */}
           <Button
-            className="h-9 bg-[#FF6600] hover:bg-[#FF7A1F]"
+            className="h-9"
             onClick={() => setShareOpen(true)}
           >
             <Share2 className="h-3.5 w-3.5 mr-1" />
@@ -760,15 +761,15 @@ function ContractFullPage() {
 
       {/* Status / errors. Distraction-free notification strip. */}
       {(notice || error) && (
-        <div className="px-4 sm:px-8 py-2 border-b-2 border-[#1a1a1a] flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 border-b border-[#F1F1F3] bg-white px-4 py-2 text-sm sm:px-8">
           {error ? (
-            <span className="text-[#dc2626] font-bold">{error}</span>
+            <span className="font-medium text-[#D8434F]">{error}</span>
           ) : (
-            <span className="text-[#FF6600] font-bold">{notice}</span>
+            <span className="font-medium text-[#D14E00]">{notice}</span>
           )}
           <button
             type="button"
-            className="ml-auto text-xs text-[#888] hover:text-[#1a1a1a]"
+            className="ml-auto rounded-full px-2 py-1 text-xs text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
             onClick={() => {
               setError(null);
               setNotice(null);
@@ -787,7 +788,7 @@ function ContractFullPage() {
           right panel is contextual (comments OR versions, depending
           on which top-bar toggle is on). The center is the doc
           canvas — full-bleed white page, no junk below. */}
-      <div className="flex-1 flex min-h-0 bg-[#e8e8e0]">
+      <div className="flex min-h-0 flex-1 bg-[#FAFAFA]">
         {outlineOpen ? (
           <ContractSectionOutline
             sections={outlineSections}
@@ -882,8 +883,7 @@ function ContractFullPage() {
               <div
                 className="mx-auto w-full max-w-[740px] min-h-[calc(100vh-260px)] px-4 sm:px-0"
                 style={{
-                  fontFamily:
-                    '"Source Serif Pro", "Iowan Old Style", "Charter", Georgia, serif',
+                  fontFamily: '"Inter Tight", Inter, system-ui, sans-serif',
                   lineHeight: 1.75,
                   fontSize: "19px",
                   // Bind text + heading colors to the theme token so
@@ -895,7 +895,7 @@ function ContractFullPage() {
                 <style>{`
                   .snip-contract-canvas h1, .snip-contract-canvas h2, .snip-contract-canvas h3 {
                     font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-                    font-weight: 800;
+                    font-weight: 600;
                     letter-spacing: -0.015em;
                     color: var(--foreground);
                     line-height: 1.2;
@@ -903,7 +903,7 @@ function ContractFullPage() {
                   .snip-contract-canvas h1 {
                     font-size: 42px;
                     margin: 0.4em 0 0.6em;
-                    font-weight: 900;
+                    font-weight: 600;
                   }
                   .snip-contract-canvas h2 {
                     font-size: 28px;
@@ -925,15 +925,17 @@ function ContractFullPage() {
                   .snip-contract-canvas strong { font-weight: 700; }
                   .snip-contract-canvas em { font-style: italic; }
                   .snip-contract-canvas blockquote {
-                    border-left: 3px solid #FF6600;
-                    padding-left: 1em;
+                    border: 1px solid #E8E8EC;
+                    border-radius: 11px;
+                    background: #FAFAFA;
+                    padding: 10px 12px;
                     margin: 1.2em 0;
                     font-style: italic;
-                    color: var(--foreground-muted);
+                    color: #6E6E73;
                   }
                   .snip-contract-canvas hr {
                     border: none;
-                    border-top: 1px solid var(--foreground);
+                    border-top: 1px solid #E8E8EC;
                     margin: 2em auto;
                     width: 60%;
                   }
@@ -944,22 +946,22 @@ function ContractFullPage() {
                   }
                   .snip-contract-canvas .page-break {
                     border: none;
-                    border-top: 2px dashed var(--foreground-subtle);
+                    border-top: 1px dashed #D8D8DE;
                     margin: 3.5em -2em;
                     position: relative;
                   }
                   .snip-contract-canvas .page-break::after {
-                    content: 'PAGE BREAK';
+                    content: 'Page break';
                     position: absolute;
                     top: -10px;
                     left: 50%;
                     transform: translateX(-50%);
-                    background: var(--background);
-                    color: var(--foreground-muted);
-                    font-family: ui-monospace, monospace;
-                    font-size: 9px;
-                    font-weight: 700;
-                    letter-spacing: 0.15em;
+                    background: #FAFAFA;
+                    color: #A0A0A5;
+                    font-family: 'Inter Tight', system-ui, sans-serif;
+                    font-size: 11px;
+                    font-weight: 500;
+                    letter-spacing: 0;
                     padding: 0 8px;
                   }
                 `}</style>
@@ -1017,9 +1019,9 @@ function ContractFullPage() {
                 className="mt-10 mx-auto w-full max-w-[740px] block group px-4 sm:px-0"
                 title="Add a new page"
               >
-                <div className="text-[#888] border-2 border-dashed border-[#1a1a1a]/25 py-10 flex flex-col items-center justify-center gap-2 group-hover:border-[#1a1a1a]/60 group-hover:text-[#1a1a1a] transition-colors">
+                <div className="flex flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#D8D8DE] bg-white py-10 text-[#A0A0A5] transition-colors group-hover:border-[#A0A0A5] group-hover:text-[#6E6E73]">
                   <FilePlus2 className="h-5 w-5" />
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider">
+                  <span className="text-xs font-medium">
                     Add page
                   </span>
                 </div>
@@ -1027,7 +1029,7 @@ function ContractFullPage() {
 
 
             {originalFilename ? (
-              <div className="max-w-[740px] mx-auto mt-3 text-center text-xs font-mono text-[#888]">
+              <div className="mx-auto mt-3 max-w-[740px] text-center text-xs text-[#6E6E73]">
                 Originally imported from{" "}
                 <strong>{originalFilename}</strong>
               </div>
@@ -1039,10 +1041,10 @@ function ContractFullPage() {
               of the gray scroll area. Sticky to the editor column so
               it stays visible while you scroll the doc. */}
           <div className="pointer-events-none absolute left-4 bottom-4 z-10">
-            <div className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[10px] font-mono font-bold uppercase tracking-wider">
-              <span>page</span>
-              <span className="text-[#1a1a1a]">{currentPage}</span>
-              <span className="text-[#888]">/</span>
+            <div className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-2.5 py-1 text-xs font-medium text-[#6E6E73]">
+              <span>Page</span>
+              <span className="text-[#131315]">{currentPage}</span>
+              <span className="text-[#A0A0A5]">/</span>
               <span>{totalPages}</span>
             </div>
           </div>
@@ -1114,7 +1116,7 @@ function FullPageField({
 }) {
   return (
     <label className={full ? "col-span-2 block" : "block"}>
-      <div className="text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
+      <div className="mb-1 text-[13px] font-medium text-[#6E6E73]">
         {label}
       </div>
       {children}
@@ -1143,12 +1145,10 @@ function ToggleChip({
       type="button"
       onClick={onClick}
       className={cn(
-        // Brutalist drop-shadow + 2px border so every chip in the
-        // strip reads the same way as the Share/Download buttons.
-        "inline-flex h-9 items-center gap-1.5 px-3 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-all shadow-[4px_4px_0px_0px_var(--shadow-color)] active:translate-y-[2px] active:translate-x-[2px]",
+        "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium transition-colors",
         active
-          ? "bg-[#1a1a1a] text-[#f0f0e8]"
-          : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)]",
+          ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+          : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
       )}
     >
       {icon}
@@ -1183,12 +1183,10 @@ function TopBarIconButton({
       disabled={disabled}
       title={title}
       className={cn(
-        // Same drop-shadow chrome as ToggleChip so the icon buttons
-        // sit on the same visual baseline as Versions / Comments.
-        "inline-flex h-9 w-9 items-center justify-center border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-[4px_4px_0px_0px_var(--shadow-color)] active:translate-y-[2px] active:translate-x-[2px] disabled:shadow-none hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)]",
+        "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#131315] transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         variant === "danger"
-          ? "hover:bg-[#dc2626] hover:text-[#f0f0e8] hover:border-[#dc2626]"
-          : "hover:bg-[#1a1a1a] hover:text-[#f0f0e8]",
+          ? "text-[#D8434F] hover:bg-[#FFF5F5]"
+          : "hover:bg-[#F1F1F3]",
       )}
       {...rest}
     >
@@ -1212,19 +1210,19 @@ function SidePanel({
   children: React.ReactNode;
 }) {
   return (
-    <aside className="hidden lg:flex w-72 flex-shrink-0 flex-col border-l-2 border-[#1a1a1a] bg-[#f0f0e8]">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b-2 border-[#1a1a1a]">
-        <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+    <aside className="hidden w-72 flex-shrink-0 flex-col border-l border-[#E8E8EC] bg-white lg:flex">
+      <div className="flex items-center justify-between gap-2 border-b border-[#F1F1F3] px-3 py-2">
+        <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
           {title}
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="p-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]"
+          className="rounded-full p-1 text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
           title="Close panel"
           aria-label="Close panel"
         >
-          ✕
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-3">{children}</div>
@@ -1252,17 +1250,17 @@ function AutosaveIndicator({
 }) {
   if (busy) {
     return (
-      <span className="text-xs font-mono text-[#888]">Saving…</span>
+      <span className="text-xs text-[#6E6E73]">Saving…</span>
     );
   }
   if (dirty) {
     return (
-      <span className="text-xs font-mono text-[#b45309]">Unsaved</span>
+      <span className="text-xs text-[#74521D]">Unsaved</span>
     );
   }
   if (lastSavedAt) {
     return (
-      <span className="text-xs font-mono text-[#888]">
+      <span className="text-xs text-[#6E6E73]">
         Saved {new Date(lastSavedAt).toLocaleTimeString()}
       </span>
     );

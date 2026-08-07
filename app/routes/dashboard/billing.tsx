@@ -1,1050 +1,569 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@convex/_generated/api";
-import { Id } from "@convex/_generated/dataModel";
+import type { Id } from "@convex/_generated/dataModel";
 import { DashboardHeader } from "@/components/DashboardHeader";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StorageUsageBar } from "@/components/StorageUsageBar";
+import { StoragePlanner } from "@/components/StoragePlanner";
+import { AddOnsSection } from "@/components/AddOnsSection";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  CreditCard,
-  Users,
-  Receipt,
-  Check,
-  CheckCircle,
-  AlertCircle,
-  ExternalLink,
-  RefreshCw,
-  HardDrive,
-  Wallet,
-} from "lucide-react";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { AlertCircle, CheckCircle, ExternalLink, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { seoHead } from "@/lib/seo";
-import { StorageUsageBar } from "@/components/StorageUsageBar";
-import { EnterpriseUpsellBanner } from "@/components/EnterpriseUpsellBanner";
-import { AddOnsSection } from "@/components/AddOnsSection";
+import { formatBytes } from "@/lib/storagePricing";
+import {
+  buildRequirementList,
+  derivePayoutState,
+  describePayoutState,
+} from "@/lib/stripeRequirements";
 
 export const Route = createFileRoute("/dashboard/billing")({
   head: () =>
     seoHead({
-      title: "Billing & usage",
-      description: "Manage your workspace subscription.",
+      title: "Billing & Invoices",
+      description: "Manage your Snip plan, invoices, and client payouts.",
       path: "/dashboard/billing",
       noIndex: true,
     }),
   component: BillingRoute,
 });
 
-/**
- * Account-level billing page.
- *
- * Pricing shape (flat base + per-seat overage) is sourced from
- * api.workspaceBilling.getMySubscription. The seat count is computed
- * live across every team the user participates in, so adding a
- * collaborator anywhere updates the monthly total without any
- * action here.
- *
- * The CTA flips between "Activate" (no subscription yet),
- * "Subscribed" (active), or "Reactivate" (canceled). In demo mode
- * the buttons hit simulate* mutations; real Stripe Checkout swaps in
- * later.
- */
+type InvoiceRow = {
+  id: string;
+  createdAt: number;
+  description: string;
+  status: string;
+  amountPaidCents: number;
+  currency: string;
+  hostedInvoiceUrl: string | null;
+};
+
+const softCard =
+  "rounded-[14px] border border-[#E8E8EC] bg-white px-5 py-5 sm:px-6 sm:py-[22px]";
+
 function BillingRoute() {
   const subscription = useQuery(api.workspaceBilling.getMySubscription, {});
-  const tiers = useQuery(api.workspaceBilling.listTiers, {});
+  const storageUsage = useQuery(api.workspaceBilling.getMyStorageUsage, {});
   const demoStatus = useQuery(api.demoSeed.isDemoMode, {});
+  const createCheckout = useAction(api.workspaceBillingActions.createCheckout);
+  const createPortal = useAction(api.workspaceBillingActions.createPortal);
   const simulateActivate = useMutation(api.workspaceBilling.simulateActivate);
-  const cancel = useMutation(api.workspaceBilling.simulateCancel);
-  const createCheckout = useAction(
-    api.workspaceBillingActions.createCheckout,
-  );
+  const [planOpen, setPlanOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [activationNote, setActivationNote] = useState<string | null>(null);
-  // Annual prepay toggle. Defaults to monthly so the existing flow
-  // for users who don't know to look at the toggle is unchanged. The
-  // 17% discount badge inline next to each tier signals the
-  // alternative is there.
-  const [cadence, setCadence] = useState<"monthly" | "annual">("monthly");
+  const [notice, setNotice] = useState<{
+    kind: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
 
-  const isLoading = subscription === undefined;
-  const isAuthed = subscription !== null;
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("checkout");
+    if (result === "success") {
+      setNotice({
+        kind: "success",
+        message: "Payment received. Your plan will update when Stripe confirms it.",
+      });
+    } else if (result === "cancel") {
+      setNotice({ kind: "warning", message: "Nothing changed." });
+    }
+  }, []);
 
-  const handleActivate = async (plan: string) => {
-    setBusy(`activate:${plan}`);
-    setActivationNote(null);
+  const activate = async (plan: "basic" | "pro") => {
+    setBusy(`checkout:${plan}`);
+    setNotice(null);
     try {
-      // Ask the server: real Stripe Checkout, or demo simulate?
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
+      const origin = window.location.origin;
       const result = await createCheckout({
         plan,
-        cadence,
+        cadence: "monthly",
         successUrl: `${origin}/dashboard/billing?checkout=success`,
         cancelUrl: `${origin}/dashboard/billing?checkout=cancel`,
       });
       if (result.kind === "redirect") {
-        if (typeof window !== "undefined") {
-          window.location.assign(result.url);
-        }
+        window.location.assign(result.url);
         return;
       }
-      // Fallback path — Stripe isn't fully configured. Activate
-      // locally so the user can still test the rest of the app.
       await simulateActivate({ plan });
-      setActivationNote(result.reason);
+      setNotice({ kind: "warning", message: result.reason });
+      setPlanOpen(false);
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Checkout could not be started.",
+      });
     } finally {
       setBusy(null);
     }
   };
-  const handleCancel = async () => {
-    if (!confirm("Cancel your workspace subscription at the end of the period?")) {
-      return;
-    }
-    setBusy("cancel");
+
+  const openPortal = async () => {
+    setBusy("portal");
+    setNotice(null);
     try {
-      await cancel({});
+      const session = await createPortal({
+        returnUrl: `${window.location.origin}/dashboard/billing`,
+      });
+      window.location.assign(session.url);
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "The Stripe billing portal could not be opened.",
+      });
     } finally {
       setBusy(null);
     }
   };
+
+  const isLive = subscription?.status === "active" || subscription?.status === "trialing";
 
   return (
-    <div className="h-full flex flex-col">
-      <DashboardHeader paths={[{ label: "Billing & usage" }]} />
-
-      <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-8">
-        <div className="mx-auto w-full max-w-4xl">
-          <h1 className="text-3xl font-black tracking-tight text-[#1a1a1a]">
-            Billing &amp; usage
+    <div className="flex h-full flex-col">
+      <DashboardHeader paths={[{ label: "Billing & Invoices" }]} />
+      <main className="surface-billing-soft flex-1 overflow-y-auto bg-[#FAFAFA] px-4 py-8 text-[#131315] sm:px-8 lg:px-14 lg:py-10">
+        <div className="w-full max-w-[1120px] space-y-3.5">
+          <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">
+            Billing &amp; Invoices
           </h1>
-          <p className="text-sm text-[#666] mt-1 max-w-prose">
-            One subscription covers all your teams. You pay a flat monthly
-            fee plus a small per-seat amount for each collaborator beyond
-            the included seats.
-          </p>
 
-          {isLoading || !isAuthed ? (
-            <div className="mt-8 text-sm text-[#888]">Loading…</div>
+          {notice ? <Notice kind={notice.kind}>{notice.message}</Notice> : null}
+
+          {subscription === undefined ? (
+            <SoftSkeleton />
+          ) : subscription === null ? (
+            <Notice kind="warning">Sign in to manage billing.</Notice>
           ) : (
             <>
-              <PricingCard
-                plan={subscription.plan}
-                status={subscription.status}
-                baseCents={subscription.baseCents}
-                perSeatCents={subscription.perSeatCents}
-                includedSeats={subscription.includedSeats}
-                seatCount={subscription.seatCount}
-                overageSeats={subscription.overageSeats}
-                monthlyCents={subscription.monthlyCents}
+              <section className={cn(softCard, "flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between")}>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <h2 className="text-base font-semibold capitalize">{subscription.plan}</h2>
+                    <span className="rounded-full bg-[#F1F1F3] px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-[#6E6E73]">
+                      {subscription.billingCadence === "annual" ? "Annual" : "Monthly"}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-[28px] font-semibold leading-8 tracking-[-0.03em]">
+                    {formatMoney(subscription.monthlyCents, subscription.currency)}
+                    <span className="ml-1 text-sm font-normal tracking-normal text-[#6E6E73]">/ mo.</span>
+                  </p>
+                  <p className="mt-2 text-sm leading-5 text-[#6E6E73]">
+                    {formatPlanDescription(subscription.plan, subscription.storageLimitBytes)}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-[#6E6E73]">
+                    {subscription.cancelAtPeriodEnd
+                      ? `Ends ${formatDate(subscription.currentPeriodEnd)}.`
+                      : subscription.currentPeriodEnd
+                        ? `Renews on ${formatDate(subscription.currentPeriodEnd)}.`
+                        : "No renewal scheduled."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPlanOpen(true)}
+                  className="shrink-0 rounded-full border border-[#DADADD] bg-white px-4 py-2 text-[13px] font-medium transition-colors hover:bg-[#F7F7F8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315]"
+                >
+                  Adjust plan
+                </button>
+              </section>
+
+              <InvoicesCard
+                enabled={Boolean(subscription.stripeCustomerId)}
                 currency={subscription.currency}
-                currentPeriodEnd={subscription.currentPeriodEnd}
+                onOpenPortal={() => void openPortal()}
+                portalBusy={busy === "portal"}
               />
 
-              {/* Tier picker. Active sub shows a Cancel button; otherwise
-                  each tier card has its own Activate CTA. */}
-              <div className="mt-8">
-                <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
-                  <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888]">
-                    {subscription.status === "active" ||
-                    subscription.status === "trialing"
-                      ? "Change plan"
-                      : "Choose a plan"}
-                  </h2>
-                  {/* Monthly / Annual toggle. Annual prepay is 17% off
-                      (10 months for 12). The chosen cadence is passed
-                      to createCheckout and picks the right Stripe
-                      price ID server-side. */}
-                  <div
-                    className="inline-flex border-2 border-[#1a1a1a] bg-[#f0f0e8]"
-                    role="tablist"
-                    aria-label="Billing cadence"
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={cadence === "monthly"}
-                      onClick={() => setCadence("monthly")}
-                      className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider transition-colors ${
-                        cadence === "monthly"
-                          ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                          : "text-[#1a1a1a] hover:bg-[#e8e8e0]"
-                      }`}
-                    >
-                      Monthly
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={cadence === "annual"}
-                      onClick={() => setCadence("annual")}
-                      className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider transition-colors border-l-2 border-[#1a1a1a] ${
-                        cadence === "annual"
-                          ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                          : "text-[#1a1a1a] hover:bg-[#e8e8e0]"
-                      }`}
-                    >
-                      Annual <span className="text-[#C2410C]">−17%</span>
-                    </button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {(tiers ?? [])
-                    .filter((t) => t.plan !== "enterprise")
-                    .map((tier) => {
-                    const isCurrent =
-                      tier.plan === "free"
-                        ? subscription.plan === "free"
-                        : (subscription.status === "active" ||
-                            subscription.status === "trialing") &&
-                          subscription.plan === tier.plan;
-                    return (
-                      <TierCard
-                        key={tier.plan}
-                        plan={tier.plan}
-                        label={tier.label}
-                        cadence={cadence}
-                        baseCents={tier.baseCents}
-                        perSeatCents={tier.perSeatCents}
-                        includedSeats={tier.includedSeats}
-                        storageBytes={tier.storageBytes}
-                        currency={tier.currency}
-                        features={tier.features}
-                        isCurrent={isCurrent}
-                        busy={busy === `activate:${tier.plan}`}
-                        disabled={busy !== null}
-                        onActivate={() => void handleActivate(tier.plan)}
-                      />
-                    );
-                  })}
-                </div>
-                {(subscription.status === "active" ||
-                  subscription.status === "trialing") && (
-                  <div className="mt-4">
-                    <Button
-                      variant="outline"
-                      onClick={() => void handleCancel()}
-                      disabled={busy !== null}
-                    >
-                      {busy === "cancel"
-                        ? "Cancelling…"
-                        : "Cancel subscription"}
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {activationNote ? (
-                <div className="mt-4 inline-flex items-start gap-2 border-2 border-[#b45309] bg-[#fdf6e3] px-3 py-2 text-xs max-w-2xl">
-                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0 text-[#b45309]" />
-                  <div>
-                    <strong>Activated in demo mode.</strong> {activationNote}
-                  </div>
-                </div>
-              ) : demoStatus?.enabled ? (
-                <div className="mt-4 inline-flex items-start gap-2 border-2 border-[#1a1a1a] bg-[#e8e8e0] px-3 py-2 text-xs">
-                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <strong>Demo mode.</strong> No Stripe keys are
-                    configured, so activation is simulated locally — no
-                    card is charged. Set STRIPE_SECRET_KEY +
-                    STRIPE_PRICE_BASIC_MONTHLY +
-                    STRIPE_PRICE_PRO_MONTHLY in Convex to enable real
-                    Checkout.
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="mt-8">
-                <EnterpriseUpsellBanner />
-              </div>
-
-              <StorageUsageBar variant="full" />
-
-              <DriveFirstSection />
-
-              <SeatBreakdown
-                seatCount={subscription.seatCount}
-                includedSeats={subscription.includedSeats}
-              />
-
-              {subscription.plan === "enterprise" && <EnterpriseUsage />}
-
-              <AddOnsSection />
+              <div className="h-0.5 bg-[#DDDDDF]" />
 
               <PayoutsSection />
+
+              <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+                <DialogContent className="surface-client max-h-[88vh] max-w-3xl overflow-y-auto rounded-2xl border border-[#E8E8EC] bg-white p-6 text-[#131315] sm:p-8">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-semibold">Adjust plan</DialogTitle>
+                    <DialogDescription className="text-sm text-[#6E6E73]">
+                      Storage, plan controls, and optional add-ons.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="mt-5 space-y-5">
+                    <StorageUsageBar variant="full" />
+                    <StoragePlanner
+                      currentPlan={subscription.plan}
+                      usedBytes={storageUsage?.usedBytes ?? 0}
+                      busy={busy?.startsWith("checkout:") ?? false}
+                      onChoose={(plan) => {
+                        if (isLive && subscription.stripeCustomerId) {
+                          void openPortal();
+                        } else {
+                          void activate(plan);
+                        }
+                      }}
+                    />
+                    {isLive && subscription.stripeCustomerId ? (
+                      <p className="text-xs text-[#6E6E73]">
+                        Active-plan changes finish in Stripe.
+                      </p>
+                    ) : null}
+                    {demoStatus?.enabled ? (
+                      <p className="text-xs text-[#6E6E73]">
+                        Demo mode is on. Checkout simulates activation when Stripe is absent.
+                      </p>
+                    ) : null}
+                    <AddOnsSection />
+                  </div>
+                </DialogContent>
+              </Dialog>
             </>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
 
-function TierCard({
-  plan,
-  label,
-  baseCents,
-  perSeatCents,
-  includedSeats,
-  storageBytes,
-  currency,
-  features,
-  isCurrent,
-  busy,
-  disabled,
-  cadence = "monthly",
-  onActivate,
-}: {
-  plan: string;
-  label: string;
-  baseCents: number;
-  perSeatCents: number;
-  includedSeats: number;
-  storageBytes: number;
-  currency: string;
-  features: string[];
-  isCurrent: boolean;
-  busy: boolean;
-  disabled: boolean;
-  cadence?: "monthly" | "annual";
-  onActivate: () => void;
-}) {
-  // Annual prepay shows the per-month equivalent (17% off) so the
-  // sticker price stays comparable. Stripe still bills the annual
-  // total up-front; we just display the monthly-equivalent here.
-  const isAnnual = cadence === "annual" && baseCents > 0;
-  const displayCents = isAnnual ? Math.round((baseCents * 10) / 12) : baseCents;
-  const cadenceSuffix = isAnnual ? "/ mo · billed yearly" : "/ month";
-  // The "current" card flips to the forest-green inverted treatment
-  // (used elsewhere for active/badge states). This keeps text legible
-  // in both light and dark themes — the cream-on-cream variant the
-  // previous version used became invisible after the theme tokens
-  // remapped #1a1a1a.
-  return (
-    <div
-      className={cn(
-        "border-2 p-5 flex flex-col gap-3",
-        isCurrent
-          ? "border-[#FF6600] bg-[#FF6600] text-[#f0f0e8]"
-          : "border-[#1a1a1a] bg-[#f0f0e8]",
-      )}
-    >
-      <div className="flex items-baseline gap-2 justify-between">
-        <div
-          className={cn(
-            "font-black text-lg tracking-tight",
-            isCurrent ? "text-[#f0f0e8]" : "text-[#1a1a1a]",
-          )}
-        >
-          {label}
-        </div>
-        {isCurrent ? (
-          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 bg-[#f0f0e8] text-[#FF6600] font-bold">
-            current
-          </span>
-        ) : (
-          <span className="text-[10px] font-mono uppercase tracking-wider text-[#888]">
-            {plan}
-          </span>
-        )}
-      </div>
-      <div className="flex items-baseline gap-1">
-        <span
-          className={cn(
-            "font-mono font-black text-3xl",
-            isCurrent ? "text-[#f0f0e8]" : "text-[#1a1a1a]",
-          )}
-        >
-          {formatMoney(displayCents, currency)}
-        </span>
-        <span
-          className={cn(
-            "text-xs",
-            isCurrent ? "text-[#FFB380]" : "text-[#666]",
-          )}
-        >
-          {cadenceSuffix}
-        </span>
-      </div>
-      <div
-        className={cn(
-          "text-xs font-mono",
-          isCurrent ? "text-[#c8e0c8]" : "text-[#888]",
-        )}
-      >
-        {includedSeats} seats included · {formatMoney(perSeatCents, currency)} /
-        additional seat
-      </div>
-      <div
-        className={cn(
-          "text-xs font-mono flex items-center gap-1.5",
-          isCurrent ? "text-[#c8e0c8]" : "text-[#888]",
-        )}
-      >
-        <HardDrive className="h-3 w-3" />
-        {formatStorage(storageBytes)} storage
-      </div>
-      <ul
-        className={cn(
-          "text-sm space-y-1 mt-1",
-          isCurrent ? "text-[#f0f0e8]" : "text-[#1a1a1a]",
-        )}
-      >
-        {features.map((f) => (
-          <li key={f} className="flex items-start gap-2">
-            <Check
-              className={cn(
-                "h-3.5 w-3.5 mt-0.5 flex-shrink-0",
-                isCurrent ? "text-[#FFB380]" : "text-[#FF6600]",
-              )}
-            />
-            <span>{f}</span>
-          </li>
-        ))}
-      </ul>
-      <Button
-        onClick={onActivate}
-        disabled={isCurrent || disabled || plan === "free"}
-        variant={isCurrent ? "outline" : "default"}
-        className={cn(
-          "mt-auto",
-          isCurrent
-            ? "bg-transparent border-[#f0f0e8] text-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#FF6600]"
-            : "bg-[#FF6600] hover:bg-[#FF7A1F]",
-        )}
-      >
-        <CreditCard className="h-4 w-4 mr-1.5" />
-        {isCurrent
-          ? "Current plan"
-          : plan === "free"
-            ? "Default plan"
-            : busy
-              ? "Activating…"
-              : "Switch to this plan"}
-      </Button>
-    </div>
-  );
-}
-
-const GIBIBYTE = 1024 ** 3;
-const TEBIBYTE = 1024 ** 4;
-
-function formatStorage(bytes: number): string {
-  if (bytes >= TEBIBYTE) return `${(bytes / TEBIBYTE).toFixed(0)} TB`;
-  return `${Math.round(bytes / GIBIBYTE)} GB`;
-}
-
-function PricingCard({
-  plan,
-  status,
-  baseCents,
-  perSeatCents,
-  includedSeats,
-  seatCount,
-  overageSeats,
-  monthlyCents,
-  currency,
-  currentPeriodEnd,
-}: {
-  plan: string;
-  status: string;
-  baseCents: number;
-  perSeatCents: number;
-  includedSeats: number;
-  seatCount: number;
-  overageSeats: number;
-  monthlyCents: number;
-  currency: string;
-  currentPeriodEnd: number | undefined;
-}) {
-  const isActive = status === "active" || status === "trialing";
-  return (
-    <div className="mt-6 border-2 border-[#1a1a1a] bg-[#f0f0e8]">
-      <div className="px-5 py-4 border-b-2 border-[#1a1a1a] flex items-center gap-2 flex-wrap">
-        <div className="font-black text-sm uppercase tracking-tight">
-          {plan === "studio_v1" ? "Studio plan" : plan}
-        </div>
-        <Badge variant={isActive ? "success" : "secondary"}>
-          {status === "active"
-            ? "Active"
-            : status === "trialing"
-              ? "Trial"
-              : status === "canceled"
-                ? "Canceled"
-                : status === "past_due"
-                  ? "Past due"
-                  : "Not subscribed"}
-        </Badge>
-        {currentPeriodEnd && isActive ? (
-          <span className="text-xs font-mono text-[#888] ml-auto">
-            renews {new Date(currentPeriodEnd).toLocaleDateString()}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y-2 sm:divide-y-0 sm:divide-x-2 divide-[#1a1a1a]">
-        <PricingRow
-          label="Base"
-          help={`Includes ${includedSeats} seats.`}
-          amountCents={baseCents}
-          currency={currency}
-        />
-        <PricingRow
-          label="Per additional seat"
-          help={`${overageSeats} extra seat${overageSeats === 1 ? "" : "s"} this period.`}
-          amountCents={perSeatCents}
-          currency={currency}
-          accent={overageSeats > 0}
-        />
-      </div>
-
-      <div
-        className={cn(
-          "px-5 py-4 border-t-2 border-[#1a1a1a] flex items-center justify-between gap-2",
-          isActive ? "bg-[#1a1a1a] text-[#f0f0e8]" : "bg-[#e8e8e0]",
-        )}
-      >
-        <div className="flex items-center gap-2">
-          <Receipt className="h-4 w-4" />
-          <span className="font-black text-sm uppercase tracking-tight">
-            Total per month
-          </span>
-        </div>
-        <div className="font-mono font-black text-xl">
-          {formatMoney(monthlyCents, currency)}
-        </div>
-      </div>
-
-      <div className="px-5 py-2 text-[10px] font-mono text-[#888] uppercase tracking-wider border-t border-[#ccc]">
-        {seatCount} seat{seatCount === 1 ? "" : "s"} ·{" "}
-        {overageSeats > 0
-          ? `${overageSeats} over included`
-          : `${includedSeats - seatCount} seat${
-              includedSeats - seatCount === 1 ? "" : "s"
-            } left in plan`}
-      </div>
-    </div>
-  );
-}
-
-function PricingRow({
-  label,
-  help,
-  amountCents,
-  currency,
-  accent,
-}: {
-  label: string;
-  help?: string;
-  amountCents: number;
-  currency: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="px-5 py-4 flex items-start gap-3">
-      <div className="flex-shrink-0 w-8 h-8 border-2 border-[#1a1a1a] flex items-center justify-center bg-[#e8e8e0]">
-        {accent ? (
-          <Users className="h-4 w-4 text-[#FF6600]" />
-        ) : (
-          <Check className="h-4 w-4 text-[#888]" />
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-bold text-sm uppercase tracking-wider">
-          {label}
-        </div>
-        {help ? (
-          <div className="text-xs text-[#666] mt-0.5">{help}</div>
-        ) : null}
-      </div>
-      <div className="font-mono font-bold text-base text-[#1a1a1a]">
-        {formatMoney(amountCents, currency)}
-      </div>
-    </div>
-  );
-}
-
-function SeatBreakdown({
-  seatCount,
-  includedSeats,
-}: {
-  seatCount: number;
-  includedSeats: number;
-}) {
-  return (
-    <section className="mt-10 border-2 border-[#1a1a1a] p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <Users className="h-4 w-4" />
-        <h2 className="font-black text-sm uppercase tracking-tight">
-          Seat usage
-        </h2>
-      </div>
-      <div className="h-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] relative">
-        <div
-          className={cn(
-            "absolute inset-y-0 left-0",
-            seatCount > includedSeats ? "bg-[#b45309]" : "bg-[#FF6600]",
-          )}
-          style={{
-            width: `${Math.min(100, (seatCount / Math.max(includedSeats, 1)) * 100)}%`,
-          }}
-        />
-      </div>
-      <div className="mt-2 text-xs font-mono text-[#666] flex items-center justify-between">
-        <span>
-          {seatCount} / {includedSeats} included
-        </span>
-        {seatCount > includedSeats ? (
-          <span className="text-[#b45309]">
-            +{seatCount - includedSeats} overage
-          </span>
-        ) : null}
-      </div>
-      <p className="text-xs text-[#666] mt-3 max-w-prose">
-        A seat is any unique person across your teams — owners, members,
-        and viewers all count. Invite or remove collaborators from each
-        team's settings page.
-      </p>
-    </section>
-  );
-}
-
-function formatMoney(cents: number, currency: string) {
-  const amount = cents / 100;
-  return amount.toLocaleString(undefined, {
-    style: "currency",
-    currency: currency.toUpperCase(),
-    maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
-  });
-}
-
-/**
- * Payouts (per-team Stripe Connect) used to live under each team's
- * settings. It now sits with billing so all money-in/money-out controls
- * are in one place. Receiving client money is still team-scoped, so this
- * lists every team the user belongs to with its own Connect card.
- */
-/**
- * Pay-as-you-go usage table. Only rendered for enterprise subscribers.
- * Reads `usageMeters.getCurrentPeriod` which returns the current
- * billing period's running totals (or zeros if nothing's recorded
- * yet). Values are local — the daily cron pushes them to Stripe.
- */
-function EnterpriseUsage() {
-  const period = useQuery(api.usageMeters.getCurrentPeriod, {});
-  const tiers = useQuery(api.workspaceBilling.listTiers, {});
-  const enterprise = tiers?.find((t) => t.plan === "enterprise");
-  if (!period || !enterprise?.meters) return null;
-
-  const rates = enterprise.meters;
-
-  const rows = [
-    {
-      label: "Storage",
-      value: period.storageBytesGbMonths,
-      unit: "GB-mo",
-      cents: rates.storageGbMonthCents,
-      rateUnit: "/ GB-mo",
-    },
-    {
-      label: "Egress",
-      value: period.egressBytesGb,
-      unit: "GB",
-      cents: rates.egressGbCents,
-      rateUnit: "/ GB",
-    },
-    {
-      label: "Seats",
-      value: period.seatCount,
-      unit: "",
-      cents: rates.perSeatCents,
-      rateUnit: "/ seat / mo",
-    },
-    {
-      label: "Transcription",
-      value: period.transcribedMinutes / 1000,
-      unit: "1k min",
-      cents: rates.transcriptionPer1kMinCents,
-      rateUnit: "/ 1k min",
-    },
-  ];
-
-  return (
-    <div className="mt-8">
-      <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#888] mb-3">
-        This period's usage
-      </h2>
-      <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8]">
-        <div className="grid grid-cols-4 divide-x-2 divide-[#1a1a1a]/15">
-          {rows.map((row) => (
-            <div key={row.label} className="p-4">
-              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-                {row.label}
-              </div>
-              <div className="mt-2 text-2xl font-black tracking-tighter text-[#1a1a1a]">
-                {row.value.toFixed(2)}
-                {row.unit && (
-                  <span className="text-xs text-[#888] ml-1 font-mono font-normal">
-                    {row.unit}
-                  </span>
-                )}
-              </div>
-              <div className="text-[10px] text-[#C2410C] font-mono mt-1">
-                ${(row.cents / 100).toFixed(2)} {row.rateUnit}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="border-t-2 border-[#1a1a1a] px-4 py-2 text-[10px] font-mono text-[#888]">
-          Reported daily to Stripe at 03:00 UTC. Period ends{" "}
-          {new Date(period.periodEnd).toLocaleDateString()}.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Drive-first storage policy, per owned team. When on, uploads to that
- * team defer cloud encoding and their source bytes drop off the storage
- * cap — the source is served from the connected drive/LucidLink mount.
- * This is the cost floor for teams that can edit off a shared drive.
- * Owner-only; teams the user merely belongs to aren't shown.
- */
-function DriveFirstSection() {
-  const teams = useQuery(api.teams.list, {});
-  const ownedTeams = (teams ?? []).filter((t) => t.role === "owner");
-
-  if (teams === undefined || ownedTeams.length === 0) return null;
-
-  return (
-    <section className="mt-10">
-      <div className="flex items-center gap-2 mb-1">
-        <HardDrive className="h-4 w-4" />
-        <h2 className="font-black text-sm uppercase tracking-tight">
-          Drive-first storage
-        </h2>
-      </div>
-      <p className="text-sm text-[#666] mb-4 max-w-prose">
-        Serve footage straight from a connected drive instead of holding a
-        cloud copy. New uploads skip eager encoding and stop counting against
-        your storage cap — full quality is rebuilt on demand the first time
-        someone watches, or for paywalled delivery. Best when your team edits
-        off a shared drive (LucidLink, SAN, NAS).
-      </p>
-      <div className="space-y-3">
-        {ownedTeams.map((team) => (
-          <DriveFirstToggle
-            key={team._id}
-            teamId={team._id as Id<"teams">}
-            teamName={team.name}
-            enabled={team.driveFirstStorage === true}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function DriveFirstToggle({
-  teamId,
-  teamName,
+function InvoicesCard({
   enabled,
+  currency,
+  onOpenPortal,
+  portalBusy,
 }: {
-  teamId: Id<"teams">;
-  teamName: string;
   enabled: boolean;
+  currency: string;
+  onOpenPortal: () => void;
+  portalBusy: boolean;
 }) {
-  const setDriveFirst = useMutation(api.teams.setDriveFirstStorage);
-  const [pending, setPending] = useState(false);
+  const listInvoices = useAction(api.workspaceBillingActions.listRecentInvoices);
+  const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const toggle = async () => {
-    setPending(true);
-    try {
-      await setDriveFirst({ teamId, enabled: !enabled });
-    } finally {
-      setPending(false);
+  useEffect(() => {
+    if (!enabled) {
+      setInvoices([]);
+      return;
     }
-  };
+    let canceled = false;
+    void listInvoices({ limit: 6 })
+      .then((rows) => {
+        if (!canceled) setInvoices(rows);
+      })
+      .catch((cause) => {
+        if (!canceled) {
+          setError(cause instanceof Error ? cause.message : "Invoices could not be loaded.");
+          setInvoices([]);
+        }
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [enabled, listInvoices]);
 
   return (
-    <div className="flex items-center justify-between gap-4 border-2 border-[#1a1a1a] px-4 py-3">
-      <div>
-        <div className="font-bold text-sm">{teamName}</div>
-        <div className="text-xs font-mono uppercase tracking-wider text-[#888]">
-          {enabled ? "Drive-first · on" : "Cloud storage · default"}
+    <section className={softCard} aria-labelledby="invoices-heading">
+      <CardHeading
+        id="invoices-heading"
+        title="Invoices"
+        subtitle="What you paid Snip."
+        aside={<PeriodPill />}
+      />
+      <div className="mt-4">
+        <div className="hidden grid-cols-[130px_minmax(0,1fr)_110px_120px_80px] pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#A0A0A5] md:grid">
+          <span>Date</span><span>Description</span><span>Status</span><span className="text-right">Amount</span><span className="text-right">Invoice</span>
         </div>
+        {invoices === null ? (
+          <p className="border-t border-[#F1F1F3] py-4 text-sm text-[#6E6E73]">Loading invoices…</p>
+        ) : invoices.length === 0 ? (
+          <div className="flex flex-col gap-3 border-t border-[#F1F1F3] py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-[#6E6E73]">{error ?? "No Snip invoices yet."}</p>
+            {enabled ? (
+              <button type="button" onClick={onOpenPortal} disabled={portalBusy} className="text-left text-sm font-medium hover:underline">
+                {portalBusy ? "Opening…" : "Open Stripe"}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          invoices.map((invoice) => (
+            <div key={invoice.id} className="grid gap-1 border-t border-[#F1F1F3] py-3 text-sm md:grid-cols-[130px_minmax(0,1fr)_110px_120px_80px] md:items-center md:gap-0">
+              <span className="text-[#6E6E73]">{formatDate(invoice.createdAt)}</span>
+              <span className="min-w-0 truncate">{invoice.description}</span>
+              <span className="capitalize text-[#6E6E73]">{invoice.status}</span>
+              <span className="md:text-right">{formatMoney(invoice.amountPaidCents, invoice.currency || currency)}</span>
+              <span className="md:text-right">
+                {invoice.hostedInvoiceUrl ? (
+                  <a href={invoice.hostedInvoiceUrl} target="_blank" rel="noreferrer" className="font-medium hover:underline">View</a>
+                ) : <span className="text-[#A0A0A5]">—</span>}
+              </span>
+            </div>
+          ))
+        )}
       </div>
-      <Button
-        variant="outline"
-        className="h-9"
-        disabled={pending}
-        onClick={() => {
-          void toggle();
-        }}
-      >
-        {pending ? "Saving…" : enabled ? "Turn off" : "Turn on"}
-      </Button>
-    </div>
+    </section>
   );
 }
 
 function PayoutsSection() {
   const teams = useQuery(api.teams.list, {});
   const featureStatus = useQuery(api.featureFlags.getFeatureStatus, {});
+  const ownedTeams = (teams ?? []).filter((team) => team.role === "owner");
+
+  if (featureStatus && !featureStatus.stripeConnect) {
+    return <Notice kind="error">Stripe Connect is not configured on this deployment.</Notice>;
+  }
+  if (teams === undefined) return <SoftSkeleton />;
+  if (ownedTeams.length === 0) {
+    return <p className="py-4 text-sm text-[#6E6E73]">Create a workspace to accept client payments.</p>;
+  }
 
   return (
-    <section className="mt-10">
-      <div className="flex items-center gap-2 mb-1">
-        <Wallet className="h-4 w-4" />
-        <h2 className="font-black text-sm uppercase tracking-tight">Payouts</h2>
-      </div>
-      <p className="text-sm text-[#666] mb-4 max-w-prose">
-        Connect a Stripe account to charge for shared files and receive payouts.
-      </p>
-
-      {featureStatus && !featureStatus.stripeConnect ? (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-[#dc2626]" />
-              <CardTitle>Stripe not configured</CardTitle>
-            </div>
-            <CardDescription>
-              Set <code className="bg-[#e8e8e0] px-1">STRIPE_SECRET_KEY</code>{" "}
-              and{" "}
-              <code className="bg-[#e8e8e0] px-1">STRIPE_WEBHOOK_SECRET</code>{" "}
-              on this deployment before teams can collect client payments.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      ) : teams === undefined ? (
-        <div className="text-sm text-[#888]">Loading payout accounts…</div>
-      ) : teams.length === 0 ? (
-        <div className="text-sm text-[#888]">
-          You're not on any teams yet.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {teams.map((team) => (
-            <TeamPayoutCard
-              key={team._id}
-              teamId={team._id as Id<"teams">}
-              teamName={team.name}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+    <div className="space-y-3.5">
+      {ownedTeams.map((team) => (
+        <TeamBillingCards
+          key={team._id}
+          teamId={team._id as Id<"teams">}
+          teamName={team.name}
+          showTeamName={ownedTeams.length > 1}
+        />
+      ))}
+    </div>
   );
 }
 
-function TeamPayoutCard({
+function TeamBillingCards({
   teamId,
   teamName,
+  showTeamName,
 }: {
   teamId: Id<"teams">;
   teamName: string;
+  showTeamName: boolean;
 }) {
-  const onboardingStatus = useQuery(api.stripeConnect.getOnboardingStatus, {
-    teamId,
-  });
+  const status = useQuery(api.stripeConnect.getOnboardingStatus, { teamId });
+  const earnings = useQuery(api.payments.getTeamEarnings, { teamId, limit: 6 });
   const createAccount = useAction(api.stripeConnectActions.createConnectAccount);
-  const createOnboardingLink = useAction(
-    api.stripeConnectActions.createOnboardingLink,
-  );
+  const createOnboardingLink = useAction(api.stripeConnectActions.createOnboardingLink);
   const refreshStatus = useAction(api.stripeConnectActions.refreshAccountStatus);
-
-  const [busy, setBusy] = useState<null | "create" | "link" | "refresh">(null);
+  const getReceiptUrl = useAction(api.paymentsActions.getReceiptUrl);
+  const [busy, setBusy] = useState(false);
+  const [receiptBusy, setReceiptBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const status = onboardingStatus?.status ?? null;
-
-  // Reconcile once on mount when an account exists but isn't active yet,
-  // so a just-completed Stripe onboarding reflects without a manual click
-  // (and without depending on the account.updated webhook arriving).
   useEffect(() => {
-    if (!onboardingStatus?.stripeAccountId || status === "active") return;
-    void refreshStatus({ teamId }).catch(() => {});
-  }, [onboardingStatus?.stripeAccountId, status, refreshStatus, teamId]);
+    if (!status?.stripeAccountId || status.status === "active") return;
+    void refreshStatus({ teamId }).catch(() => undefined);
+  }, [refreshStatus, status?.status, status?.stripeAccountId, teamId]);
 
-  const returnUrl = `${window.location.origin}/dashboard/billing?stripe=return`;
-  const refreshUrl = `${window.location.origin}/dashboard/billing?stripe=refresh`;
-
-  const handleConnect = async () => {
+  const startOnboarding = async () => {
+    setBusy(true);
     setError(null);
-    setBusy("create");
     try {
-      const result = await createAccount({ teamId });
-      if (result.status === "disabled") {
-        setError(result.reason ?? "Stripe is not configured on this deployment.");
-        return;
+      if (!status?.stripeAccountId) {
+        const account = await createAccount({ teamId });
+        if (account.status !== "ok" && account.status !== "exists") {
+          throw new Error(account.reason ?? "Stripe account setup is unavailable.");
+        }
       }
-      if (result.status === "configuration_required") {
-        setError(result.reason ?? "Stripe Connect needs platform setup.");
-        return;
+      const origin = window.location.origin;
+      const link = await createOnboardingLink({
+        teamId,
+        returnUrl: `${origin}/dashboard/billing?stripe=return`,
+        refreshUrl: `${origin}/dashboard/billing?stripe=refresh`,
+      });
+      if (link.status !== "ok" || !link.url) {
+        throw new Error(link.reason ?? "Stripe onboarding could not be opened.");
       }
-      setBusy("link");
-      const link = await createOnboardingLink({ teamId, returnUrl, refreshUrl });
-      if (link.status === "ok" && link.url) {
-        window.location.href = link.url;
-        return;
-      }
-      setError(link.reason ?? "Could not start Stripe onboarding.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not connect Stripe.");
+      window.location.assign(link.url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Stripe setup failed.");
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
-  const handleContinue = async () => {
+  const openReceipt = async (paymentId: Id<"payments">) => {
+    setReceiptBusy(paymentId);
     setError(null);
-    setBusy("link");
     try {
-      const link = await createOnboardingLink({ teamId, returnUrl, refreshUrl });
-      if (link.status === "ok" && link.url) {
-        window.location.href = link.url;
-        return;
-      }
-      setError(link.reason ?? "Could not continue onboarding.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed.");
+      const result = await getReceiptUrl({ paymentId });
+      if (!result.url) throw new Error("Stripe has not attached a receipt yet.");
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Receipt could not be opened.");
     } finally {
-      setBusy(null);
+      setReceiptBusy(null);
     }
   };
 
-  const handleRefresh = async () => {
-    setError(null);
-    setBusy("refresh");
-    try {
-      const result = await refreshStatus({ teamId });
-      if (result.status === "disabled") {
-        setError(result.reason ?? "Stripe not configured.");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Refresh failed.");
-    } finally {
-      setBusy(null);
-    }
-  };
+  const state = status ? derivePayoutState(status) : "notConnected";
+  const payout = describePayoutState(state);
+  const todo = buildRequirementList(status?.requirements ?? null);
+  const ready = state === "ready";
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <CardTitle>{teamName}</CardTitle>
-            <CardDescription>
-              Stripe Express handles onboarding and payouts.
-            </CardDescription>
+    <>
+      <section className={softCard} aria-labelledby={`paid-${teamId}`}>
+        <CardHeading
+          id={`paid-${teamId}`}
+          title="Paid to you"
+          subtitle="Clients pay the Snip fee on top. You receive the listed price."
+          aside={<div className="flex items-center gap-2">{showTeamName ? <span className="text-xs text-[#6E6E73]">{teamName}</span> : null}<PeriodPill /></div>}
+        />
+        <div className="mt-4">
+          <div className="hidden grid-cols-[130px_minmax(0,1fr)_110px_120px_80px] pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#A0A0A5] md:grid">
+            <span>Date</span><span>File</span><span>Paid out</span><span className="text-right">You get</span><span className="text-right">Receipt</span>
           </div>
-          {status === "active" ? (
-            <Badge variant="success">
-              <CheckCircle className="h-3 w-3 mr-1" /> Active
-            </Badge>
-          ) : status === "pending" ? (
-            <Badge variant="secondary">Pending</Badge>
-          ) : status === "restricted" ? (
-            <Badge variant="destructive">Restricted</Badge>
-          ) : status === "disabled" ? (
-            <Badge variant="destructive">Disabled</Badge>
+          {earnings === undefined ? (
+            <p className="border-t border-[#F1F1F3] py-4 text-sm text-[#6E6E73]">Loading payments…</p>
+          ) : earnings.recent.length === 0 ? (
+            <p className="border-t border-[#F1F1F3] py-4 text-sm text-[#6E6E73]">No client payments yet.</p>
           ) : (
-            <Badge variant="secondary">Not connected</Badge>
+            earnings.recent.map((row) => (
+              <div key={row.id} className="grid gap-1 border-t border-[#F1F1F3] py-3 text-sm md:grid-cols-[130px_minmax(0,1fr)_110px_120px_80px] md:items-center md:gap-0">
+                <span className="text-[#6E6E73]">{formatDate(row.paidAt)}</span>
+                <span className="min-w-0 truncate">{row.fileName}</span>
+                <span className={row.routedTo === "held" ? "text-[#D14E00]" : "text-[#6E6E73]"}>{row.routedTo === "held" ? "Held" : "Sent"}</span>
+                <span className="md:text-right">{formatMoney(row.netCents, row.currency)}</span>
+                <button type="button" disabled={receiptBusy === row.id} onClick={() => void openReceipt(row.id)} className="text-left font-medium hover:underline disabled:opacity-50 md:text-right">
+                  {receiptBusy === row.id ? "…" : "View"}
+                </button>
+              </div>
+            ))
+          )}
+          {earnings?.totals && earnings.totals.owedByPlatformCents > 0 ? (
+            <div className="grid grid-cols-[1fr_120px_80px] border-t border-[#E8E8EC] pt-3 text-sm">
+              <span className="font-medium">Waiting on Stripe verification</span>
+              <span className="text-right text-[15px] font-semibold">{formatMoney(earnings.totals.owedByPlatformCents, earnings.totals.currency)}</span>
+              <span />
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className={softCard} aria-labelledby={`getting-paid-${teamId}`}>
+        <CardHeading
+          id={`getting-paid-${teamId}`}
+          title="Getting paid"
+          subtitle="Set up Stripe once. Clients pay through your share links, Stripe pays you out."
+          aside={
+            <button
+              type="button"
+              disabled={busy || status === undefined || (!status.canManageBilling && !ready)}
+              onClick={() => {
+                if (ready) {
+                  setBusy(true);
+                  void refreshStatus({ teamId }).finally(() => setBusy(false));
+                } else {
+                  void startOnboarding();
+                }
+              }}
+              className="inline-flex items-center rounded-full bg-[#131315] px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-85 disabled:opacity-40"
+            >
+              {busy ? "Opening…" : ready ? <><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</> : <>Finish setup<ExternalLink className="ml-1.5 h-3.5 w-3.5" /></>}
+            </button>
+          }
+        />
+
+        <div className="mt-4 grid rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] sm:grid-cols-3">
+          <Metric label="Payments" value={status?.available === false ? "Unavailable" : "Active"} accent />
+          <Metric label="Payouts" value={payout.label} />
+          <Metric label="Collected so far" value={earnings?.totals ? formatMoney(earnings.totals.grossCents, earnings.totals.currency) : "—"} />
+        </div>
+
+        <div className="mt-4">
+          <div className="flex items-center justify-between pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#A0A0A5]">
+            <span>Stripe still needs</span><span>Due</span>
+          </div>
+          {todo.length > 0 ? todo.map((item) => (
+            <div key={item.key} className="flex items-center border-t border-[#F1F1F3] py-3 text-sm">
+              <span className={cn("mr-3 h-1.5 w-1.5 rounded-full", item.pastDue ? "bg-[#D8434F]" : "bg-[#D39329]")} />
+              <span className="flex-1">{item.label}</span>
+              <span className={cn("text-[13px] font-medium", item.pastDue ? "text-[#D8434F]" : "text-[#6E6E73]")}>{item.pastDue ? "Past due" : "Now"}</span>
+            </div>
+          )) : (
+            <p className="border-t border-[#F1F1F3] py-3 text-sm text-[#6E6E73]">
+              {ready
+                ? "Stripe has everything it needs."
+                : status?.stripeAccountId
+                  ? "Checking your Stripe requirements…"
+                  : "Connect Stripe to add your payout details."}
+            </p>
           )}
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {onboardingStatus === undefined ? (
-          <div className="text-sm text-[#888]">Loading status…</div>
-        ) : (
-          <>
-            {onboardingStatus.stripeAccountId ? (
-              <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 text-sm">
-                <dt className="text-[#888]">Account ID</dt>
-                <dd className="max-w-[12rem] truncate font-mono">
-                  {onboardingStatus.stripeAccountId}
-                </dd>
-                <dt className="text-[#888]">Charges enabled</dt>
-                <dd>{onboardingStatus.chargesEnabled ? "Yes" : "No"}</dd>
-                <dt className="text-[#888]">Payouts enabled</dt>
-                <dd>{onboardingStatus.payoutsEnabled ? "Yes" : "No"}</dd>
-              </dl>
-            ) : null}
-
-            {!onboardingStatus.stripeAccountId ? (
-              <Button
-                onClick={() => void handleConnect()}
-                disabled={busy !== null || !onboardingStatus.canManageBilling}
-                className="w-full bg-[#FF6600] hover:bg-[#FF7A1F]"
-              >
-                {busy === "create" || busy === "link"
-                  ? "Opening Stripe…"
-                  : "Connect Stripe"}
-              </Button>
-            ) : status !== "active" ? (
-              <div className="flex gap-2">
-                <Button
-                  onClick={() => void handleContinue()}
-                  disabled={busy !== null || !onboardingStatus.canManageBilling}
-                  className="flex-1 bg-[#FF6600] hover:bg-[#FF7A1F]"
-                >
-                  {busy === "link" ? "Opening…" : "Continue onboarding"}
-                  <ExternalLink className="h-3 w-3 ml-2" />
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => void handleRefresh()}
-                  disabled={busy !== null}
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  {busy === "refresh" ? "…" : "Refresh"}
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="outline"
-                onClick={() => void handleRefresh()}
-                disabled={busy !== null}
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                {busy === "refresh" ? "Refreshing…" : "Refresh status"}
-              </Button>
-            )}
-
-            {!onboardingStatus.canManageBilling ? (
-              <p className="text-xs text-[#888]">
-                Only the team owner can manage payout settings.
-              </p>
-            ) : null}
-
-            {error ? (
-              <div role="alert" className="border-2 border-[#dc2626] bg-[#dc2626]/10 p-3 text-sm text-[#7f1d1d]">
-                <p>{error}</p>
-                {error.includes("platform") ? (
-                  <a
-                    href="https://dashboard.stripe.com/settings/connect/platform-profile"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-2 inline-flex items-center gap-1 font-bold underline"
-                  >
-                    Finish Stripe platform setup
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                ) : null}
-              </div>
-            ) : null}
-          </>
-        )}
-      </CardContent>
-    </Card>
+        {error ? <div className="mt-3"><Notice kind="error">{error}</Notice></div> : null}
+      </section>
+    </>
   );
+}
+
+function CardHeading({ id, title, subtitle, aside }: { id: string; title: string; subtitle: string; aside?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      <div>
+        <h2 id={id} className="text-base font-semibold leading-[22px]">{title}</h2>
+        <p className="mt-1 text-sm leading-5 text-[#6E6E73]">{subtitle}</p>
+      </div>
+      {aside ? <div className="shrink-0">{aside}</div> : null}
+    </div>
+  );
+}
+
+function PeriodPill() {
+  return <span className="inline-flex rounded-full border border-[#E8E8EC] bg-white px-3 py-1.5 text-[12px] text-[#6E6E73]">Last 6 months</span>;
+}
+
+function Metric({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="px-4 py-3.5 sm:border-l sm:border-[#E8E8EC] sm:first:border-l-0">
+      <p className="text-sm font-medium">{label}</p>
+      <p className={cn("mt-0.5 text-[13px]", accent ? "text-[#D14E00]" : "text-[#6E6E73]")}>{value}</p>
+    </div>
+  );
+}
+
+function SoftSkeleton() {
+  return <div className={cn(softCard, "h-28 animate-pulse bg-white")} aria-label="Loading" />;
+}
+
+function Notice({ kind, children }: { kind: "success" | "warning" | "error"; children: ReactNode }) {
+  const styles = {
+    success: "border-[#BBE2CA] bg-[#F2FBF5] text-[#225B36]",
+    warning: "border-[#E7D3AB] bg-[#FFF9EC] text-[#74521D]",
+    error: "border-[#E8B9BD] bg-[#FFF5F5] text-[#8A2B34]",
+  };
+  return (
+    <div role="status" className={cn("flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm", styles[kind])}>
+      {kind === "success" ? <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function formatMoney(cents: number, currency: string): string {
+  return (cents / 100).toLocaleString(undefined, {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatDate(value: number | undefined): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatPlanDescription(plan: string, storageLimitBytes: number): string {
+  if (plan === "free") return `${formatBytes(storageLimitBytes)} of storage, 1 collaborator, paid delivery.`;
+  if (plan === "enterprise") return "Usage-based storage, unlimited collaborators, paid delivery.";
+  return `${formatBytes(storageLimitBytes)} of storage, unlimited collaborators, paid delivery.`;
 }

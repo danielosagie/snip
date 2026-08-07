@@ -65,7 +65,7 @@ export function ContractCommentsPanel({
           rows={3}
           disabled={posting}
         />
-        <div className="flex items-center justify-between text-[10px] font-mono text-[#888]">
+        <div className="flex items-center justify-between text-[11px] text-[#6E6E73]">
           <span>⌘↵ to post</span>
           <Button
             size="sm"
@@ -77,12 +77,12 @@ export function ContractCommentsPanel({
         </div>
       </div>
 
-      <div className="border-t-2 border-[#1a1a1a] pt-3 space-y-2">
+      <div className="space-y-2 border-t border-[#F1F1F3] pt-3">
         {comments === undefined ? (
-          <div className="text-xs text-[#888]">Loading…</div>
+          <div className="text-xs text-[#6E6E73]">Loading…</div>
         ) : active.length === 0 ? (
-          <div className="text-xs text-[#888] italic">
-            No open comments. Drop the first one above.
+          <div className="text-xs italic text-[#6E6E73]">
+            No open comments.
           </div>
         ) : (
           active.map((c) => (
@@ -101,11 +101,11 @@ export function ContractCommentsPanel({
 
       {resolved.length > 0 ? (
         <details
-          className="border-t-2 border-[#1a1a1a] pt-3"
+          className="border-t border-[#F1F1F3] pt-3"
           open={showResolved}
           onToggle={(e) => setShowResolved((e.target as HTMLDetailsElement).open)}
         >
-          <summary className="cursor-pointer text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <summary className="cursor-pointer font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             Resolved ({resolved.length})
           </summary>
           <div className="space-y-2 mt-2">
@@ -151,7 +151,7 @@ function CommentCard({
   return (
     <div
       className={cn(
-        "border-2 border-[#1a1a1a] p-2.5 bg-[#f0f0e8]",
+        "rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-2.5",
         resolved ? "opacity-70" : "",
       )}
     >
@@ -166,23 +166,23 @@ function CommentCard({
         </Avatar>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
-            <span className="font-bold text-xs text-[#1a1a1a] truncate">
+            <span className="truncate text-xs font-semibold text-[#131315]">
               {comment.authorName}
             </span>
-            <span className="text-[10px] font-mono text-[#888]">
+            <span className="text-[10px] text-[#6E6E73]">
               {formatRelativeTime(comment._creationTime)}
             </span>
           </div>
           {comment.anchorText ? (
-            <div className="mt-1 text-[10px] font-mono italic text-[#666] border-l-2 border-[#888] pl-1.5 truncate">
+            <div className="mt-1 truncate rounded-[8px] bg-[#F1F1F3] px-2 py-1 text-[10px] italic text-[#6E6E73]">
               “{comment.anchorText}”
             </div>
           ) : null}
-          <div className="mt-1 text-sm text-[#1a1a1a] whitespace-pre-wrap break-words">
+          <div className="mt-1 whitespace-pre-wrap break-words text-sm text-[#131315]">
             {comment.body}
           </div>
           {resolved ? (
-            <div className="mt-1 text-[10px] font-mono text-[#FF6600]">
+            <div className="mt-1 text-[10px] text-[#D14E00]">
               Resolved by {comment.resolvedByName ?? "someone"}
             </div>
           ) : null}
@@ -191,7 +191,7 @@ function CommentCard({
           <button
             type="button"
             onClick={onResolve}
-            className="p-1 text-[#888] hover:text-[#FF6600] hover:bg-[#e8e8e0]"
+            className="rounded-full p-1 text-[#6E6E73] hover:bg-[#FFF0E6] hover:text-[#D14E00]"
             title={resolved ? "Re-open" : "Resolve"}
             aria-label={resolved ? "Re-open" : "Resolve"}
           >
@@ -204,7 +204,7 @@ function CommentCard({
           <button
             type="button"
             onClick={onDelete}
-            className="p-1 text-[#888] hover:text-[#dc2626] hover:bg-[#e8e8e0]"
+            className="rounded-full p-1 text-[#6E6E73] hover:bg-[#FFF5F5] hover:text-[#D8434F]"
             title="Delete"
             aria-label="Delete"
           >

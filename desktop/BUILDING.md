@@ -32,6 +32,12 @@ asked for both).
 Installed apps self-update via `electron-updater` against GitHub Releases
 (`build.publish` → `danielosagie/snip`). To ship a new version:
 
+The website's default download must remain the signed DMG. A Finder-installed
+app is owned by the user and can self-update without a privileged helper. The
+optional PKG installs the app system-wide (and bundles macFUSE), so those copies
+offer an explicit DMG download instead of attempting an automatic update on
+quit.
+
 1. Bump `desktop/package.json` `version` (e.g. `0.1.1` → `0.1.2`).
 2. Commit, then tag and push: `git tag desktop-v0.1.2 && git push origin desktop-v0.1.2`.
 3. The `release` job in `.github/workflows/desktop-dmg.yml` builds **both arches

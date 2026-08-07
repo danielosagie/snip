@@ -4,14 +4,14 @@ import { SnipMark } from "@/components/SnipMark";
 
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
-    <div className="surface-client min-h-screen flex items-center justify-center bg-[#f0f0e8] relative">
+    <div className="relative flex min-h-screen items-center justify-center bg-[#FAFAFA] text-[#131315]">
       {/* Subtle grid pattern */}
       <div
-        className="absolute inset-0 opacity-[0.03] pointer-events-none"
+        className="pointer-events-none absolute inset-0 opacity-40"
         style={{
           backgroundImage: `
-            linear-gradient(#1a1a1a 1px, transparent 1px),
-            linear-gradient(90deg, #1a1a1a 1px, transparent 1px)
+            linear-gradient(#E8E8EC 1px, transparent 1px),
+            linear-gradient(90deg, #E8E8EC 1px, transparent 1px)
           `,
           backgroundSize: "60px 60px",
         }}
@@ -20,14 +20,14 @@ export function AuthShell({ children }: { children: ReactNode }) {
       <div className="relative z-10 w-full max-w-md px-4">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2.5">
-            <span className="rounded-lg overflow-hidden inline-flex">
+            <span className="inline-flex overflow-hidden rounded-[9px]">
               <SnipMark size={32} />
             </span>
-            <span className="text-3xl font-semibold tracking-tight text-[#1a1a1a]">
+            <span className="text-3xl font-semibold tracking-[-0.03em] text-[#131315]">
               snip<span className="text-[#FF6600]">.</span>
             </span>
           </Link>
-          <p className="mt-3 text-sm text-[#888]">
+          <p className="sr-only">
             Video collaboration, simplified
           </p>
         </div>

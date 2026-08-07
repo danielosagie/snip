@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, Folder, Home, CornerDownRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { softButton, softButtonPrimary } from "@/components/soft";
 
 /**
  * Navigable folder-tree picker. Drills down one level at a time via
@@ -94,30 +96,30 @@ export function MoveToFolderDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto flex flex-col gap-4">
+      <DialogContent className="surface-soft max-h-[80vh] max-w-md gap-4 overflow-y-auto rounded-[14px] border border-[#E8E8EC] bg-white text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="text-lg font-semibold normal-case tracking-[-0.01em] text-[#131315]">
             Move {count} item{count === 1 ? "" : "s"}
           </DialogTitle>
         </DialogHeader>
 
         {/* Path: Project root > A > B — click a crumb to jump back up. */}
-        <div className="flex items-center gap-1 flex-wrap text-xs font-bold">
+        <div className="flex flex-wrap items-center gap-1 text-[13px] font-medium">
           <button
             type="button"
             onClick={() => setStack([])}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[#1a1a1a] hover:bg-[#e8e8e0]"
+            className="inline-flex items-center gap-1 rounded-[8px] px-2 py-1 text-[#131315] hover:bg-[#F1F1F3]"
           >
             <Home className="h-3.5 w-3.5" />
             Project root
           </button>
           {stack.map((c, i) => (
             <span key={c.id} className="flex items-center gap-1 min-w-0">
-              <ChevronRight className="h-3 w-3 text-[#888] flex-shrink-0" />
+              <ChevronRight className="h-3 w-3 flex-shrink-0 text-[#A0A0A5]" />
               <button
                 type="button"
                 onClick={() => setStack((s) => s.slice(0, i + 1))}
-                className="px-1.5 py-0.5 truncate max-w-[14ch] text-[#1a1a1a] hover:bg-[#e8e8e0]"
+                className="max-w-[14ch] truncate rounded-[8px] px-2 py-1 text-[#131315] hover:bg-[#F1F1F3]"
               >
                 {c.name}
               </button>
@@ -126,11 +128,11 @@ export function MoveToFolderDialog({
         </div>
 
         {/* Subfolders at this level. Clicking drills in. */}
-        <div className="border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a] max-h-[40vh] overflow-y-auto">
+        <div className="max-h-[40vh] divide-y divide-[#F1F1F3] overflow-y-auto rounded-[11px] border border-[#E8E8EC] bg-white">
           {children === undefined ? (
-            <div className="px-3 py-3 text-xs text-[#888]">Loading…</div>
+            <div className="px-3 py-3 text-[13px] text-[#6E6E73]">Loading…</div>
           ) : children.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-[#888]">
+            <div className="px-3 py-3 text-[13px] text-[#6E6E73]">
               No subfolders here.
             </div>
           ) : (
@@ -144,22 +146,22 @@ export function MoveToFolderDialog({
                   onClick={() =>
                     setStack((s) => [...s, { id: f._id, name: f.name }])
                   }
-                  className="w-full flex items-center gap-2 px-3 py-2.5 bg-[#f0f0e8] text-left hover:bg-[#e8e8e0] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex w-full items-center gap-2 bg-white px-3 py-2.5 text-left hover:bg-[#F1F1F3] disabled:cursor-not-allowed disabled:opacity-40"
                   title={
                     disabled
                       ? "Items are already in this folder"
                       : `Open ${f.name}`
                   }
                 >
-                  <Folder className="h-4 w-4 flex-shrink-0 text-[#1a1a1a]" />
-                  <span className="flex-1 min-w-0 truncate text-sm font-bold">
+                  <Folder className="h-4 w-4 flex-shrink-0 text-[#6E6E73]" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#131315]">
                     {f.name}
                   </span>
-                  <span className="text-[10px] font-mono text-[#888]">
+                  <span className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
                     {f.itemCount} item{f.itemCount === 1 ? "" : "s"}
                   </span>
                   {!disabled ? (
-                    <ChevronRight className="h-3.5 w-3.5 text-[#888] flex-shrink-0" />
+                    <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-[#A0A0A5]" />
                   ) : null}
                 </button>
               );
@@ -168,7 +170,7 @@ export function MoveToFolderDialog({
         </div>
 
         {error ? (
-          <div className="text-xs text-[#dc2626] border-l-2 border-[#dc2626] pl-2">
+          <div className="rounded-[10px] bg-[#FFF5F5] px-3 py-2 text-[13px] text-[#D8434F]">
             {error}
           </div>
         ) : null}
@@ -177,7 +179,7 @@ export function MoveToFolderDialog({
           <Button
             onClick={() => void handleMove()}
             disabled={isMoving || isSameAsCurrent}
-            className="flex-1"
+            className={cn(softButtonPrimary, "flex-1")}
             title={
               isSameAsCurrent
                 ? "Items are already here"
@@ -189,10 +191,11 @@ export function MoveToFolderDialog({
               ? "Moving…"
               : isSameAsCurrent
                 ? "Already here"
-                : `Move here → ${here ? here.name : "Project root"}`}
+                : `Move to ${here ? here.name : "Project root"}`}
           </Button>
           <Button
             variant="outline"
+            className={softButton}
             onClick={() => {
               reset();
               onOpenChange(false);

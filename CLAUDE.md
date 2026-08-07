@@ -5,12 +5,28 @@ lawn; the upstream repo at `pingdotgg/lawn` is still the origin remote.
 
 ## Design Language
 
-> **Exception — marketing landing page.** `app/routes/-home.tsx` intentionally
-> uses a different, shade.inc-inspired art direction (white background, Inter
-> Tight sentence-case display type with a gray second line, mono `▶ EYEBROW`
-> labels, pill buttons, rounded bento cards, dark rounded CTA panel). Do not
-> "fix" it back to the brutalist language below — that language applies to the
-> app UI and the other marketing pages.
+> **The soft language is the only language** (2026-08-06). The sweep is
+> complete: shell, billing, team, settings, trash, document and contract
+> editor, landing and all marketing pages, the shared `src/components/ui`
+> primitives, the video review page, the project grid, the share/watch/
+> invite/auth client surfaces, and the contract wizard and signing pages
+> all use the soft system defined in `docs/design/soft-tokens.md` (Paper
+> reference: `docs/design/soft-reference-billing.tsx`): #FAFAFA canvas,
+> white cards with 1px #E8E8EC hairlines, 14px radius, Inter Tight,
+> #FF6600 brand block, #FFF0E6/#D14E00 active-nav tint, pill buttons,
+> Geist Mono 11px column labels.
+>
+> The brutalist section below is **historical reference only** — do not
+> style new work from it. `data-style` defaults to "soft" and "classic"
+> remains selectable, but no surface depends on it any more. The
+> `.surface-client` CSS block in `app/app.css` is now only a light-theme
+> variable scope for client-facing pages; its `[class*="border-2"]` and
+> `[class*="shadow-["]` neutralizers are vestigial and safe to drop once
+> "classic" is retired.
+>
+> Two idioms legitimately still match a naive "brutalist" grep and should
+> not be "fixed": spinner rings (`animate-spin rounded-full border-2`) and
+> the soft system's own Geist Mono uppercase column labels.
 
 ### Philosophy
 Brutalist, typographic, minimal. The design should feel bold and direct—like a

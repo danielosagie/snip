@@ -123,13 +123,7 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
   };
 
   const hardCapped = seatUsage?.hardCapped ?? false;
-  const overageCents = seatUsage?.perSeatCents ?? 0;
-  const isOverageInvite =
-    !!seatUsage &&
-    !hardCapped &&
-    seatUsage.plan !== "free" &&
-    seatUsage.seatsUsed + seatUsage.pendingInvites >=
-      seatUsage.includedSeats;
+  const unlimitedCollaborators = seatUsage?.unlimitedSeats ?? false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -142,53 +136,52 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
         </DialogHeader>
 
         {seatUsage ? (
-          <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3">
+          <div className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-3">
             <div className="flex items-baseline justify-between gap-2">
-              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-                Seats · {seatUsage.label}
+              <div className="text-xs font-medium text-[#6E6E73]">
+                Collaborators · {seatUsage.label}
               </div>
-              <div className="text-xs font-mono text-[#1a1a1a]">
-                {seatUsage.seatsUsed + seatUsage.pendingInvites} /{" "}
-                {seatUsage.includedSeats} included
+              <div className="text-xs text-[#131315]">
+                {unlimitedCollaborators
+                  ? `${seatUsage.seatsUsed + seatUsage.pendingInvites} active + pending`
+                  : `${seatUsage.seatsUsed + seatUsage.pendingInvites} / ${seatUsage.includedSeats} included`}
               </div>
             </div>
-            <div className="mt-2 h-1.5 border border-[#1a1a1a] bg-[#f0f0e8] relative">
-              <div
-                className={`absolute inset-y-0 left-0 ${
-                  hardCapped ? "bg-[#b91c1c]" : "bg-[#C2410C]"
-                }`}
-                style={{
-                  width: `${Math.min(
-                    100,
-                    ((seatUsage.seatsUsed + seatUsage.pendingInvites) /
-                      Math.max(seatUsage.includedSeats, 1)) *
+            {!unlimitedCollaborators ? (
+              <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-[#F1F1F3]">
+                <div
+                  className={`absolute inset-y-0 left-0 rounded-full ${
+                    hardCapped ? "bg-[#D8434F]" : "bg-[#FF6600]"
+                  }`}
+                  style={{
+                    width: `${Math.min(
                       100,
-                  )}%`,
-                }}
-              />
-            </div>
+                      ((seatUsage.seatsUsed + seatUsage.pendingInvites) /
+                        Math.max(seatUsage.includedSeats, 1)) *
+                        100,
+                    )}%`,
+                  }}
+                />
+              </div>
+            ) : null}
             {hardCapped ? (
-              <p className="mt-2 text-xs text-[#1a1a1a]">
+              <p className="mt-2 text-xs text-[#6E6E73]">
                 Free workspaces are capped at {seatUsage.includedSeats} seats.{" "}
                 <Link
                   to="/dashboard/billing"
-                  className="font-bold text-[#C2410C] underline"
+                  className="font-medium text-[#D14E00] underline"
                   onClick={() => onOpenChange(false)}
                 >
                   Upgrade to invite more
                 </Link>
                 .
               </p>
-            ) : isOverageInvite ? (
-              <p className="mt-2 text-xs text-[#666]">
-                You're at the included-seat limit. The next invite adds{" "}
-                <span className="font-mono font-bold text-[#1a1a1a]">
-                  ${(overageCents / 100).toFixed(2)}/mo
-                </span>{" "}
-                to your subscription.
+            ) : unlimitedCollaborators ? (
+              <p className="mt-2 text-xs text-[#6E6E73]">
+                Your paid storage plan includes unlimited collaborators.
               </p>
             ) : seatUsage.pendingInvites > 0 ? (
-              <p className="mt-2 text-[10px] font-mono text-[#888]">
+              <p className="mt-2 text-[11px] text-[#A0A0A5]">
                 {seatUsage.pendingInvites} pending invite
                 {seatUsage.pendingInvites === 1 ? "" : "s"} counted
               </p>
@@ -240,21 +233,19 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
               ? "Upgrade to invite more"
               : isLoading
                 ? "Sending..."
-                : isOverageInvite
-                  ? `Send invite · +$${(overageCents / 100).toFixed(2)}/mo`
-                  : "Send invite"}
+                : "Send invite"}
           </Button>
           {inviteError ? (
-            <div className="text-xs text-[#dc2626] font-bold">
+            <div className="rounded-[11px] bg-[#FFF5F5] px-3 py-2 text-xs text-[#8A2B34]">
               {inviteError}
             </div>
           ) : null}
         </form>
 
         {inviteLink && (
-          <div className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-3">
-            <p className="text-sm text-[#888] mb-2">
-              Share this link with the invitee:
+          <div className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-3">
+            <p className="mb-2 text-sm text-[#6E6E73]">
+              Invite link
             </p>
             <div className="flex gap-2">
               <Input value={inviteLink} readOnly className="text-sm" />
@@ -274,12 +265,12 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
         )}
 
         <div className="space-y-2">
-          <h4 className="text-sm font-bold text-[#1a1a1a]">Current members</h4>
+          <h4 className="text-[13px] font-semibold text-[#131315]">Current members</h4>
           <div className="space-y-2">
             {members?.map((member) => (
               <div
                 key={member._id}
-                className="flex items-center justify-between p-2 border-2 border-[#1a1a1a]"
+                className="flex items-center justify-between rounded-[11px] border border-[#E8E8EC] bg-white p-2.5"
               >
                 <div className="flex items-center gap-3">
                   <Avatar className="h-8 w-8">
@@ -289,8 +280,8 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="text-sm font-bold text-[#1a1a1a]">{member.userName}</p>
-                    <p className="text-xs text-[#888]">{member.userEmail}</p>
+                    <p className="text-sm font-medium text-[#131315]">{member.userName}</p>
+                    <p className="text-xs text-[#6E6E73]">{member.userEmail}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -326,7 +317,7 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-[#dc2626] hover:text-[#dc2626] hover:bg-[#dc2626]/10"
+                        className="h-8 w-8 text-[#D8434F] hover:bg-[#FFF5F5] hover:text-[#D8434F]"
                         onClick={() => handleRemoveMember(member._id)}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -341,16 +332,16 @@ export function MemberInvite({ teamId, open, onOpenChange }: MemberInviteProps) 
 
         {invites && invites.length > 0 && (
           <div className="space-y-2">
-            <h4 className="text-sm font-bold text-[#1a1a1a]">Pending invites</h4>
+            <h4 className="text-[13px] font-semibold text-[#131315]">Pending invites</h4>
             <div className="space-y-2">
               {invites.map((invite) => (
                 <div
                   key={invite._id}
-                  className="flex items-center justify-between p-2 border-2 border-[#1a1a1a] bg-[#e8e8e0]"
+                  className="flex items-center justify-between rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-2.5"
                 >
                   <div>
-                    <p className="text-sm text-[#1a1a1a]">{invite.email}</p>
-                    <p className="text-xs text-[#888]">
+                    <p className="text-sm text-[#131315]">{invite.email}</p>
+                    <p className="text-xs text-[#6E6E73]">
                       Invited as {roleLabels[invite.role]}
                     </p>
                   </div>

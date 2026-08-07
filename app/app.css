@@ -266,7 +266,11 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Geist Mono', ui-monospace, monospace;
+  /* Inter Tight is the app's voice. This used to be Geist Mono, which meant
+     anything without an explicit font class rendered monospace whenever the
+     data-style attribute was missing or stale. Mono is now opt-in, for the
+     column labels and technical values that ask for it. */
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -543,6 +547,67 @@ body {
   color-scheme: light;
 }
 
+/* Paper's Billing & Invoices artboard is deliberately soft and light even
+   when the surrounding desktop shell is using another theme. */
+/* Scoped soft skin for the account-level pages (billing, team members,
+   settings). `.surface-billing-soft` is the original billing-only name,
+   kept as an alias so that page keeps working; `.surface-soft` is the
+   general one to reach for on new surfaces. */
+.surface-soft,
+.surface-billing-soft {
+  --background: #fafafa;
+  --surface: #ffffff;
+  --surface-alt: #fafafa;
+  --foreground: #131315;
+  --foreground-muted: #6e6e73;
+  --foreground-subtle: #a0a0a5;
+  --border: #e8e8ec;
+  --border-subtle: #e8e8ec;
+  color-scheme: light;
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+}
+
+/* Explicit soft primitives stay soft even when the user selects the classic
+   app style. This keeps scoped account surfaces independent from data-style. */
+.surface-soft .ui-btn,
+.surface-soft.ui-btn {
+  border-width: 1px !important;
+  border-radius: 9999px;
+  box-shadow: none !important;
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  transform: none !important;
+  translate: none !important;
+}
+
+.surface-soft .ui-btn:hover,
+.surface-soft .ui-btn:active,
+.surface-soft.ui-btn:hover,
+.surface-soft.ui-btn:active {
+  box-shadow: none !important;
+  transform: none !important;
+  translate: none !important;
+}
+
+.surface-soft input:not([type="checkbox"]):not([type="radio"]),
+.surface-soft textarea {
+  border-color: #e8e8ec !important;
+  border-width: 1px;
+  border-radius: 10px;
+  background-color: #ffffff !important;
+  box-shadow: none !important;
+  color: #131315 !important;
+  font-family: 'Inter Tight', 'Geist', system-ui, sans-serif;
+}
+
+.surface-soft input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.surface-soft textarea:focus-visible {
+  border-color: #ff6600 !important;
+  box-shadow: none !important;
+}
+
 /* Primitive geometry inside client surfaces */
 .surface-client .ui-card {
   border-radius: 16px;
@@ -652,4 +717,43 @@ body {
 [data-style="soft"] textarea {
   border-radius: 10px;
   border-width: 1px;
+}
+
+/* Escape hatch for an input that sits INSIDE an already-styled field
+   wrapper (search box, chip input). Without this the rules above draw a
+   second border inside the wrapper's, and the UA focus ring lands on the
+   input instead of the wrapper. The wrapper owns the border and the
+   focus-within affordance; the input owns nothing. */
+input.field-bare,
+.surface-soft input.field-bare,
+[data-style="soft"] input.field-bare {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* The wrapper that owns the border and the focus affordance for a
+   `field-bare` input. Written here rather than as Tailwind
+   focus-within: utilities because those live in @layer utilities and
+   lose to this file's unlayered rules — and any `shadow-[...]` class
+   gets overwritten by the soft drop-shadow remap above. */
+.field-shell:focus-within {
+  border-color: #ff6600 !important;
+  box-shadow: 0 0 0 3px rgba(255, 102, 0, 0.12) !important;
+}
+
+/* An editable title that should read as a heading, not a form field:
+   no chrome at rest, a quiet fill on hover, the real field on focus. */
+input.title-field {
+  border-radius: 8px !important;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+input.title-field:hover:not(:focus) {
+  background-color: #f1f1f3 !important;
+}
+input.title-field:focus {
+  background-color: #ffffff !important;
+  box-shadow: inset 0 0 0 1px #ff6600 !important;
 }

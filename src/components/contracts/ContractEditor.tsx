@@ -16,6 +16,7 @@ import { FontFamily } from "@tiptap/extension-font-family";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { FontSize } from "./fontSizeExtension";
 import * as Y from "yjs";
+import { ORIGIN_INITIAL_SEED } from "@/lib/convexYjsProvider";
 import {
   Bold,
   Italic,
@@ -69,16 +70,20 @@ interface Props {
    * to the editor instance in the parent so a separately-rendered
    * `ContractToolbar` can bind to it.
    */
-  onEditorReady?: (editor: Editor) => void;
+  onEditorReady?: (editor: Editor | null) => void;
+  /** Named fragment inside a shared project Y.Doc. */
+  yjsField?: string;
   /**
-   * Collab mode only. When true, the parent has confirmed the server-side
-   * Yjs doc is empty (no `contractDocs` row), so `contentHtml` should be
-   * planted into the shared doc exactly once as the initial content —
-   * this is what bridges the wizard's generated clauses into the editor.
-   * Gated by the parent on `api.contractDocs.getDoc === null` so we never
-   * duplicate an existing document.
+   * Collab mode only. When true, the parent has synced the remote Yjs state
+   * and confirmed this contract's named fragment is empty. `contentHtml` is
+   * then proposed as the fragment's one-time initial content. The server
+   * compare-and-set below decides which concurrent tab may apply it.
    */
   seedHtmlIfEmpty?: boolean;
+  /** Persists an initial seed through the provider's atomic seed mutation. */
+  onInitialSeed?: (update: Uint8Array) => Promise<boolean>;
+  /** Rebuild the local Y.Doc when another tab wins the initial-seed race. */
+  onSeedRejected?: () => void;
 }
 
 /**
@@ -99,7 +104,10 @@ export function ContractEditor({
   ydoc = null,
   chromeMode = "framed",
   onEditorReady,
+  yjsField = "default",
   seedHtmlIfEmpty = false,
+  onInitialSeed,
+  onSeedRejected,
 }: Props) {
   const collabMode = Boolean(ydoc);
   const seededRef = useRef(false);
@@ -156,7 +164,7 @@ export function ContractEditor({
         ? [
             Collaboration.configure({
               document: ydoc,
-              field: "default",
+              field: yjsField,
             }),
           ]
         : []),
@@ -169,7 +177,7 @@ export function ContractEditor({
       onChange(editor.getHTML());
     },
     immediatelyRender: false,
-  }, [ydoc]);
+  }, [ydoc, yjsField]);
 
   // Local mode only: keep the editor in sync when the parent swaps the
   // HTML (e.g. after a .docx import). In collab mode this would fight
@@ -184,17 +192,18 @@ export function ContractEditor({
   // Surface the editor instance once it's ready so a separately-
   // rendered toolbar can bind to it.
   useEffect(() => {
-    if (editor && onEditorReady) onEditorReady(editor);
+    if (!editor || !onEditorReady) return;
+    onEditorReady(editor);
   }, [editor, onEditorReady]);
 
   // Collab seed: plant the wizard-generated HTML into the shared Yjs doc
   // the first time it's opened. Without this the editor binds to an empty
   // collab doc and the wizard's clauses never render (the doc comment
   // above promised this seed; the implementation was missing). Strictly
-  // guarded so it can only ever populate a provably-empty doc:
-  //   - parent passes seedHtmlIfEmpty only when getDoc === null
-  //   - we re-check the bound fragment is empty (defends the rare race
-  //     where a remote update lands between the query and this effect)
+  // guarded so it can only ever populate an empty named fragment:
+  //   - parent passes seedHtmlIfEmpty only after remote sync completes
+  //   - we re-check the bound fragment is empty locally
+  //   - the server atomically re-checks the stored fragment before applying
   //   - seededRef makes it at-most-once per mount (HMR / re-render safe)
   // setContent is NOT idempotent across sessions, so seeding a non-empty
   // doc would duplicate the whole contract — hence the belt-and-braces.
@@ -203,16 +212,46 @@ export function ContractEditor({
     if (!collabMode || !ydoc) return;
     if (!seedHtmlIfEmpty || seededRef.current) return;
     if (!contentHtml || contentHtml.trim().length === 0) return;
-    if (ydoc.getXmlFragment("default").length > 0) return;
+    if (ydoc.getXmlFragment(yjsField).length > 0) return;
     seededRef.current = true;
-    editor.commands.setContent(contentHtml, { emitUpdate: false });
-  }, [editor, collabMode, ydoc, seedHtmlIfEmpty, contentHtml]);
+    if (!onInitialSeed) {
+      editor.commands.setContent(contentHtml, { emitUpdate: false });
+      return;
+    }
+
+    // Keep this one local update out of the provider's normal append queue.
+    // The server accepts it only if this fragment is still empty, so two tabs
+    // opening a new document cannot merge two copies of the initial HTML.
+    const stateVector = Y.encodeStateVector(ydoc);
+    editor.setEditable(false);
+    ydoc.transact(() => {
+      editor.commands.setContent(contentHtml, { emitUpdate: false });
+    }, ORIGIN_INITIAL_SEED);
+    const seedUpdate = Y.encodeStateAsUpdate(ydoc, stateVector);
+    void onInitialSeed(seedUpdate).then((applied) => {
+      if (!applied) {
+        if (!editor.isDestroyed) onSeedRejected?.();
+        return;
+      }
+      if (!editor.isDestroyed) editor.setEditable(editable);
+    });
+  }, [
+    editor,
+    collabMode,
+    ydoc,
+    yjsField,
+    seedHtmlIfEmpty,
+    contentHtml,
+    onInitialSeed,
+    onSeedRejected,
+    editable,
+  ]);
 
   if (!editor) {
     return chromeMode === "bare" ? (
-      <div className="text-sm text-[#888] p-4">Loading editor…</div>
+      <div className="p-4 text-sm text-[#6E6E73]">Loading editor…</div>
     ) : (
-      <div className="border-2 border-[#1a1a1a] p-6 text-sm text-[#888]">
+      <div className="rounded-[14px] border border-[#E8E8EC] bg-white p-6 text-sm text-[#6E6E73]">
         Loading editor…
       </div>
     );
@@ -226,7 +265,7 @@ export function ContractEditor({
       <>
         <EditorContent
           editor={editor}
-          className="contract-editor text-[18px] leading-[1.75]"
+          className="contract-editor text-[15px] leading-[1.7]"
         />
         {editable ? <EditorSelectionBubble editor={editor} /> : null}
         {editable ? <EditorBlockMenu editor={editor} /> : null}
@@ -236,9 +275,9 @@ export function ContractEditor({
   }
 
   return (
-    <div className="border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+    <div className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
       {editable ? <Toolbar editor={editor} /> : null}
-      <div className="bg-white border-t-2 border-[#1a1a1a]">
+      <div className="border-t border-[#E8E8EC] bg-white">
         <EditorContent
           editor={editor}
           className="contract-editor min-h-[400px] max-h-[55vh] overflow-y-auto px-6 py-5 text-[15px] leading-relaxed"
@@ -247,19 +286,19 @@ export function ContractEditor({
       <style>{`
         .contract-editor .ProseMirror {
           outline: none;
-          color: #1a1a1a;
-          font-family: 'Times New Roman', Georgia, serif;
+          color: #131315;
+          font-family: 'Inter Tight', system-ui, sans-serif;
         }
         .contract-editor .ProseMirror h1 {
           font-size: 26px;
-          font-weight: 900;
+          font-weight: 600;
           margin: 1em 0 0.5em;
           letter-spacing: -0.01em;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         }
         .contract-editor .ProseMirror h2 {
           font-size: 20px;
-          font-weight: 800;
+          font-weight: 600;
           margin: 1.2em 0 0.4em;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         }
@@ -277,13 +316,15 @@ export function ContractEditor({
         }
         .contract-editor .ProseMirror li { margin: 0.2em 0; }
         .contract-editor .ProseMirror blockquote {
-          border-left: 3px solid #FF6600;
-          padding-left: 12px;
-          color: #555;
+          border: 1px solid #E8E8EC;
+          border-radius: 11px;
+          padding: 10px 12px;
+          color: #6E6E73;
+          background: #FAFAFA;
           margin: 0.8em 0;
         }
         .contract-editor .ProseMirror a {
-          color: #FF6600;
+          color: #D14E00;
           text-decoration: underline;
         }
         .contract-editor .ProseMirror table {
@@ -293,16 +334,16 @@ export function ContractEditor({
         }
         .contract-editor .ProseMirror th,
         .contract-editor .ProseMirror td {
-          border: 1px solid #1a1a1a;
+          border: 1px solid #E8E8EC;
           padding: 6px 10px;
           vertical-align: top;
         }
         .contract-editor .ProseMirror th {
-          background: #e8e8e0;
+          background: #F1F1F3;
           font-weight: 700;
         }
         .contract-editor .ProseMirror[contenteditable="false"] {
-          color: #1a1a1a;
+          color: #131315;
         }
       `}</style>
     </div>
@@ -330,9 +371,22 @@ function ContractEditorStyles() {
     <style>{`
       .contract-editor .ProseMirror {
         outline: none;
-        color: var(--foreground);
-        font-family: inherit;
+        min-height: 60vh;
+        color: #131315;
+        font-family: 'Inter Tight', system-ui, sans-serif;
+        font-size: 15px;
+        line-height: 1.7;
       }
+      .contract-editor .ProseMirror h1,
+      .contract-editor .ProseMirror h2,
+      .contract-editor .ProseMirror h3 {
+        color: #131315;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .contract-editor .ProseMirror h1 { font-size: 26px; line-height: 1.25; margin: 1em 0 0.5em; }
+      .contract-editor .ProseMirror h2 { font-size: 20px; line-height: 1.35; margin: 1.2em 0 0.45em; }
+      .contract-editor .ProseMirror h3 { font-size: 17px; line-height: 1.4; margin: 1em 0 0.35em; }
       .contract-editor .ProseMirror p { margin: 0.5em 0; }
       .contract-editor .ProseMirror ul,
       .contract-editor .ProseMirror ol {
@@ -341,13 +395,15 @@ function ContractEditorStyles() {
       }
       .contract-editor .ProseMirror li { margin: 0.2em 0; }
       .contract-editor .ProseMirror blockquote {
-        border-left: 3px solid #FF6600;
-        padding-left: 12px;
-        color: #555;
+        border: 1px solid #E8E8EC;
+        border-radius: 11px;
+        padding: 10px 12px;
+        color: #6E6E73;
+        background: #FAFAFA;
         margin: 0.8em 0;
       }
       .contract-editor .ProseMirror a {
-        color: #FF6600;
+        color: #D14E00;
         text-decoration: underline;
       }
       .contract-editor .ProseMirror table {
@@ -357,12 +413,12 @@ function ContractEditorStyles() {
       }
       .contract-editor .ProseMirror th,
       .contract-editor .ProseMirror td {
-        border: 1px solid #1a1a1a;
+        border: 1px solid #E8E8EC;
         padding: 6px 10px;
         vertical-align: top;
       }
       .contract-editor .ProseMirror th {
-        background: #e8e8e0;
+        background: #F1F1F3;
         font-weight: 700;
       }
       .contract-editor .ProseMirror[contenteditable="false"] {
@@ -376,7 +432,7 @@ function ContractEditorStyles() {
       .contract-editor .ProseMirror h3.is-empty::before {
         content: attr(data-placeholder);
         float: left;
-        color: #b5b5ad;
+        color: #A0A0A5;
         pointer-events: none;
         height: 0;
       }
@@ -395,7 +451,7 @@ function Toolbar({ editor }: { editor: Editor }) {
     return null;
   }
   return (
-    <div className="flex flex-wrap items-center gap-0.5 p-1 bg-[#e8e8e0]">
+    <div className="flex flex-wrap items-center gap-0.5 bg-[#FAFAFA] p-1">
       <ToolbarGroup>
         <ToolButton
           onClick={() => editor.chain().focus().undo().run()}
@@ -560,7 +616,7 @@ function Toolbar({ editor }: { editor: Editor }) {
 
 function ToolbarGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-0.5 pr-1 mr-1 border-r-2 border-[#1a1a1a] last:border-r-0 last:mr-0">
+    <div className="mr-1 flex items-center gap-0.5 border-r border-[#E8E8EC] pr-1 last:mr-0 last:border-r-0">
       {children}
     </div>
   );
@@ -587,10 +643,10 @@ function ToolButton({
       title={title}
       aria-label={title}
       className={
-        "inline-flex h-7 w-7 items-center justify-center transition-colors disabled:opacity-30 disabled:cursor-not-allowed " +
+        "inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-30 " +
         (active
-          ? "bg-[#1a1a1a] text-[#f0f0e8]"
-          : "text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8]")
+          ? "bg-[#FFF0E6] text-[#D14E00]"
+          : "text-[#131315] hover:bg-[#F1F1F3]")
       }
     >
       {children}
@@ -613,7 +669,7 @@ function EditorSelectionBubble({ editor }: { editor: Editor }) {
         offset: 8,
       }}
     >
-      <div className="inline-flex items-center gap-0.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-1 shadow-[4px_4px_0px_0px_var(--shadow-color)]">
+      <div className="inline-flex items-center gap-0.5 rounded-[11px] border border-[#E8E8EC] bg-white p-1 text-[#131315]">
         <BubbleBtn
           active={editor.isActive("bold")}
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -642,7 +698,7 @@ function EditorSelectionBubble({ editor }: { editor: Editor }) {
         >
           <Strikethrough className="h-3.5 w-3.5" />
         </BubbleBtn>
-        <span className="w-px self-stretch bg-[#f0f0e8]/30 mx-1" />
+        <span className="mx-1 w-px self-stretch bg-[#E8E8EC]" />
         <BubbleBtn
           active={editor.isActive("heading", { level: 1 })}
           onClick={() =>
@@ -668,7 +724,7 @@ function EditorSelectionBubble({ editor }: { editor: Editor }) {
         >
           <Quote className="h-3.5 w-3.5" />
         </BubbleBtn>
-        <span className="w-px self-stretch bg-[#f0f0e8]/30 mx-1" />
+        <span className="mx-1 w-px self-stretch bg-[#E8E8EC]" />
         <BubbleBtn
           active={editor.isActive("link")}
           onClick={() => {
@@ -719,10 +775,10 @@ function BubbleBtn({
       title={title}
       aria-label={title}
       className={
-        "inline-flex h-6 w-6 items-center justify-center transition-colors " +
+        "inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors " +
         (active
-          ? "bg-[#f0f0e8] text-[#1a1a1a]"
-          : "text-[#f0f0e8] hover:bg-[#f0f0e8]/15")
+          ? "bg-[#FFF0E6] text-[#D14E00]"
+          : "text-[#131315] hover:bg-[#F1F1F3]")
       }
     >
       {children}
@@ -749,14 +805,14 @@ function EditorBlockMenu({ editor }: { editor: Editor }) {
             e.preventDefault();
             setExpanded((v) => !v);
           }}
-          className="inline-flex h-7 w-7 items-center justify-center border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#131315] transition-colors hover:bg-[#F1F1F3]"
           title="Insert block"
           aria-label="Insert block"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
         {expanded ? (
-          <div className="inline-flex items-center gap-0.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-1 shadow-[4px_4px_0px_0px_var(--shadow-color)]">
+          <div className="inline-flex items-center gap-0.5 rounded-[11px] border border-[#E8E8EC] bg-white p-1 text-[#131315]">
             <BubbleBtn
               active={false}
               onClick={() => {
@@ -896,7 +952,7 @@ function FontFamilySelect({ editor }: { editor: Editor }) {
           editor.chain().focus().setFontFamily(next).run();
         }
       }}
-      className="h-7 px-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] focus:outline-none"
+      className="h-7 rounded-full border border-[#D8D8DE] bg-white px-2.5 text-xs font-medium text-[#131315] outline-none hover:bg-[#F1F1F3] focus:border-[#FF6600]"
     >
       <option value="">Default</option>
       {FONT_FAMILIES.map((f) => (
@@ -925,7 +981,7 @@ function FontSizeSelect({ editor }: { editor: Editor }) {
           editor.chain().focus().setFontSize(next).run();
         }
       }}
-      className="h-7 px-1.5 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-mono font-bold hover:bg-[#e8e8e0] focus:outline-none w-[68px]"
+      className="h-7 w-[68px] rounded-full border border-[#D8D8DE] bg-white px-2.5 text-xs font-medium text-[#131315] outline-none hover:bg-[#F1F1F3] focus:border-[#FF6600]"
     >
       <option value="">Auto</option>
       {FONT_SIZES.map((s) => (

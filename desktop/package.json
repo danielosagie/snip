@@ -1,7 +1,7 @@
 {
   "name": "snip-desktop",
   "productName": "snip",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "description": "Desktop sync + cloud-mount companion for snip.",
   "main": "electron-main.cjs",
@@ -17,7 +17,7 @@
     "build:dmg:x64": "bun run build:renderer && electron-builder --mac dmg --x64",
     "build": "bun run build:renderer && electron-builder",
     "release": "bun run build:renderer && electron-builder --mac dmg zip pkg --arm64 --x64 --publish always",
-    "test": "bun test test",
+    "test": "bun test test && node --test electron-webdav.test.cjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

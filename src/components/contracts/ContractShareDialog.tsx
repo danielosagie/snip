@@ -31,7 +31,6 @@ import {
   User,
   AlertCircle,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 /**
  * Google-Drive-style share dialog for a contract/document:
@@ -128,22 +127,22 @@ export function ContractShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="surface-soft max-w-lg">
         <DialogHeader>
           <DialogTitle>Share</DialogTitle>
           <DialogDescription>
-            Pick who gets in and what they can do.
+            Choose access.
           </DialogDescription>
         </DialogHeader>
 
         {isSigned ? (
-          <div className="border-2 border-[#16a34a] bg-[#dcfce7] p-3">
-            <div className="font-bold text-sm text-[#16a34a] flex items-center gap-2">
+          <div className="rounded-[11px] bg-[#F2FBF5] p-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-[#225B36]">
               <Check className="h-4 w-4" />
               Signed by {signedByName}
             </div>
             {signedAt ? (
-              <div className="text-xs text-[#666] mt-0.5">
+              <div className="mt-0.5 text-xs text-[#225B36]">
                 {new Date(signedAt).toLocaleString()}
               </div>
             ) : null}
@@ -152,36 +151,36 @@ export function ContractShareDialog({
 
         {/* People with access */}
         <div>
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+          <div className="mb-2 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             People with access
           </div>
           <div className="flex items-center gap-3">
-            <span className="h-8 w-8 flex-shrink-0 inline-flex items-center justify-center rounded-full border-2 border-[#1a1a1a] bg-[#FFEDD5]">
-              <User className="h-4 w-4 text-[#1a1a1a]" />
+            <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[#E8E8EC] bg-[#FFF0E6]">
+              <User className="h-4 w-4 text-[#D14E00]" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold text-[#1a1a1a]">You</div>
-              <div className="text-[11px] font-mono text-[#888]">
+              <div className="text-sm font-semibold text-[#131315]">You</div>
+              <div className="text-[11px] text-[#6E6E73]">
                 Your team
               </div>
             </div>
-            <span className="text-xs font-bold uppercase tracking-wider text-[#888]">
+            <span className="rounded-full bg-[#F1F1F3] px-2.5 py-1 text-xs font-medium text-[#6E6E73]">
               Owner
             </span>
           </div>
         </div>
 
         {/* General access — link sharing with a role */}
-        <div className="border-t-2 border-[#1a1a1a] pt-3">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-2">
+        <div className="border-t border-[#F1F1F3] pt-3">
+          <div className="mb-2 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             General access
           </div>
           <div className="flex items-center gap-3">
-            <span className="h-8 w-8 flex-shrink-0 inline-flex items-center justify-center rounded-full border-2 border-[#1a1a1a] bg-[#f0f0e8]">
+            <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[#E8E8EC] bg-[#FAFAFA]">
               {linkEnabled ? (
-                <Globe className="h-4 w-4 text-[#1a1a1a]" />
+                <Globe className="h-4 w-4 text-[#131315]" />
               ) : (
-                <Lock className="h-4 w-4 text-[#888]" />
+                <Lock className="h-4 w-4 text-[#A0A0A5]" />
               )}
             </span>
             <div className="min-w-0 flex-1">
@@ -190,9 +189,9 @@ export function ContractShareDialog({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 text-sm font-bold text-[#1a1a1a] hover:bg-[#FFEDD5] px-1 -ml-1"
+                    className="-ml-2 inline-flex items-center gap-1 rounded-full px-2 py-1 text-sm font-semibold text-[#131315] hover:bg-[#F1F1F3]"
                   >
-                    {linkEnabled ? "Anyone with the link" : "Restricted"}
+                    {linkEnabled ? "Anyone with link" : "Restricted"}
                     <ChevronDown className="h-3.5 w-3.5" />
                   </button>
                 </DropdownMenuTrigger>
@@ -200,18 +199,18 @@ export function ContractShareDialog({
                   <DropdownMenuItem onClick={() => setLinkEnabled(false)}>
                     Restricted
                     {!linkEnabled ? (
-                      <Check className="ml-auto h-3.5 w-3.5 text-[#C2410C]" />
+                      <Check className="ml-auto h-3.5 w-3.5 text-[#D14E00]" />
                     ) : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setLinkEnabled(true)}>
-                    Anyone with the link
+                    Anyone with link
                     {linkEnabled ? (
-                      <Check className="ml-auto h-3.5 w-3.5 text-[#C2410C]" />
+                      <Check className="ml-auto h-3.5 w-3.5 text-[#D14E00]" />
                     ) : null}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <div className="text-[11px] font-mono text-[#888]">
+              <div className="text-[11px] text-[#6E6E73]">
                 {linkEnabled
                   ? `Anyone with the link can ${role === "edit" ? "edit" : "review"}`
                   : "Only people you add can open this"}
@@ -223,7 +222,7 @@ export function ContractShareDialog({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 h-8 text-xs font-bold uppercase tracking-wider hover:bg-[#FFEDD5]"
+                    className="inline-flex h-8 items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-3 text-xs font-medium text-[#131315] hover:bg-[#F1F1F3]"
                   >
                     {ROLE_META[role].label}
                     <ChevronDown className="h-3 w-3" />
@@ -239,13 +238,13 @@ export function ContractShareDialog({
                       }}
                       className="flex-col items-start"
                     >
-                      <span className="flex w-full items-center justify-between font-bold">
+                      <span className="flex w-full items-center justify-between font-semibold">
                         {ROLE_META[r].label}
                         {role === r ? (
-                          <Check className="h-3.5 w-3.5 text-[#C2410C]" />
+                          <Check className="h-3.5 w-3.5 text-[#D14E00]" />
                         ) : null}
                       </span>
-                      <span className="text-[11px] text-[#888]">
+                      <span className="text-[11px] text-[#6E6E73]">
                         {ROLE_META[r].help}
                       </span>
                     </DropdownMenuItem>
@@ -260,7 +259,7 @@ export function ContractShareDialog({
               type="button"
               onClick={() => void handleCopyLink()}
               disabled={busy === "copy"}
-              className="mt-3 inline-flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 h-9 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-50"
+              className="mt-3 inline-flex h-9 items-center gap-2 rounded-full border border-[#D8D8DE] bg-white px-3.5 text-xs font-medium text-[#131315] hover:bg-[#F1F1F3] disabled:opacity-50"
             >
               {copied ? (
                 <>
@@ -278,20 +277,19 @@ export function ContractShareDialog({
 
         {/* Signing — the contract-specific action */}
         {!isSigned ? (
-          <div className="border-t-2 border-[#1a1a1a] pt-3">
-            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1.5">
+          <div className="border-t border-[#F1F1F3] pt-3">
+            <div className="mb-1.5 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
               Signing
             </div>
-            <p className="text-xs text-[#666] mb-2">
-              Open the signing editor — add signers, place fields, send.
-              Recorded with a tamper-evident hash, ESIGN consent, IP + audit
-              trail, and a Certificate of Completion.
+            <p className="mb-2 text-xs text-[#6E6E73]">
+              Add signers, place fields, and send. Includes tamper-evident
+              hashing, consent, IP, an audit trail, and a completion certificate.
             </p>
             <button
               type="button"
               onClick={() => void handleSetUpSigning()}
               disabled={busy === "sign"}
-              className="inline-flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#C2410C] px-3 h-9 text-xs font-bold uppercase tracking-wider text-[#f0f0e8] hover:bg-[#9A3412] disabled:opacity-50"
+              className="inline-flex h-9 items-center gap-2 rounded-full bg-[#131315] px-3.5 text-xs font-medium text-white hover:bg-[#26262A] disabled:opacity-50"
             >
               <FileSignature className="h-3.5 w-3.5" />
               {busy === "sign" ? "Opening…" : "Set up signing"}
@@ -300,7 +298,7 @@ export function ContractShareDialog({
         ) : null}
 
         {error ? (
-          <div className="text-xs text-[#dc2626] font-bold flex items-start gap-2">
+          <div className="flex items-start gap-2 rounded-[11px] bg-[#FFF5F5] p-3 text-xs font-medium text-[#8A2B34]">
             <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
             {error}
           </div>

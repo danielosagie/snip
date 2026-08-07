@@ -24,9 +24,9 @@ const STATUS_META: Record<
   ShareItemMeta["workflowStatus"],
   { label: string; className: string }
 > = {
-  review: { label: "Needs Review", className: "bg-[#FFEDD5] text-[#C2410C]" },
-  rework: { label: "Rework", className: "bg-[#fde2e2] text-[#dc2626]" },
-  done: { label: "Done", className: "bg-[#dcfce7] text-[#15803d]" },
+  review: { label: "Needs review", className: "bg-[#FFF0E6] text-[#D14E00]" },
+  rework: { label: "Rework", className: "bg-[#FFF5F5] text-[#8A2B34]" },
+  done: { label: "Done", className: "bg-[#F2FBF5] text-[#225B36]" },
 };
 
 function typeLabel(meta: ShareItemMeta): string {
@@ -40,10 +40,10 @@ function typeLabel(meta: ShareItemMeta): string {
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3 py-2">
-      <dt className="text-xs font-bold uppercase tracking-widest text-[#888]">
+      <dt className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
         {label}
       </dt>
-      <dd className="text-right text-sm text-[#1a1a1a] min-w-0 break-words">
+      <dd className="min-w-0 break-words text-right text-sm text-[#131315]">
         {value}
       </dd>
     </div>
@@ -53,7 +53,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 export function ShareItemMetadata({ meta }: { meta: ShareItemMeta | null }) {
   if (!meta) {
     return (
-      <p className="text-sm text-[#888]">
+      <p className="text-sm text-[#6E6E73]">
         Open an item to see its details.
       </p>
     );
@@ -65,15 +65,15 @@ export function ShareItemMetadata({ meta }: { meta: ShareItemMeta | null }) {
     (meta.versionNumber ? `v${meta.versionNumber}` : null);
 
   return (
-    <dl className="divide-y-2 divide-[#1a1a1a] border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3">
-      <Row label="Name" value={<span className="font-bold">{meta.title}</span>} />
-      <Row label="Type" value={<span className="font-mono">{typeLabel(meta)}</span>} />
+    <dl className="overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] px-3 divide-y divide-[#F1F1F3]">
+      <Row label="Name" value={<span className="font-semibold">{meta.title}</span>} />
+      <Row label="Type" value={typeLabel(meta)} />
       <Row
         label="Status"
         value={
           <span
             className={cn(
-              "inline-block px-1.5 py-0.5 text-[10px] font-bold",
+              "inline-block rounded-full px-2 py-0.5 text-[11px] font-medium",
               status.className,
             )}
           >
@@ -82,19 +82,19 @@ export function ShareItemMetadata({ meta }: { meta: ShareItemMeta | null }) {
         }
       />
       {versionDisplay ? (
-        <Row label="Version" value={<span className="font-mono">{versionDisplay}</span>} />
+        <Row label="Version" value={versionDisplay} />
       ) : null}
       {meta.duration ? (
         <Row
           label="Duration"
-          value={<span className="font-mono">{formatDuration(meta.duration)}</span>}
+          value={formatDuration(meta.duration)}
         />
       ) : null}
       <Row
         label="Size"
         value={
-          <span className="font-mono">
-            {meta.fileSize ? formatBytes(meta.fileSize) : "—"}
+          <span>
+            {meta.fileSize ? formatBytes(meta.fileSize) : "Unknown"}
           </span>
         }
       />
@@ -102,7 +102,7 @@ export function ShareItemMetadata({ meta }: { meta: ShareItemMeta | null }) {
       <Row
         label="Uploaded"
         value={
-          <span className="font-mono">{formatRelativeTime(meta.createdAt)}</span>
+          <span>{formatRelativeTime(meta.createdAt)}</span>
         }
       />
     </dl>

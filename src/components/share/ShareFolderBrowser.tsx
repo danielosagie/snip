@@ -17,6 +17,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { cn, formatBytes, formatDuration } from "@/lib/utils";
+import { ItemUnlockControl } from "@/components/share/ItemUnlockControl";
 
 /**
  * Drive-style folder browser for a shared bundle. Renders the bundle's real
@@ -56,6 +57,15 @@ interface Props {
   onSelectItem: (id: string) => void;
   grantToken: string | null;
   viewAs: "client" | "owner";
+  perItemPricing: boolean;
+  itemPriceById: ReadonlyMap<string, number>;
+  unlockedItemIds: ReadonlySet<string>;
+  allItemsUnlocked: boolean;
+  purchaseItemId: string | null;
+  checkoutItemId: string | null;
+  confirmingItemId: string | null;
+  onExpandPurchase: (id: string) => void;
+  onConfirmPurchase: (id: string) => void;
 }
 
 type ItemKind = "video" | "image" | "other";
@@ -74,9 +84,9 @@ const STATUS_META: Record<
   ShareItemNode["workflowStatus"],
   { label: string; className: string }
 > = {
-  review: { label: "Needs Review", className: "bg-[#FFEDD5] text-[#C2410C]" },
-  rework: { label: "Rework", className: "bg-[#fde2e2] text-[#dc2626]" },
-  done: { label: "Done", className: "bg-[#dcfce7] text-[#15803d]" },
+  review: { label: "Needs review", className: "bg-[#FFF0E6] text-[#D14E00]" },
+  rework: { label: "Rework", className: "bg-[#FFF5F5] text-[#8A2B34]" },
+  done: { label: "Done", className: "bg-[#F2FBF5] text-[#225B36]" },
 };
 
 function KindIcon({ kind, className }: { kind: ItemKind; className?: string }) {
@@ -133,7 +143,7 @@ function ShareThumbnail({
       {resolvedUrl ? (
         <img src={resolvedUrl} alt="" className="h-full w-full object-cover" />
       ) : (
-        <div className="flex h-full w-full items-center justify-center text-[#777]">
+        <div className="flex h-full w-full items-center justify-center bg-[#0A0A0B] text-[#A0A0A5]">
           <KindIcon kind={kind} className="h-5 w-5" />
         </div>
       )}
@@ -142,7 +152,7 @@ function ShareThumbnail({
 }
 
 const SELECT_CLASS =
-  "h-8 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-xs font-bold text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#C2410C]";
+  "h-9 rounded-full border border-[#D8D8DE] bg-white px-3 text-[13px] font-medium text-[#131315] focus:border-[#D14E00] focus:outline-none focus:ring-2 focus:ring-[#FFF0E6]";
 
 export function ShareFolderBrowser({
   bundleName,
@@ -152,6 +162,15 @@ export function ShareFolderBrowser({
   onSelectItem,
   grantToken,
   viewAs,
+  perItemPricing,
+  itemPriceById,
+  unlockedItemIds,
+  allItemsUnlocked,
+  purchaseItemId,
+  checkoutItemId,
+  confirmingItemId,
+  onExpandPurchase,
+  onConfirmPurchase,
 }: Props) {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -255,7 +274,7 @@ export function ShareFolderBrowser({
   const isEmpty = folders.length === 0 && items.length === 0;
   if (isEmpty) {
     return (
-      <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-6 text-center text-sm text-[#888]">
+      <section className="rounded-[14px] border border-[#E8E8EC] bg-white p-6 text-center text-sm text-[#6E6E73]">
         This share has no ready items yet. Uploads will appear here as soon as
         processing finishes.
       </section>
@@ -263,17 +282,17 @@ export function ShareFolderBrowser({
   }
 
   return (
-    <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0]" aria-label="Shared files">
-      <div className="flex items-center gap-3 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
+    <section className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white" aria-label="Shared files">
+      <div className="flex items-center gap-3 border-b border-[#E8E8EC] bg-white px-4 py-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-black text-[#1a1a1a]">Shared files</div>
-          <div className="font-mono text-[11px] text-[#888]">{items.length} items</div>
+          <div className="text-sm font-semibold text-[#131315]">Shared files</div>
+          <div className="text-[11px] text-[#6E6E73]">{items.length} items</div>
         </div>
         <button
           type="button"
           onClick={() => setIsOpen((open) => !open)}
           aria-expanded={isOpen}
-          className="flex h-8 items-center gap-1.5 border-2 border-[#1a1a1a] px-2 text-xs font-bold hover:bg-[#e0e0d6]"
+          className="flex h-9 items-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#FAFAFA]"
         >
           {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           {isOpen ? "Collapse" : "Browse"}
@@ -281,23 +300,23 @@ export function ShareFolderBrowser({
       </div>
       {isOpen ? <>
       {/* Breadcrumbs */}
-      <div className="flex items-center gap-1 flex-wrap border-b-2 border-[#1a1a1a] px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-1 border-b border-[#F1F1F3] px-4 py-2.5 text-sm">
         {breadcrumbs.map((crumb, idx) => {
           const isLast = idx === breadcrumbs.length - 1;
           return (
             <span key={crumb.id ?? "root"} className="flex items-center gap-1">
               {idx > 0 ? (
-                <ChevronRight className="h-3.5 w-3.5 text-[#888]" />
+                <ChevronRight className="h-3.5 w-3.5 text-[#A0A0A5]" />
               ) : null}
               <button
                 type="button"
                 onClick={() => setCurrentFolderId(crumb.id)}
                 disabled={isLast}
                 className={cn(
-                  "font-bold",
+                  "font-medium",
                   isLast
-                    ? "text-[#1a1a1a] cursor-default"
-                    : "text-[#888] hover:text-[#C2410C]",
+                    ? "cursor-default text-[#131315]"
+                    : "text-[#6E6E73] hover:text-[#D14E00]",
                 )}
               >
                 {crumb.name}
@@ -308,21 +327,21 @@ export function ShareFolderBrowser({
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b-2 border-[#1a1a1a] px-3 py-2">
-        <span className="text-xs font-mono text-[#888] mr-auto">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#F1F1F3] px-4 py-3">
+        <span className="mr-auto text-xs text-[#6E6E73]">
           {items.length} {items.length === 1 ? "item" : "items"}
           {totalSize > 0 ? ` · ${formatBytes(totalSize)}` : ""}
         </span>
 
-        <label className="relative min-w-[12rem] flex-1 sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#888]" />
+        <label className="field-shell relative flex min-h-9 min-w-[12rem] flex-1 items-center rounded-full border border-[#D8D8DE] bg-white pl-8 pr-3 transition-[border-color,box-shadow] sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#A0A0A5]" />
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search this share…"
             aria-label="Search shared files"
-            className="h-8 w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] pl-7 pr-2 text-xs text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-[#C2410C]"
+            className="field-bare min-w-0 flex-1 text-[13px] text-[#131315] placeholder:text-[#A0A0A5]"
           />
         </label>
 
@@ -333,7 +352,7 @@ export function ShareFolderBrowser({
           className={SELECT_CLASS}
         >
           <option value="all">All statuses</option>
-          <option value="review">Needs Review</option>
+          <option value="review">Needs review</option>
           <option value="rework">Rework</option>
           <option value="done">Done</option>
         </select>
@@ -362,16 +381,16 @@ export function ShareFolderBrowser({
           <option value="size">Largest</option>
         </select>
 
-        <div className="flex items-center border-2 border-[#1a1a1a]">
+        <div className="flex items-center rounded-full border border-[#D8D8DE] bg-white p-0.5">
           <button
             type="button"
             aria-label="Grid view"
             onClick={() => setView("grid")}
             className={cn(
-              "flex h-8 w-8 items-center justify-center",
+              "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
               view === "grid"
-                ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]",
+                ? "bg-[#FFF0E6] text-[#D14E00]"
+                : "text-[#6E6E73] hover:bg-[#FAFAFA] hover:text-[#131315]",
             )}
           >
             <LayoutGrid className="h-4 w-4" />
@@ -381,10 +400,10 @@ export function ShareFolderBrowser({
             aria-label="List view"
             onClick={() => setView("list")}
             className={cn(
-              "flex h-8 w-8 items-center justify-center border-l-2 border-[#1a1a1a]",
+              "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
               view === "list"
-                ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]",
+                ? "bg-[#FFF0E6] text-[#D14E00]"
+                : "text-[#6E6E73] hover:bg-[#FAFAFA] hover:text-[#131315]",
             )}
           >
             <ListIcon className="h-4 w-4" />
@@ -401,14 +420,14 @@ export function ShareFolderBrowser({
                 key={folder._id}
                 type="button"
                 onClick={() => setCurrentFolderId(folder._id)}
-                className="flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] p-3 text-left hover:bg-[#FFEDD5] transition-colors"
+                className="flex items-center gap-2 rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-3 text-left transition-colors hover:bg-[#FFF0E6]"
               >
-                <Folder className="h-5 w-5 flex-shrink-0 text-[#C2410C]" />
+                <Folder className="h-5 w-5 flex-shrink-0 text-[#D14E00]" />
                 <div className="min-w-0">
-                  <div className="text-xs font-bold text-[#1a1a1a] truncate">
+                  <div className="truncate text-xs font-medium text-[#131315]">
                     {folder.name}
                   </div>
-                  <div className="text-[10px] font-mono text-[#888]">
+                  <div className="text-[11px] text-[#6E6E73]">
                     {subtreeCountByFolder.get(folder._id) ?? 0} items
                   </div>
                 </div>
@@ -419,7 +438,7 @@ export function ShareFolderBrowser({
 
         {/* Files */}
         {visibleItems.length === 0 ? (
-          <div className="px-2 py-6 text-center text-sm text-[#888]">
+          <div className="px-2 py-6 text-center text-sm text-[#6E6E73]">
             {childFolders.length > 0
               ? "No files in this folder match the current filters."
               : "No files match the current filters."}
@@ -429,77 +448,116 @@ export function ShareFolderBrowser({
             {visibleItems.map((item) => {
               const isActive = item._id === activeItemId;
               const status = STATUS_META[item.workflowStatus];
+              const unlocked =
+                allItemsUnlocked || unlockedItemIds.has(item._id);
               return (
-                <button
+                <div
                   key={item._id}
-                  type="button"
-                  onClick={() => onSelectItem(item._id)}
                   className={cn(
-                    "text-left border-2 transition-colors",
+                    "overflow-hidden rounded-[11px] border text-left transition-colors",
                     isActive
-                      ? "border-[#C2410C] bg-[#FFEDD5]"
-                      : "border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e0e0d6]",
+                      ? "border-[#E8E8EC] bg-[#FFF0E6]"
+                      : "border-[#E8E8EC] bg-white hover:bg-[#FAFAFA]",
                   )}
                 >
-                  <div className="relative aspect-video bg-[#1a1a1a] overflow-hidden">
-                    <ShareThumbnail item={item} grantToken={grantToken} viewAs={viewAs} className="h-full w-full" />
-                    {item.duration ? (
-                      <span className="absolute bottom-1 right-1 bg-black/75 px-1 text-[10px] font-mono text-white">
-                        {formatDuration(item.duration)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="p-2 space-y-1">
-                    <div className="text-xs font-bold text-[#1a1a1a] truncate">
-                      {item.title}
+                  <button
+                    type="button"
+                    onClick={() => onSelectItem(item._id)}
+                    className="block w-full text-left"
+                  >
+                    <div className="relative aspect-video overflow-hidden bg-[#0A0A0B]">
+                      <ShareThumbnail item={item} grantToken={grantToken} viewAs={viewAs} className="h-full w-full" />
+                      {item.duration ? (
+                        <span className="absolute bottom-1 right-1 rounded-full bg-[#161618] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                          {formatDuration(item.duration)}
+                        </span>
+                      ) : null}
                     </div>
+                    <div className="space-y-1 p-2">
+                      <div className="truncate text-xs font-medium text-[#131315]">
+                        {item.title}
+                      </div>
+                      <span
+                        className={cn(
+                          "inline-block rounded-full px-2 py-0.5 text-[11px] font-medium",
+                          status.className,
+                        )}
+                      >
+                        {status.label}
+                      </span>
+                    </div>
+                  </button>
+                  {perItemPricing && !unlocked ? (
+                    <div className="border-t border-[#F1F1F3] p-2">
+                      <ItemUnlockControl
+                        priceCents={itemPriceById.get(item._id) ?? null}
+                        unlocked={unlocked}
+                        expanded={purchaseItemId === item._id}
+                        confirming={confirmingItemId === item._id}
+                        busy={checkoutItemId === item._id}
+                        onExpand={() => onExpandPurchase(item._id)}
+                        onConfirm={() => onConfirmPurchase(item._id)}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-[11px] border border-[#E8E8EC] divide-y divide-[#F1F1F3]">
+            {visibleItems.map((item) => {
+              const isActive = item._id === activeItemId;
+              const status = STATUS_META[item.workflowStatus];
+              const unlocked =
+                allItemsUnlocked || unlockedItemIds.has(item._id);
+              return (
+                <div
+                  key={item._id}
+                  className={cn(
+                    "flex flex-wrap items-center gap-3 px-3 py-2 text-left transition-colors",
+                    isActive ? "bg-[#FFF0E6]" : "bg-white hover:bg-[#FAFAFA]",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSelectItem(item._id)}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <ShareThumbnail item={item} grantToken={grantToken} viewAs={viewAs} className="h-10 w-16 flex-shrink-0 overflow-hidden rounded-[10px] bg-[#0A0A0B]" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#131315]">
+                      {item.title}
+                    </span>
                     <span
                       className={cn(
-                        "inline-block px-1.5 py-0.5 text-[10px] font-bold",
+                        "hidden flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline-block",
                         status.className,
                       )}
                     >
                       {status.label}
                     </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="divide-y-2 divide-[#1a1a1a] border-2 border-[#1a1a1a]">
-            {visibleItems.map((item) => {
-              const isActive = item._id === activeItemId;
-              const status = STATUS_META[item.workflowStatus];
-              return (
-                <button
-                  key={item._id}
-                  type="button"
-                  onClick={() => onSelectItem(item._id)}
-                  className={cn(
-                    "flex w-full items-center gap-3 px-3 py-2 text-left transition-colors",
-                    isActive ? "bg-[#FFEDD5]" : "bg-[#f0f0e8] hover:bg-[#e0e0d6]",
-                  )}
-                >
-                  <ShareThumbnail item={item} grantToken={grantToken} viewAs={viewAs} className="h-10 w-16 flex-shrink-0 overflow-hidden bg-[#1a1a1a]" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#1a1a1a]">
-                    {item.title}
-                  </span>
-                  <span
-                    className={cn(
-                      "hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-bold flex-shrink-0",
-                      status.className,
-                    )}
-                  >
-                    {status.label}
-                  </span>
-                  <span className="hidden md:block w-20 flex-shrink-0 text-right text-[11px] font-mono text-[#888]">
-                    {item.fileSize ? formatBytes(item.fileSize) : "—"}
-                  </span>
-                  <span className="w-14 flex-shrink-0 text-right text-[11px] font-mono text-[#888]">
-                    {item.duration ? formatDuration(item.duration) : "—"}
-                  </span>
-                </button>
+                    <span className="hidden w-20 flex-shrink-0 text-right text-[11px] text-[#6E6E73] md:block">
+                      {item.fileSize ? formatBytes(item.fileSize) : "Unknown"}
+                    </span>
+                    <span className="w-14 flex-shrink-0 text-right text-[11px] text-[#6E6E73]">
+                      {item.duration ? formatDuration(item.duration) : "Unknown"}
+                    </span>
+                  </button>
+                  {perItemPricing && !unlocked ? (
+                    <ItemUnlockControl
+                      priceCents={itemPriceById.get(item._id) ?? null}
+                      unlocked={unlocked}
+                      expanded={purchaseItemId === item._id}
+                      confirming={confirmingItemId === item._id}
+                      busy={checkoutItemId === item._id}
+                      onExpand={() => onExpandPurchase(item._id)}
+                      onConfirm={() => onConfirmPurchase(item._id)}
+                      className={cn(
+                        purchaseItemId === item._id && "w-full sm:w-52",
+                      )}
+                    />
+                  ) : null}
+                </div>
               );
             })}
           </div>

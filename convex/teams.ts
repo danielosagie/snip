@@ -211,12 +211,22 @@ export const update = mutation({
   args: {
     teamId: v.id("teams"),
     name: v.optional(v.string()),
+    onboarding: v.optional(
+      v.object({
+        makes: v.string(),
+        size: v.string(),
+      })
+    ),
   },
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "admin");
 
-    const updates: Partial<{ name: string }> = {};
+    const updates: Partial<{
+      name: string;
+      onboarding: { makes: string; size: string };
+    }> = {};
     if (args.name) updates.name = args.name;
+    if (args.onboarding) updates.onboarding = args.onboarding;
 
     await ctx.db.patch(args.teamId, updates);
   },
@@ -279,8 +289,7 @@ export const inviteMember = mutation({
 
     // Seat cap. On free tier, blocks once owner + 1 invitee is
     // reached (including any other pending invites the owner has
-    // out across their teams). Paid tiers pass through — overage
-    // seats are billed at $5/mo via the per-seat rate.
+    // out across their teams). Paid tiers include unlimited collaborators.
     await assertCanAddWorkspaceSeat(ctx, args.teamId);
 
     const token = generateToken();

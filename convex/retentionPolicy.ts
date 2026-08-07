@@ -16,17 +16,14 @@ export function retentionHotDays(): number {
 }
 
 /**
- * Whether cold eviction runs on this deployment. Explicit env wins;
- * otherwise it's on only when billing is enforced — single-tenant / demo
- * deployments keep everything hot so there's no surprise re-encode latency
- * for a tool someone is self-hosting.
+ * Custom provider-ladder eviction is retired. Mux's native inactive-asset
+ * storage discount keeps playback instant and avoids paying to re-encode a
+ * video when it becomes active again. Keep this function while old scheduled
+ * jobs age out; they safely no-op even if a stale RETENTION_EVICTION env var
+ * is still present on a deployment.
  */
 export function isEvictionEnabled(): boolean {
-  const flag = (process.env.RETENTION_EVICTION ?? "").trim().toLowerCase();
-  if (flag === "on" || flag === "true" || flag === "1") return true;
-  if (flag === "off" || flag === "false" || flag === "0") return false;
-  const secret = process.env.STRIPE_SECRET_KEY;
-  return typeof secret === "string" && secret.trim().length > 0;
+  return false;
 }
 
 /** Wall-clock of the most recent activity; falls back to creation. */

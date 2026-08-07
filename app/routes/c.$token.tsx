@@ -23,7 +23,7 @@ function ContractShareViewer() {
   if (data === undefined) {
     return (
       <Shell>
-        <p className="text-[#888]">Loading…</p>
+        <p className="text-[#6E6E73]">Loading…</p>
       </Shell>
     );
   }
@@ -50,37 +50,37 @@ function ContractShareViewer() {
   const { contract, project, role } = data;
 
   return (
-    <div className="min-h-screen bg-[#f0f0e8]">
-      <header className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 py-4 flex items-center justify-between">
+    <div className="surface-client surface-soft min-h-screen bg-[#FAFAFA]">
+      <header className="flex items-center justify-between border-b border-[#E8E8EC] bg-white px-6 py-4">
         <SnipMark />
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+        <span className="text-xs font-medium text-[#6E6E73]">
           {role === "edit" ? "Edit access" : "Read-only access"}
         </span>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-12 space-y-6">
         <div>
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             {project.name}
           </div>
-          <h1 className="text-5xl md:text-6xl font-black uppercase tracking-tighter leading-[0.95] mt-2 text-[#1a1a1a]">
+          <h1 className="mt-2 text-[32px] font-semibold leading-tight tracking-[-0.02em] text-[#131315] md:text-[40px]">
             Contract
           </h1>
           {contract.signedAt ? (
-            <p className="mt-3 inline-block border-2 border-[#16a34a] bg-[#f0f0e8] px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#16a34a]">
-              Signed by {contract.signedByName ?? "client"} ·{" "}
+            <p className="mt-3 inline-flex rounded-full bg-[#F2FBF5] px-3 py-1 text-xs font-medium text-[#225B36]">
+              Signed by {contract.signedByName ?? "client"},{" "}
               {new Date(contract.signedAt).toLocaleDateString()}
             </p>
           ) : contract.sentForSignatureAt ? (
-            <p className="mt-3 inline-block border-2 border-[#C2410C] bg-[#FFEDD5] px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#C2410C]">
+            <p className="mt-3 inline-flex rounded-full bg-[#FFF0E6] px-3 py-1 text-xs font-medium text-[#D14E00]">
               Sent for signature
             </p>
           ) : null}
         </div>
 
-        <article className="border-2 border-[#1a1a1a] bg-white p-8">
+        <article className="rounded-[14px] border border-[#E8E8EC] bg-white p-8">
           <div
-            className="prose prose-sm max-w-none text-[#1a1a1a]"
+            className="prose prose-sm max-w-none text-[#131315]"
             dangerouslySetInnerHTML={{
               __html: contract.contentHtml
                 ? sanitizeHtml(contract.contentHtml)
@@ -90,12 +90,12 @@ function ContractShareViewer() {
         </article>
 
         {role === "edit" ? (
-          <div className="border-2 border-dashed border-[#1a1a1a]/30 bg-[#FFEDD5] p-4 text-xs text-[#1a1a1a]">
-            <span className="font-bold uppercase tracking-wider text-[#C2410C]">
+          <div className="rounded-[11px] border border-[#E8E8EC] bg-[#FFF0E6] p-4 text-xs text-[#131315]">
+            <span className="font-medium text-[#D14E00]">
               Edit access pending
             </span>
-            <p className="mt-1 text-[#1a1a1a]/80">
-              Inline editing without a snip account is in the works — for now
+            <p className="mt-1 text-[#6E6E73]">
+              Inline editing without a snip account is in the works. For now,
               this link is view-only. Reply to the agency directly with your
               feedback.
             </p>
@@ -108,8 +108,8 @@ function ContractShareViewer() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#f0f0e8] flex flex-col">
-      <header className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 py-4">
+    <div className="surface-client surface-soft flex min-h-screen flex-col bg-[#FAFAFA]">
+      <header className="border-b border-[#E8E8EC] bg-white px-6 py-4">
         <SnipMark />
       </header>
       <main className="flex-1 flex items-center justify-center px-6 py-12">
@@ -127,11 +127,11 @@ function Terminal({
   children: React.ReactNode;
 }) {
   return (
-    <div className="max-w-md w-full border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[8px_8px_0px_0px_#1a1a1a] p-8 text-center">
-      <h2 className="text-3xl font-black uppercase tracking-tighter text-[#1a1a1a] mb-3">
+    <div className="w-full max-w-md rounded-[14px] border border-[#E8E8EC] bg-white p-8 text-center">
+      <h2 className="mb-3 text-[22px] font-semibold tracking-[-0.02em] text-[#131315]">
         {title}
       </h2>
-      <p className="text-sm text-[#1a1a1a]">{children}</p>
+      <p className="text-sm text-[#6E6E73]">{children}</p>
     </div>
   );
 }

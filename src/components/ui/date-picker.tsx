@@ -51,10 +51,10 @@ export function DatePicker({
           type="button"
           disabled={disabled}
           className={cn(
-            "inline-flex items-center gap-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors text-left w-full",
+            "inline-flex w-full items-center gap-2 rounded-[10px] border border-[#E8E8EC] bg-white text-left text-[#131315] transition-[border-color,box-shadow,background-color] hover:bg-[#F7F7F8] focus-visible:!border-[#FF6600] focus-visible:outline-none focus-visible:!ring-[3px] focus-visible:!ring-[rgba(255,102,0,0.12)]",
             size === "lg" ? "px-3 py-2 text-base" : "px-2 py-1.5 text-sm",
             disabled ? "opacity-50 cursor-not-allowed" : "",
-            !date ? "text-[#888]" : "",
+            !date ? "text-[#A0A0A5]" : "",
             className,
           )}
         >
@@ -64,13 +64,14 @@ export function DatePicker({
               size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5",
             )}
           />
-          <span className="flex-1 font-mono">
+          <span className="flex-1">
             {date ? format(date, "MMMM d, yyyy") : placeholder}
           </span>
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">
         <Calendar
+          className="border-0"
           mode="single"
           selected={date}
           onSelect={(d) => {

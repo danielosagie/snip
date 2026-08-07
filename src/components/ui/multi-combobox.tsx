@@ -88,18 +88,18 @@ export function MultiCombobox({
               onClick={() => toggleOption(opt.value)}
               disabled={disabled}
               className={cn(
-                "flex items-center gap-2 px-3 py-2 border-2 text-sm text-left transition-colors",
+                "flex items-center gap-2 rounded-[10px] border px-3 py-2 text-left text-sm transition-[border-color,box-shadow,background-color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#131315] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-40",
                 isOn
-                  ? "border-[#FF6600] bg-[#FF6600] text-[#f0f0e8] font-bold"
-                  : "border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                  ? "border-[#FF6600] bg-[#FFF0E6] font-medium text-[#D14E00]"
+                  : "border-[#E8E8EC] bg-white text-[#131315] hover:bg-[#F7F7F8]",
               )}
             >
               <span
                 className={cn(
-                  "w-4 h-4 flex-shrink-0 flex items-center justify-center border-2",
+                  "flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border",
                   isOn
-                    ? "border-[#f0f0e8] bg-[#f0f0e8] text-[#FF6600]"
-                    : "border-[#1a1a1a]",
+                    ? "border-[#FF6600] bg-[#FF6600] text-white"
+                    : "border-[#D8D8DE] bg-white",
                 )}
               >
                 {isOn ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
@@ -125,19 +125,19 @@ export function MultiCombobox({
             }
           }}
           placeholder={placeholder}
-          className="flex-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#1a1a1a] placeholder:text-[#888]"
+          className="min-w-0 flex-1 rounded-[10px] border border-[#E8E8EC] bg-white px-3 py-2 text-sm text-[#131315] outline-none transition-[border-color,box-shadow] placeholder:text-[#A0A0A5] focus:!border-[#FF6600] focus:!ring-[3px] focus:!ring-[rgba(255,102,0,0.12)] disabled:cursor-not-allowed disabled:opacity-40"
         />
         <button
           type="button"
           onClick={addCustom}
           disabled={disabled || !draft.trim()}
-          className="inline-flex items-center gap-1 px-3 py-2 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] text-xs font-bold uppercase tracking-wider hover:bg-[#FF6600] disabled:opacity-40 transition-colors"
+          className="inline-flex h-9 items-center gap-1 rounded-full border border-transparent bg-[#131315] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#131315] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#131315] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:pointer-events-none disabled:opacity-40"
         >
           <Plus className="h-3.5 w-3.5" />
           Add
         </button>
       </div>
-      <p className="text-[11px] font-mono text-[#888]">{customHint}</p>
+      <p className="text-xs text-[#A0A0A5]">{customHint}</p>
 
       {/* Chips of currently-selected values — both quick + custom. */}
       {selected.length > 0 ? (
@@ -147,13 +147,13 @@ export function MultiCombobox({
             return (
               <span
                 key={v}
-                className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-xs font-bold"
+                className="inline-flex items-center gap-1.5 rounded-full bg-[#F1F1F3] px-2.5 py-1 text-xs font-medium text-[#6E6E73]"
               >
                 {label}
                 <button
                   type="button"
                   onClick={() => removeChip(v)}
-                  className="text-[#888] hover:text-[#dc2626]"
+                  className="rounded-full p-0.5 text-[#A0A0A5] transition-colors hover:bg-[#FFF5F5] hover:text-[#D8434F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#131315]"
                   title="Remove"
                 >
                   <X className="h-3 w-3" />

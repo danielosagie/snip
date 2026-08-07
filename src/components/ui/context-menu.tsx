@@ -108,7 +108,7 @@ export function ContextMenu({
             <div
               ref={menuRef}
               role="menu"
-              className="fixed z-[100] border-2 border-[#1a1a1a] bg-[#f0f0e8] py-1 shadow-[6px_6px_0px_0px_rgba(0,0,0,0.15)]"
+              className="fixed z-[100] rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-(--soft-menu-shadow) [--soft-menu-shadow:0_8px_24px_rgba(19,19,21,0.10)]"
               style={{ left: coords.x, top: coords.y, minWidth: MENU_WIDTH }}
             >
               {entries.map((entry, idx) => {
@@ -116,7 +116,7 @@ export function ContextMenu({
                   return (
                     <div
                       key={entry.key ?? `sep-${idx}`}
-                      className="my-1 h-0.5 bg-[#1a1a1a]/15"
+                      className="-mx-1 my-1 h-px bg-[#F1F1F3]"
                     />
                   );
                 }
@@ -131,10 +131,10 @@ export function ContextMenu({
                       entry.onSelect();
                     }}
                     className={cn(
-                      "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                      "flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-1.5 text-left text-[13px] font-normal transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                       entry.danger
-                        ? "text-[#dc2626] hover:bg-[#fde2e2]"
-                        : "text-[#1a1a1a] hover:bg-[#FFEDD5]",
+                        ? "text-[#D8434F] hover:bg-[#FFF5F5]"
+                        : "text-[#131315] hover:bg-[#F1F1F3]",
                     )}
                   >
                     {entry.icon ? (

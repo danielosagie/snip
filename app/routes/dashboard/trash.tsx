@@ -5,11 +5,18 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { RotateCcw, Trash2, Briefcase, Film, FileSignature } from "lucide-react";
+import { RotateCcw, Trash2, Briefcase, Film, FileSignature, FileText } from "lucide-react";
 import { formatRelativeTime } from "@/lib/utils";
-import { projectPath, videoPath } from "@/lib/routes";
+import { contractPath, documentPath, projectPath, videoPath } from "@/lib/routes";
+import { friendlyError } from "@/lib/friendlyError";
 import { seoHead } from "@/lib/seo";
+import {
+  softButton,
+  softButtonDanger,
+  SoftPage,
+  SoftPill,
+  SoftRow,
+} from "@/components/soft";
 
 export const Route = createFileRoute("/dashboard/trash")({
   head: () =>
@@ -37,12 +44,15 @@ function TrashRoute() {
   const trashedProjects = useQuery(api.projects.listDeleted, {});
   const trashedVideos = useQuery(api.videos.listDeleted, {});
   const trashedContracts = useQuery(api.projects.listDeletedContracts, {});
+  const trashedDocumentItems = useQuery(api.contractsTable.listDeleted, {});
   const restoreProject = useMutation(api.projects.restore);
   const purgeProject = useMutation(api.projects.purge);
   const restoreVideo = useMutation(api.videos.restore);
   const purgeVideo = useMutation(api.videos.purge);
   const restoreContract = useMutation(api.projects.restoreContract);
   const purgeContract = useMutation(api.projects.purgeContract);
+  const restoreDocumentItem = useMutation(api.contractsTable.restore);
+  const purgeDocumentItem = useMutation(api.contractsTable.purge);
   const navigate = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -156,6 +166,43 @@ function TrashRoute() {
     }
   };
 
+  const handleRestoreDocumentItem = async (item: {
+    id: Id<"contracts">;
+    docType: "contract" | "document";
+    teamSlug: string;
+    projectId: Id<"projects">;
+  }) => {
+    setBusy(item.id);
+    try {
+      await restoreDocumentItem({ contractId: item.id });
+      navigate({
+        to:
+          item.docType === "document"
+            ? documentPath(item.teamSlug, item.projectId, item.id)
+            : contractPath(item.teamSlug, item.projectId, item.id),
+      });
+    } catch (error) {
+      alert(friendlyError(error, "Restore failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handlePurgeDocumentItem = async (
+    id: Id<"contracts">,
+    title: string,
+  ) => {
+    if (!confirm(`Permanently delete “${title}”? This can't be undone.`)) return;
+    setBusy(id);
+    try {
+      await purgeDocumentItem({ contractId: id });
+    } catch (error) {
+      alert(friendlyError(error, "Permanent delete failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // Merge projects + videos + contracts into one chronological feed
   // so the user sees "most recently deleted" first regardless of type.
   type Row =
@@ -188,6 +235,18 @@ function TrashRoute() {
         projectId: Id<"projects">;
         projectName: string;
         clientName?: string;
+        deletedAt: number;
+        deletedByName?: string;
+      }
+    | {
+        kind: "documentItem";
+        id: Id<"contracts">;
+        title: string;
+        docType: "contract" | "document";
+        teamSlug: string;
+        teamName: string;
+        projectId: Id<"projects">;
+        projectName: string;
         deletedAt: number;
         deletedByName?: string;
       };
@@ -225,56 +284,59 @@ function TrashRoute() {
       deletedAt: c.deletedAt,
       deletedByName: c.deletedByName,
     })),
+    ...(trashedDocumentItems ?? []).map<Row>((item) => ({
+      kind: "documentItem",
+      id: item._id,
+      title: item.title,
+      docType: item.docType,
+      teamSlug: item.teamSlug,
+      teamName: item.teamName,
+      projectId: item.projectId,
+      projectName: item.projectName,
+      deletedAt: item.deletedAt,
+      deletedByName: item.deletedByName,
+    })),
   ].sort((a, b) => b.deletedAt - a.deletedAt);
 
   const isLoading =
     trashedProjects === undefined ||
     trashedVideos === undefined ||
-    trashedContracts === undefined;
+    trashedContracts === undefined ||
+    trashedDocumentItems === undefined;
 
   return (
     <div className="h-full flex flex-col">
       <DashboardHeader paths={[{ label: "Recently deleted" }]} />
 
-      <div className="flex-1 overflow-y-auto px-6 py-8">
+      <SoftPage title="Recently deleted">
         <div className="max-w-3xl">
-          <h1 className="text-3xl font-black tracking-tight text-[#1a1a1a]">
-            Recently deleted
-          </h1>
-          <p className="text-sm text-[#666] mt-1 max-w-prose">
-            Anything you delete lands here — projects and videos. Restore
-            brings it back into its original folder. Permanent delete
-            cascades through every related row and can't be undone.
-          </p>
-
-          <div className="mt-6">
             {isLoading ? (
-              <div className="text-sm text-[#888]">Loading…</div>
+              <div className="text-sm text-[#6E6E73]">Loading…</div>
             ) : rows.length === 0 ? (
-              <div className="border-2 border-dashed border-[#1a1a1a] p-8 text-center text-sm text-[#888]">
-                Nothing here. Deleted projects and videos show up in this
-                list and stay restorable until you purge them.
+              <div className="rounded-[14px] border border-[#E8E8EC] bg-white p-8 text-center text-sm leading-5 text-[#A0A0A5]">
+                Deleted items appear here until you remove them forever.
               </div>
             ) : (
-              <div className="border-2 border-[#1a1a1a] divide-y-2 divide-[#1a1a1a]">
+              <div className="rounded-[14px] border border-[#E8E8EC] bg-white px-4">
                 {rows.map((row) => {
-                  if (row.kind === "contract") {
+                  if (row.kind === "documentItem") {
+                    const isDocument = row.docType === "document";
+                    const Icon = isDocument ? FileText : FileSignature;
                     return (
-                      <div
-                        key={row.id}
-                        className="flex items-center gap-4 px-4 py-3"
-                      >
-                        <div className="w-9 h-9 flex-shrink-0 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center justify-center">
-                          <FileSignature className="h-4 w-4 text-[#888]" />
+                      <SoftRow key={row.id} className="flex-col sm:flex-row sm:flex-nowrap">
+                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA]">
+                          <Icon className="h-4 w-4 text-[#6E6E73]" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-bold text-sm text-[#1a1a1a] truncate flex items-center gap-2">
-                            Contract — {row.projectName}
-                            <Badge variant="secondary">Contract</Badge>
-                            <Badge variant="secondary">{row.teamName}</Badge>
+                          <div className="flex flex-wrap items-center gap-2 text-sm font-medium leading-5 text-[#131315]">
+                            {row.title}
+                            <SoftPill>
+                              {isDocument ? "Document" : "Contract"}
+                            </SoftPill>
+                            <SoftPill>{row.projectName}</SoftPill>
+                            <SoftPill>{row.teamName}</SoftPill>
                           </div>
-                          <div className="text-xs font-mono text-[#888]">
-                            {row.clientName ? `Client: ${row.clientName} · ` : ""}
+                          <div className="text-[13px] leading-[18px] text-[#A0A0A5]">
                             Deleted {formatRelativeTime(row.deletedAt)}
                             {row.deletedByName ? ` by ${row.deletedByName}` : ""}
                           </div>
@@ -282,6 +344,51 @@ function TrashRoute() {
                         <Button
                           variant="outline"
                           size="sm"
+                          className={softButton}
+                          onClick={() => void handleRestoreDocumentItem(row)}
+                          disabled={busy !== null}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                          {busy === row.id ? "…" : "Restore"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={softButtonDanger}
+                          onClick={() => void handlePurgeDocumentItem(row.id, row.title)}
+                          disabled={busy !== null}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />
+                          Forever
+                        </Button>
+                      </SoftRow>
+                    );
+                  }
+                  if (row.kind === "contract") {
+                    return (
+                      <SoftRow
+                        key={row.id}
+                        className="flex-col sm:flex-row sm:flex-nowrap"
+                      >
+                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA]">
+                          <FileSignature className="h-4 w-4 text-[#6E6E73]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-sm font-medium leading-5 text-[#131315]">
+                            Contract, {row.projectName}
+                            <SoftPill>Contract</SoftPill>
+                            <SoftPill>{row.teamName}</SoftPill>
+                          </div>
+                          <div className="text-[13px] leading-[18px] text-[#A0A0A5]">
+                            {row.clientName ? `Client: ${row.clientName}, ` : ""}
+                            Deleted {formatRelativeTime(row.deletedAt)}
+                            {row.deletedByName ? ` by ${row.deletedByName}` : ""}
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className={softButton}
                           onClick={() =>
                             void handleRestoreContract(
                               row.id,
@@ -297,33 +404,33 @@ function TrashRoute() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          className={softButtonDanger}
                           onClick={() =>
                             void handlePurgeContract(row.id, row.projectName)
                           }
                           disabled={busy !== null}
-                          className="text-[#dc2626] hover:text-[#dc2626] hover:bg-[#fef2f2]"
                         >
                           <Trash2 className="h-3.5 w-3.5 mr-1" />
                           Forever
                         </Button>
-                      </div>
+                      </SoftRow>
                     );
                   }
                   return row.kind === "project" ? (
-                    <div
+                    <SoftRow
                       key={row.id}
-                      className="flex items-center gap-4 px-4 py-3"
+                      className="flex-col sm:flex-row sm:flex-nowrap"
                     >
-                      <div className="w-9 h-9 flex-shrink-0 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center justify-center">
-                        <Briefcase className="h-4 w-4 text-[#888]" />
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA]">
+                        <Briefcase className="h-4 w-4 text-[#6E6E73]" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-bold text-sm text-[#1a1a1a] truncate flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium leading-5 text-[#131315]">
                           {row.name}
-                          <Badge variant="secondary">Project</Badge>
-                          <Badge variant="secondary">{row.teamName}</Badge>
+                          <SoftPill>Project</SoftPill>
+                          <SoftPill>{row.teamName}</SoftPill>
                         </div>
-                        <div className="text-xs font-mono text-[#888]">
+                        <div className="text-[13px] leading-[18px] text-[#A0A0A5]">
                           Deleted {formatRelativeTime(row.deletedAt)}
                           {row.deletedByName ? ` by ${row.deletedByName}` : ""}
                         </div>
@@ -331,6 +438,7 @@ function TrashRoute() {
                       <Button
                         variant="outline"
                         size="sm"
+                        className={softButton}
                         onClick={() =>
                           void handleRestoreProject(row.id, row.teamSlug)
                         }
@@ -342,20 +450,20 @@ function TrashRoute() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        className={softButtonDanger}
                         onClick={() => void handlePurgeProject(row.id, row.name)}
                         disabled={busy !== null}
-                        className="text-[#dc2626] hover:text-[#dc2626] hover:bg-[#fef2f2]"
                       >
                         <Trash2 className="h-3.5 w-3.5 mr-1" />
                         Forever
                       </Button>
-                    </div>
+                    </SoftRow>
                   ) : (
-                    <div
+                    <SoftRow
                       key={row.id}
-                      className="flex items-center gap-4 px-4 py-3"
+                      className="flex-col sm:flex-row sm:flex-nowrap"
                     >
-                      <div className="w-9 h-9 flex-shrink-0 bg-[#e8e8e0] border-2 border-[#1a1a1a] flex items-center justify-center overflow-hidden">
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA]">
                         {row.thumbnailUrl ? (
                           <img
                             src={row.thumbnailUrl}
@@ -363,17 +471,17 @@ function TrashRoute() {
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <Film className="h-4 w-4 text-[#888]" />
+                          <Film className="h-4 w-4 text-[#6E6E73]" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-bold text-sm text-[#1a1a1a] truncate flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium leading-5 text-[#131315]">
                           {row.title}
-                          <Badge variant="secondary">Video</Badge>
-                          <Badge variant="secondary">{row.projectName}</Badge>
-                          <Badge variant="secondary">{row.teamName}</Badge>
+                          <SoftPill>Video</SoftPill>
+                          <SoftPill>{row.projectName}</SoftPill>
+                          <SoftPill>{row.teamName}</SoftPill>
                         </div>
-                        <div className="text-xs font-mono text-[#888]">
+                        <div className="text-[13px] leading-[18px] text-[#A0A0A5]">
                           Deleted {formatRelativeTime(row.deletedAt)}
                           {row.deletedByName ? ` by ${row.deletedByName}` : ""}
                         </div>
@@ -381,6 +489,7 @@ function TrashRoute() {
                       <Button
                         variant="outline"
                         size="sm"
+                        className={softButton}
                         onClick={() =>
                           void handleRestoreVideo(
                             row.id,
@@ -396,21 +505,20 @@ function TrashRoute() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        className={softButtonDanger}
                         onClick={() => void handlePurgeVideo(row.id, row.title)}
                         disabled={busy !== null}
-                        className="text-[#dc2626] hover:text-[#dc2626] hover:bg-[#fef2f2]"
                       >
                         <Trash2 className="h-3.5 w-3.5 mr-1" />
                         Forever
                       </Button>
-                    </div>
+                    </SoftRow>
                   );
                 })}
               </div>
             )}
-          </div>
         </div>
-      </div>
+      </SoftPage>
     </div>
   );
 }

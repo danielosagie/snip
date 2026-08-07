@@ -1,8 +1,6 @@
 "use client";
 
-import { useQuery } from "convex/react";
 import { Link } from "@tanstack/react-router";
-import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { contractPath, documentPath } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -11,6 +9,21 @@ import { Check, FileSignature, FileText } from "lucide-react";
 interface ContractListSectionProps {
   projectId: Id<"projects">;
   teamSlug: string;
+  items:
+    | Array<{
+        _id: Id<"contracts">;
+        title: string;
+        docType?: "contract" | "document";
+        kind: string;
+        status: string;
+        recipientCount: number;
+        signedCount: number;
+      }>
+    | undefined;
+  search?: string;
+  selectedIds?: Set<Id<"contracts">>;
+  selectionMode?: boolean;
+  onSelectToggle?: (contractId: Id<"contracts">) => void;
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -22,12 +35,12 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 const STATUS_STYLES: Record<string, string> = {
-  draft: "border-[#888] text-[#888]",
-  pending: "border-[#C2410C] text-[#C2410C] bg-[#FFEDD5]",
-  completed: "border-[#16a34a] text-[#16a34a]",
-  declined: "border-[#dc2626] text-[#dc2626]",
-  voided: "border-[#888] text-[#888] line-through",
-  expired: "border-[#888] text-[#888]",
+  draft: "bg-[#F1F1F3] text-[#6E6E73]",
+  pending: "bg-[#FFF0E6] text-[#D14E00]",
+  completed: "bg-[#F2FBF5] text-[#225B36]",
+  declined: "bg-[#FFF5F5] text-[#8A2B34]",
+  voided: "bg-[#F1F1F3] text-[#6E6E73] line-through",
+  expired: "bg-[#F1F1F3] text-[#6E6E73]",
 };
 
 /**
@@ -35,124 +48,86 @@ const STATUS_STYLES: Record<string, string> = {
  * project has any contracts in the new table. Auto-hides when empty
  * AND there's no embedded contract (caller handles back-compat).
  *
- * Contracts and plain documents share the `contracts` table (split by
- * `docType`) but are NOT the same thing to the user: contracts carry
- * signing chrome (status badge, signed counts), documents are just
- * docs. Render them as two distinct groups so a document never looks
- * like something awaiting signature.
+ * Documents are the primary writing surface. Contracts are rendered as a
+ * secondary workflow because they add recipients and a signing lifecycle.
  */
 export function ContractListSection({
   projectId,
   teamSlug,
+  items,
+  search = "",
+  selectedIds,
+  selectionMode,
+  onSelectToggle,
 }: ContractListSectionProps) {
-  // Each group fetches its own kind server-side — documents never ride
-  // along in a "contracts" payload and vice versa.
-  const contractRows = useQuery(api.contractsTable.list, {
-    projectId,
-    docType: "contract",
-  });
-  const documentRows = useQuery(api.contractsTable.list, {
-    projectId,
-    docType: "document",
-  });
-  // Legacy embedded contract (the wizard-backed singleton on
-  // projects.contract). Surfaced as a synthetic row at the top of the
-  // list so a project that pre-dates the multi-contract table still
-  // shows its contract here with folder-style tiles, instead of as a
-  // separate large file card in the grid.
-  const project = useQuery(api.projects.get, { projectId });
-  const legacyContract = project?.contract ?? null;
-
-  if (
-    contractRows === undefined ||
-    documentRows === undefined ||
-    project === undefined
-  ) {
-    return null;
-  }
+  if (items === undefined) return null;
+  const allContractRows = items.filter((row) => (row.docType ?? "contract") === "contract");
+  const allDocumentRows = items.filter((row) => row.docType === "document");
   const totalCount =
-    contractRows.length + documentRows.length + (legacyContract ? 1 : 0);
+    allContractRows.length + allDocumentRows.length;
   if (totalCount === 0) {
     return null;
   }
-  const hasContracts = contractRows.length > 0 || legacyContract !== null;
+  const q = search.trim().toLowerCase();
+  const contractRows = q
+    ? allContractRows.filter((row) => row.title.toLowerCase().includes(q))
+    : allContractRows;
+  const documentRows = q
+    ? allDocumentRows.filter((row) => row.title.toLowerCase().includes(q))
+    : allDocumentRows;
+  if (q && contractRows.length === 0 && documentRows.length === 0) {
+    return null;
+  }
+  const hasContracts = contractRows.length > 0;
   const hasDocuments = documentRows.length > 0;
 
   return (
     // Match FolderRow: dense top-padding, plain mono header, no
-    // shadow on the section container. stopPropagation on right-click so a
-    // contract tile never triggers the project's background context menu —
-    // contracts aren't part of the create/combine background gesture.
+    // shadow on the section container.
+    // stopPropagation on right-click so a contract tile never triggers the
+    // project's background context menu — contracts aren't part of the
+    // create/combine background gesture.
     <section
-      className="px-6 pt-4 space-y-4"
+      className="flex flex-col gap-4 px-6 pt-4"
       onContextMenu={(e) => e.stopPropagation()}
     >
       {/* ── Contracts — signing lifecycle lives here ─────────────── */}
-      <div>
+      <div className="order-2">
         <div className="flex items-center justify-between mb-2">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <div className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             Contracts
           </div>
         </div>
         {hasContracts ? (
           <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-            {legacyContract ? (
-              <Link
-                to={`/dashboard/${teamSlug}/${projectId}/contract`}
-                className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
-              >
-                <FileSignature
-                  className="h-5 w-5 flex-shrink-0 text-[#888]"
-                  strokeWidth={1.75}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
-                    {project?.name ?? "Contract"}
-                  </div>
-                  <div className="text-[10px] font-mono text-[#888] truncate">
-                    {legacyContract.clientName
-                      ? `Client: ${legacyContract.clientName}`
-                      : "Statement of work"}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
-                    legacyContract.signedAt
-                      ? STATUS_STYLES.completed
-                      : legacyContract.sentForSignatureAt
-                        ? STATUS_STYLES.pending
-                        : STATUS_STYLES.draft,
-                  )}
-                >
-                  {legacyContract.signedAt ? (
-                    <>
-                      <Check className="mr-0.5 h-2.5 w-2.5" strokeWidth={3} />
-                      signed
-                    </>
-                  ) : legacyContract.sentForSignatureAt ? (
-                    "sent"
-                  ) : (
-                    "draft"
-                  )}
-                </span>
-              </Link>
-            ) : null}
             {contractRows.map((c) => (
               <Link
                 key={c._id}
                 to={contractPath(teamSlug, projectId, c._id)}
-                className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
+                onClick={(event) => {
+                  if (
+                    onSelectToggle &&
+                    (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey)
+                  ) {
+                    event.preventDefault();
+                    onSelectToggle(c._id);
+                  }
+                }}
+                className={cn(
+                  "group flex min-h-12 w-full min-w-0 cursor-pointer items-center gap-2 rounded-[12px] border border-[#E8E8EC] bg-white px-3 py-2 transition-[background-color,border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm",
+                  selectedIds?.has(c._id) && "shadow-[inset_0_0_0_1.5px_#FF6600]",
+                )}
               >
+                {selectionMode ? <SelectionBox selected={Boolean(selectedIds?.has(c._id))} /> : null}
                 <FileSignature
-                  className="h-5 w-5 flex-shrink-0 text-[#888]"
+                  className="h-5 w-5 flex-shrink-0 text-[#6E6E73]"
                   strokeWidth={1.75}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
+                  <div className="truncate text-sm font-medium text-[#131315]">
                     {c.title}
                   </div>
-                  <div className="text-[10px] font-mono text-[#888] truncate">
+                  <div className="truncate font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
                     {c.recipientCount > 0
                       ? `${c.signedCount}/${c.recipientCount} signed`
                       : KIND_LABELS[c.kind] ?? c.kind}
@@ -160,7 +135,7 @@ export function ContractListSection({
                 </div>
                 <span
                   className={cn(
-                    "shrink-0 inline-flex items-center px-1.5 py-0.5 border text-[9px] font-bold uppercase tracking-wider",
+                    "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-medium capitalize",
                     STATUS_STYLES[c.status] ?? STATUS_STYLES.draft,
                   )}
                 >
@@ -177,16 +152,16 @@ export function ContractListSection({
             ))}
           </div>
         ) : (
-          <div className="text-[11px] font-mono text-[#888] italic">
+          <div className="text-[13px] text-[#A0A0A5]">
             No contracts yet.
           </div>
         )}
       </div>
 
-      {/* ── Documents — plain docs, no signing chrome ────────────── */}
-      <div>
+      {/* Documents are the default project writing surface. */}
+      <div className="order-1">
         <div className="flex items-center justify-between mb-2">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+          <div className="font-['Geist_Mono',system-ui,sans-serif] text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
             Documents
           </div>
         </div>
@@ -196,17 +171,30 @@ export function ContractListSection({
               <Link
                 key={d._id}
                 to={documentPath(teamSlug, projectId, d._id)}
-                className="group flex items-center gap-2 px-3 py-2 border-2 border-[#1a1a1a] bg-[#f0f0e8] hover:bg-[#e8e8e0] cursor-pointer transition-colors w-full min-w-0"
+                onClick={(event) => {
+                  if (
+                    onSelectToggle &&
+                    (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey)
+                  ) {
+                    event.preventDefault();
+                    onSelectToggle(d._id);
+                  }
+                }}
+                className={cn(
+                  "group flex min-h-12 w-full min-w-0 cursor-pointer items-center gap-2 rounded-[12px] border border-[#E8E8EC] bg-white px-3 py-2 transition-[background-color,border-color,box-shadow] hover:border-[#D8D8DE] hover:shadow-sm",
+                  selectedIds?.has(d._id) && "shadow-[inset_0_0_0_1.5px_#FF6600]",
+                )}
               >
+                {selectionMode ? <SelectionBox selected={Boolean(selectedIds?.has(d._id))} /> : null}
                 <FileText
-                  className="h-5 w-5 flex-shrink-0 text-[#888]"
+                  className="h-5 w-5 flex-shrink-0 text-[#6E6E73]"
                   strokeWidth={1.75}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-[#1a1a1a] truncate">
+                  <div className="truncate text-sm font-medium text-[#131315]">
                     {d.title}
                   </div>
-                  <div className="text-[10px] font-mono text-[#888] truncate">
+                  <div className="truncate font-['Geist_Mono',system-ui,sans-serif] text-[11px] text-[#A0A0A5]">
                     Document
                   </div>
                 </div>
@@ -214,11 +202,25 @@ export function ContractListSection({
             ))}
           </div>
         ) : (
-          <div className="text-[11px] font-mono text-[#888] italic">
+          <div className="text-[13px] text-[#A0A0A5]">
             No documents yet.
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+function SelectionBox({ selected }: { selected: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+        selected ? "bg-[#FF6600] text-white" : "border border-[#D8D8DE] bg-white text-transparent",
+      )}
+    >
+      {selected ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+    </span>
   );
 }

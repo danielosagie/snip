@@ -158,11 +158,11 @@ export const sendContractOtp = internalAction({
 /** Shared guard for notification emails: resolve the absolute link or
  *  bail (no APP_URL → skip; the in-app activity is unaffected). */
 function linkOrSkip(path: string): string | null {
-  const appUrl = process.env.APP_URL;
-  if (!appUrl) {
-    console.log("email: APP_URL not set — skipping notification email");
-    return null;
-  }
+  // Production signing must not silently stop working because APP_URL was
+  // omitted from one deployment. SITE_URL is supported by several hosts; the
+  // canonical Snip URL is the final production-safe fallback.
+  const appUrl =
+    process.env.APP_URL || process.env.SITE_URL || "https://snip.film";
   return `${appUrl.replace(/\/$/, "")}${path}`;
 }
 

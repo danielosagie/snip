@@ -88,23 +88,23 @@ export function ContractSectionOutline({
   return (
     <aside
       className={cn(
-        "flex flex-col bg-[#f0f0e8] min-h-0",
+        "flex min-h-0 flex-col bg-white",
         inSheet
           ? "flex-1 w-full"
-          : "hidden lg:flex w-72 flex-shrink-0 border-r-2 border-[#1a1a1a]",
+          : "hidden w-72 flex-shrink-0 border-r border-[#E8E8EC] lg:flex",
       )}
     >
       {/* In a Sheet the panel header (title + close X) is supplied by the
           host SheetContent, so the rail's own header row is rail-only. */}
       {inSheet ? null : (
-        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b-2 border-[#1a1a1a]">
-          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+        <div className="flex items-center justify-between gap-2 border-b border-[#E8E8EC] px-3 py-2.5">
+          <div className="text-[13px] text-[#A0A0A5]">
             Sections
           </div>
           <button
             type="button"
             onClick={onCollapse}
-            className="p-1 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0]"
+            className="rounded-[8px] p-1 text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315]"
             title="Hide outline"
             aria-label="Hide outline"
           >
@@ -112,21 +112,21 @@ export function ContractSectionOutline({
           </button>
         </div>
       )}
-      <nav className="flex-1 overflow-y-auto py-1">
+      <nav className="flex-1 overflow-y-auto p-3">
         {sections.length === 0 ? (
-          <div className="px-3 py-3 text-xs text-[#888]">
-            Headings you add to the contract will appear here.
+          <div className="px-2.5 py-3 text-sm leading-5 text-[#6E6E73]">
+            Add a heading to create a section.
           </div>
         ) : (
           sections.map((s) => {
             const isActive = activeSectionId === s.id;
-            const isExpanded = expandedId === s.id;
+            const isExpanded = Boolean(renderSectionBody) && expandedId === s.id;
             return (
               <div
                 key={s.id}
                 className={cn(
-                  "border-b border-[#ccc] last:border-b-0",
-                  isExpanded ? "bg-[#e8e8e0]" : "",
+                  "rounded-[10px]",
+                  isExpanded ? "bg-[#FAFAFA]" : "",
                 )}
               >
                 <div className="group flex items-stretch">
@@ -134,10 +134,10 @@ export function ContractSectionOutline({
                     type="button"
                     onClick={() => onSelect(s.id)}
                     className={cn(
-                      "flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors flex-1 min-w-0 border-l-2",
+                      "flex min-w-0 flex-1 items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-sm transition-colors",
                       isActive
-                        ? "border-[#FF6600] font-bold text-[#1a1a1a]"
-                        : "border-transparent text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                        ? "bg-[#FFF0E6] font-medium text-[#D14E00]"
+                        : "text-[#131315] hover:bg-[#F1F1F3]",
                     )}
                   >
                     {s.required ? (
@@ -160,39 +160,41 @@ export function ContractSectionOutline({
                           return;
                         await onDeleteSection(s.id);
                       }}
-                      className="px-2 text-[#888] hover:text-[#dc2626] hover:bg-[#e8e8e0] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="flex-shrink-0 rounded-[8px] px-2 text-[#A0A0A5] opacity-0 transition-[color,background-color,opacity] hover:bg-[#F1F1F3] hover:text-[#D8434F] group-hover:opacity-100"
                       title="Delete section"
                       aria-label="Delete section"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedId(isExpanded ? null : s.id)
-                    }
-                    className="px-2 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] flex-shrink-0"
-                    title={isExpanded ? "Collapse section" : "Edit section answers"}
-                    aria-label={
-                      isExpanded
-                        ? "Collapse section"
-                        : "Edit section answers"
-                    }
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    ) : (
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    )}
-                  </button>
+                  {renderSectionBody ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedId(isExpanded ? null : s.id)
+                      }
+                      className="flex-shrink-0 rounded-[8px] px-2 text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]"
+                      title={isExpanded ? "Collapse section" : "Edit section answers"}
+                      aria-label={
+                        isExpanded
+                          ? "Collapse section"
+                          : "Edit section answers"
+                      }
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  ) : null}
                 </div>
                 {isExpanded ? (
-                  <div className="px-3 py-3 border-t border-[#ccc]">
+                  <div className="border-t border-[#E8E8EC] px-3 py-3">
                     {renderSectionBody ? (
                       renderSectionBody(s)
                     ) : (
-                      <div className="text-[11px] font-mono text-[#888]">
+                      <div className="text-[13px] text-[#6E6E73]">
                         Nothing to edit here.
                       </div>
                     )}
@@ -204,12 +206,12 @@ export function ContractSectionOutline({
         )}
       </nav>
       {onOpenAddSection || onRunWizard ? (
-        <div className="border-t-2 border-[#1a1a1a] p-2 space-y-2">
+        <div className="space-y-2 border-t border-[#E8E8EC] p-3">
           {onOpenAddSection ? (
             <button
               type="button"
               onClick={onOpenAddSection}
-              className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 border-2 border-dashed border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+              className="flex w-full items-center justify-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3.5 py-2 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F7F7F8]"
             >
               <Plus className="h-3.5 w-3.5" />
               Add section
@@ -219,7 +221,7 @@ export function ContractSectionOutline({
             <button
               type="button"
               onClick={onRunWizard}
-              className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+              className="flex w-full items-center justify-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white px-3.5 py-2 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F7F7F8]"
             >
               <Wand2 className="h-3.5 w-3.5" />
               {runWizardLabel ?? "Run wizard"}
@@ -245,7 +247,7 @@ export function ContractSectionOutlineCollapsedToggle({
     <button
       type="button"
       onClick={onExpand}
-      className="hidden lg:inline-flex absolute left-3 top-16 z-10 items-center justify-center w-7 h-7 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+      className="absolute left-3 top-16 z-10 hidden h-7 w-7 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#131315] transition-colors hover:bg-[#F7F7F8] lg:inline-flex"
       title="Show outline"
       aria-label="Show outline"
     >

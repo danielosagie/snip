@@ -55,8 +55,8 @@ export function SectionAnswerFields({
   const keys = SECTION_TO_ANSWER_KEYS[sectionKey];
   if (!keys || keys.length === 0) {
     return (
-      <div className="text-[11px] font-mono text-[#888] italic">
-        Standard boilerplate — nothing to tune here.
+      <div className="text-[11px] italic text-[#6E6E73]">
+        Standard boilerplate. Nothing to tune here.
       </div>
     );
   }
@@ -74,9 +74,9 @@ export function SectionAnswerFields({
           return (
             <div
               key={key}
-              className="text-[10px] font-mono text-[#888]"
+              className="text-[10px] text-[#6E6E73]"
             >
-              {key} = <code>{String(answers[key] ?? "—")}</code>
+              {key} = <code>{String(answers[key] ?? "Not set")}</code>
             </div>
           );
         }
@@ -143,10 +143,10 @@ function AnswerField({
   };
 
   const label = (
-    <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888] mb-1 flex items-center gap-1.5">
+    <div className="mb-1 flex items-center gap-1.5 text-[13px] font-medium text-[#6E6E73]">
       <span className="truncate">{question.prompt}</span>
       {saving ? (
-        <span className="text-[#FF6600] normal-case font-normal">
+        <span className="font-normal text-[#D14E00]">
           saving…
         </span>
       ) : null}
@@ -214,10 +214,10 @@ function AnswerField({
               onClick={() => void commit(bv)}
               disabled={disabled}
               className={cn(
-                "px-3 py-1 border-2 border-[#1a1a1a] text-sm font-bold",
+                "rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
                 local === bv
-                  ? "bg-[#FF6600] text-[#f0f0e8]"
-                  : "bg-[#f0f0e8] hover:bg-[#e8e8e0]",
+                  ? "border-[#FFF0E6] bg-[#FFF0E6] text-[#D14E00]"
+                  : "border-[#D8D8DE] bg-white text-[#131315] hover:bg-[#F1F1F3]",
               )}
             >
               {bv ? "Yes" : "No"}

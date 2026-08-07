@@ -4,25 +4,25 @@ import { MarketingLayout } from "@/components/MarketingLayout";
 const painPoints = [
   {
     id: "01",
-    title: "ADDING A FREELANCER SHOULDN'T COST $19/MO",
+    title: "Adding a freelancer shouldn't cost $19/mo",
     description:
-      'You hired them for a two-week project. Why are you paying a monthly seat fee? snip starts at $25/month total. Unlimited seats. Add your whole roster — full-timers, freelancers, that one intern who\'s "really good at Premiere."',
+      'You hired them for a two-week project. Why are you paying a monthly seat fee? snip starts at $25/month total. Unlimited seats. Add your whole roster, full-timers, freelancers, and that one intern who\'s "really good at Premiere."',
   },
   {
     id: "02",
-    title: "CLIENTS NEED NO-ACCOUNT REVIEW",
+    title: "Clients need no-account review",
     description:
       "Your client doesn't want to create an account. They want to watch the video, leave a comment at 0:47 that says \"make it pop more,\" and move on with their day. Send a link. That's it.",
   },
   {
     id: "03",
-    title: "MANAGING 12 CLIENTS SHOULDN'T REQUIRE A PM TOOL",
+    title: "Managing 12 clients shouldn't require a PM tool",
     description:
       "Unlimited projects, organized by team. No per-project limits, no storage gotchas. Every client gets their own space. You get your sanity back.",
   },
   {
     id: "04",
-    title: "FAST TURNAROUND MEANS FAST TOOLS",
+    title: "Fast turnaround means fast tools",
     description:
       "Client says \"I need to see it by 3pm.\" It's 2:47pm. You upload the cut, it plays instantly. No transcoding queue. No \"processing your video\" spinner. Just playback.",
   },
@@ -30,21 +30,21 @@ const painPoints = [
 
 const comparisons = [
   {
-    size: "5-PERSON TEAM",
+    size: "5-person team",
     competitor: "$95",
     snip: "$25",
     saved: "$840",
     commentary: "That's a lot of coffee.",
   },
   {
-    size: "10-PERSON TEAM",
+    size: "10-person team",
     competitor: "$190",
     snip: "$25",
     saved: "$1,980",
     commentary: "A nice camera lens, actually.",
   },
   {
-    size: "15 + FREELANCERS",
+    size: "15 + freelancers",
     competitor: "$285+",
     snip: "$25",
     saved: "$3,120+",
@@ -56,45 +56,45 @@ export default function ForAgencies() {
   return (
     <MarketingLayout>
       {/* Hero */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[#1a1a1a] bg-[#f0f0e8]">
-        <div className="max-w-7xl mx-auto">
+      <section className="border-b border-[#E8E8EC] bg-white px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-7xl">
           <div className="mb-6">
-            <span className="text-sm font-bold uppercase tracking-widest text-[#888]">
-              /FOR AGENCIES
+            <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
+              For agencies
             </span>
           </div>
-          <h1 className="text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-black uppercase tracking-tighter leading-[0.85]">
-            STOP PAYING
+          <h1 className="max-w-4xl text-[42px] font-semibold leading-[1.05] tracking-[-0.055em] text-[#131315] sm:text-[54px] md:text-[64px]">
+            Stop paying
             <br />
-            PER SEAT.
+            per seat.
             <br />
-            <span className="text-[#FF6600]">START SHIPPING</span>
+            <span className="text-[#D14E00]">Start shipping</span>
             <br />
-            WORK.
+            work.
           </h1>
           <div className="mt-12 max-w-2xl">
-            <p className="text-xl md:text-2xl font-medium text-[#1a1a1a]">
+            <p className="text-[19px] leading-[29px] text-[#131315]">
               You're a 15-person agency with 30 freelancers rotating through.
               Per-seat pricing wasn't built for you. It was built to charge you
               more.
             </p>
-            <p className="text-lg text-[#888] font-medium mt-4">
+            <p className="mt-4 text-[16px] leading-6 text-[#6E6E73]">
               snip is video review for creative teams. Unlimited seats. From $25/month.
               The whole agency, not per editor.
             </p>
           </div>
-          <div className="mt-12 flex flex-col sm:flex-row gap-4">
+          <div className="mt-12 flex flex-col gap-3 sm:flex-row">
             <Link
               to="/sign-up"
-              className="bg-[#1a1a1a] text-[#f0f0e8] px-8 py-5 border-2 border-[#1a1a1a] font-black text-lg uppercase tracking-wider hover:bg-[#FF6600] transition-colors shadow-[8px_8px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] text-center"
+              className="rounded-full bg-[#131315] px-6 py-3 text-center text-[14px] font-medium leading-5 text-white transition-opacity hover:opacity-90"
             >
-              START YOUR TEAM
+              Start your team
             </Link>
-            <div className="bg-[#f0f0e8] border-2 border-[#1a1a1a] px-8 py-5 shadow-[8px_8px_0px_0px_var(--shadow-color)]">
-              <span className="text-3xl font-black block leading-none">
+            <div className="rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-3">
+              <span className="block text-[20px] font-semibold leading-6 text-[#131315]">
                 $25/mo
               </span>
-              <span className="text-xs font-bold uppercase tracking-wider text-[#888] mt-1 block">
+              <span className="mt-1 block text-[13px] leading-[18px] text-[#6E6E73]">
                 Unlimited seats. Seriously.
               </span>
             </div>
@@ -103,34 +103,34 @@ export default function ForAgencies() {
       </section>
 
       {/* Pain Points */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[#1a1a1a] bg-[#e8e8e0]">
-        <div className="max-w-7xl mx-auto">
-          <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-6">
-            AGENCY LIFE
+      <section className="border-b border-[#E8E8EC] bg-[#FAFAFA] px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-7xl">
+          <h2 className="mb-6 text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Agency life
             <br />
-            IS HARD ENOUGH.
+            is hard enough.
           </h2>
-          <p className="text-xl text-[#888] font-medium mb-16 max-w-2xl">
+          <p className="mb-16 max-w-2xl text-[15px] leading-6 text-[#6E6E73]">
             Your video review tool shouldn't make it harder. Here are the
             problems we actually solve.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             {painPoints.map((point) => (
               <div
                 key={point.id}
-                className="bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_var(--shadow-color)] flex flex-col hover:-translate-y-1 hover:translate-x-1 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all"
+                className="flex flex-col overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white"
               >
-                <div className="border-b-2 border-[#1a1a1a] px-6 py-4 flex items-center gap-4 bg-[#1a1a1a] text-[#f0f0e8]">
-                  <span className="text-sm font-black text-[#FFB380]">
+                <div className="flex items-center gap-4 border-b border-[#F1F1F3] bg-[#FAFAFA] px-6 py-4">
+                  <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                     /{point.id}
                   </span>
                 </div>
-                <div className="p-6 md:p-8 flex-grow">
-                  <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-tight mb-4">
+                <div className="flex-grow p-6 md:p-8">
+                  <h3 className="mb-4 text-[20px] font-semibold leading-7 tracking-[-0.5px] text-[#131315]">
                     {point.title}
                   </h3>
-                  <p className="text-base font-medium text-[#1a1a1a] leading-relaxed">
+                  <p className="text-[15px] leading-6 text-[#6E6E73]">
                     {point.description}
                   </p>
                 </div>
@@ -141,70 +141,70 @@ export default function ForAgencies() {
       </section>
 
       {/* Cost Comparison */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[#1a1a1a] bg-[#f0f0e8]">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col lg:flex-row gap-16">
+      <section className="border-b border-[#E8E8EC] bg-white px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-7xl">
+          <div className="flex flex-col gap-16 lg:flex-row">
             <div className="lg:w-1/3">
-              <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-6">
-                DO THE
+              <h2 className="mb-6 text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+                Do the
                 <br />
-                MATH.
+                math.
               </h2>
-              <p className="text-xl text-[#888] font-medium max-w-sm">
+              <p className="max-w-sm text-[15px] leading-6 text-[#6E6E73]">
                 Frame.io charges $19/user/month. snip starts at $25/month total.
                 Here's what that looks like at agency scale.
               </p>
             </div>
 
-            <div className="lg:w-2/3 flex flex-col gap-6">
+            <div className="flex flex-col gap-5 lg:w-2/3">
               {comparisons.map((row) => (
                 <div
                   key={row.size}
-                  className="border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_var(--shadow-color)] hover:-translate-y-1 hover:translate-x-1 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all"
+                  className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white"
                 >
                   <div className="flex flex-col md:flex-row">
                     {/* Team size label */}
-                    <div className="bg-[#1a1a1a] text-[#f0f0e8] p-6 md:p-8 md:w-1/3 flex flex-col justify-center border-b-2 md:border-b-0 md:border-r-2 border-[#1a1a1a]">
-                      <span className="text-xs font-bold tracking-widest text-[#FFB380] mb-1">
-                        TEAM SIZE
+                    <div className="flex flex-col justify-center border-b border-[#26262A] bg-[#0A0A0B] p-6 text-white md:w-1/3 md:border-b-0 md:border-r md:p-8">
+                      <span className="mb-1 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
+                        Team size
                       </span>
-                      <span className="text-2xl md:text-3xl font-black uppercase tracking-tight leading-none">
+                      <span className="text-2xl font-semibold leading-tight tracking-[-0.02em] md:text-3xl">
                         {row.size}
                       </span>
                     </div>
 
                     {/* Comparison numbers */}
                     <div className="flex flex-col sm:flex-row flex-grow">
-                      <div className="p-6 md:p-8 flex-1 border-b-2 sm:border-b-0 sm:border-r-2 border-[#1a1a1a] bg-[#ffffff]">
-                        <span className="text-xs font-bold tracking-widest text-[#888] block mb-1">
-                          FRAME.IO
+                      <div className="flex-1 border-b border-[#F1F1F3] bg-white p-6 sm:border-b-0 sm:border-r md:p-8">
+                        <span className="mb-1 block font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
+                          Frame.io
                         </span>
-                        <span className="text-3xl font-black text-[#dc2626]">
+                        <span className="text-3xl font-semibold tabular-nums text-[#D8434F]">
                           {row.competitor}
                         </span>
-                        <span className="text-sm text-[#888] font-bold">
+                        <span className="text-sm text-[#6E6E73]">
                           /mo
                         </span>
                       </div>
-                      <div className="p-6 md:p-8 flex-1 border-b-2 sm:border-b-0 sm:border-r-2 border-[#1a1a1a] bg-[#f0f0e8]">
-                        <span className="text-xs font-bold tracking-widest text-[#888] block mb-1">
-                          SNIP
+                      <div className="flex-1 border-b border-[#F1F1F3] bg-[#FAFAFA] p-6 sm:border-b-0 sm:border-r md:p-8">
+                        <span className="mb-1 block font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
+                          snip
                         </span>
-                        <span className="text-3xl font-black text-[#FF6600]">
+                        <span className="text-3xl font-semibold tabular-nums text-[#D14E00]">
                           {row.snip}
                         </span>
-                        <span className="text-sm text-[#888] font-bold">
+                        <span className="text-sm text-[#6E6E73]">
                           /mo
                         </span>
                       </div>
-                      <div className="p-6 md:p-8 flex-1 bg-[#f0f0e8]">
-                        <span className="text-xs font-bold tracking-widest text-[#888] block mb-1">
-                          YOU SAVE / YEAR
+                      <div className="flex-1 bg-[#FAFAFA] p-6 md:p-8">
+                        <span className="mb-1 block font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
+                          You save / year
                         </span>
-                        <span className="text-3xl font-black text-[#FF6600]">
+                        <span className="text-3xl font-semibold tabular-nums text-[#D14E00]">
                           {row.saved}
                         </span>
-                        <p className="text-sm font-bold text-[#888] mt-2">
+                        <p className="mt-2 text-[13px] leading-5 text-[#6E6E73]">
                           {row.commentary}
                         </p>
                       </div>
@@ -213,11 +213,11 @@ export default function ForAgencies() {
                 </div>
               ))}
 
-              <div className="border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-6 md:p-8">
-                <p className="text-lg font-bold">
-                  <span className="text-[#FFB380]">The pattern:</span> They
+              <div className="rounded-[14px] bg-[#0A0A0B] p-6 text-white md:p-8">
+                <p className="text-[15px] leading-6">
+                  <span className="font-semibold text-white">The pattern:</span> They
                   charge more as you grow. We don't. Your 50th seat costs the
-                  same as your first — $0 extra.
+                  same as your first, $0 extra.
                 </p>
               </div>
             </div>
@@ -226,25 +226,25 @@ export default function ForAgencies() {
       </section>
 
       {/* CTA */}
-      <section className="px-6 py-32 bg-[#FF6600] text-[#f0f0e8] border-b-2 border-[#1a1a1a]">
-        <div className="max-w-4xl mx-auto text-center flex flex-col items-center">
-          <h2 className="text-6xl md:text-8xl lg:text-9xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
-            START YOUR
+      <section className="bg-[#0A0A0B] px-6 py-32 text-white">
+        <div className="mx-auto flex max-w-4xl flex-col items-center text-center">
+          <h2 className="mb-6 text-[36px] font-medium leading-[1.25] tracking-[-1.8px] text-white sm:text-[60px]">
+            Start your
             <br />
-            TEAM.
+            team.
           </h2>
-          <p className="text-xl md:text-2xl font-medium mb-4 max-w-lg">
+          <p className="mb-4 max-w-lg text-[16px] leading-6 text-white">
             From $25/month. Unlimited seats. Unlimited projects. No per-user pricing.
             Ever.
           </p>
-          <p className="text-lg text-[#f0f0e8]/60 font-medium mb-12">
+          <p className="mb-10 text-[14px] leading-5 text-[#A0A0A5]">
             Set up takes about 2 minutes. Your first freelancer will thank you.
           </p>
           <Link
             to="/sign-up"
-            className="bg-[#f0f0e8] text-[#1a1a1a] px-12 py-6 border-2 border-[#f0f0e8] text-2xl font-black uppercase tracking-wider hover:bg-[#1a1a1a] hover:text-[#f0f0e8] hover:border-[#f0f0e8] transition-colors shadow-[8px_8px_0px_0px_rgba(0,0,0,0.3)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)]"
+            className="rounded-full bg-white px-6 py-3 text-[14px] font-medium leading-5 text-[#131315] transition-opacity hover:opacity-90"
           >
-            START YOUR TEAM
+            Start your team
           </Link>
         </div>
       </section>

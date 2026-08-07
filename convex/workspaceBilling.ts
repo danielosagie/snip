@@ -6,21 +6,20 @@ import {
   query,
 } from "./_generated/server";
 import { requireUser } from "./auth";
-import { getTeamStorageBreakdown } from "./billingHelpers";
+import {
+  getTeamStorageBreakdown,
+  resolvePlanFromStripePriceId,
+} from "./billingHelpers";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 /**
  * Account-level (workspace) billing.
  *
- * Pricing model: flat monthly base fee + per-seat overage. All flat
- * tiers unlock the entire feature set; the difference is included
- * seats + storage cap.
- *
- * A "seat" is a distinct collaborator across every team the owner
- * participates in — i.e. `count(distinct teamMembers.userClerkId)`
- * for all teams where the user is owner/admin/member. Computed on
- * read, never stored, so seat counts are always live.
+ * Pricing model: flat monthly fee based on managed storage capacity.
+ * Paid tiers include unlimited collaborators. Storage is the cost
+ * lever because the desktop drive, browser uploads, and delivery
+ * sources all land in Snip-managed object storage.
  *
  * Why account-level instead of team-level: users with multiple teams
  * shouldn't pay multiple base fees. The old per-team subscription
@@ -31,6 +30,10 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 // ─── Tiers ──────────────────────────────────────────────────────────────
 
 const GIBIBYTE = 1024 ** 3;
+const LEGACY_STORAGE_BYTES: Partial<Record<TierKey, number>> = {
+  basic: 2 * 1024 * GIBIBYTE,
+  pro: 5 * 1024 * GIBIBYTE,
+};
 
 const COMMON_FEATURES = [
   "Unlimited projects",
@@ -47,23 +50,24 @@ export const TIERS = {
     plan: "free",
     label: "Free",
     baseCents: 0,
-    // Free seats can't be billed, so overage is meaningless here —
-    // the cap is enforced as a hard block at invite time instead.
+    // Free has a small collaboration cap as an anti-abuse measure.
     perSeatCents: 0,
     // Owner + 1 collaborator. "Free gets 1 invitee" so an existing
     // owner can pull in one trusted teammate before having to pay.
     includedSeats: 2,
-    storageBytes: 50 * GIBIBYTE, // 50 GB — generous free tier (drive included)
+    unlimitedSeats: false,
+    storageBytes: 25 * GIBIBYTE,
     currency: "usd",
     features: [...COMMON_FEATURES],
   },
   basic: {
     plan: "basic",
     label: "Basic",
-    baseCents: 2000, // $20/mo
-    perSeatCents: 500, // $5/seat overage
-    includedSeats: 3,
-    storageBytes: 2 * 1024 * GIBIBYTE, // 2 TB
+    baseCents: 2500,
+    perSeatCents: 0,
+    includedSeats: 0,
+    unlimitedSeats: true,
+    storageBytes: 500 * GIBIBYTE,
     currency: "usd",
     features: [...COMMON_FEATURES],
   },
@@ -71,9 +75,10 @@ export const TIERS = {
     plan: "pro",
     label: "Pro",
     baseCents: 5000, // $50/mo
-    perSeatCents: 500, // $5/seat overage
-    includedSeats: 8,
-    storageBytes: 5 * 1024 * GIBIBYTE, // 5 TB
+    perSeatCents: 0,
+    includedSeats: 0,
+    unlimitedSeats: true,
+    storageBytes: 2 * 1024 * GIBIBYTE,
     currency: "usd",
     features: [...COMMON_FEATURES, "Priority support"],
   },
@@ -88,6 +93,7 @@ export const TIERS = {
     baseCents: 0,
     perSeatCents: 500,
     includedSeats: 0,
+    unlimitedSeats: true,
     storageBytes: Number.MAX_SAFE_INTEGER,
     currency: "usd",
     features: [
@@ -151,33 +157,6 @@ function normalizePlanKey(plan: string | undefined | null): TierKey {
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 type BillingCtx = QueryCtx | MutationCtx;
-
-async function computeSeatCount(
-  ctx: BillingCtx,
-  ownerClerkId: string,
-): Promise<number> {
-  // Find every team the owner belongs to, then collapse the union of
-  // distinct collaborators across them. This avoids double-counting
-  // someone who's in two of the owner's teams.
-  const ownerMemberships = await ctx.db
-    .query("teamMembers")
-    .withIndex("by_user", (q) => q.eq("userClerkId", ownerClerkId))
-    .collect();
-
-  const distinctCollaborators = new Set<string>();
-  for (const m of ownerMemberships) {
-    const teamMembers = await ctx.db
-      .query("teamMembers")
-      .withIndex("by_team", (q) => q.eq("teamId", m.teamId))
-      .collect();
-    for (const member of teamMembers) {
-      distinctCollaborators.add(member.userClerkId);
-    }
-  }
-  // The owner themselves counts as a seat — they're using a license.
-  distinctCollaborators.add(ownerClerkId);
-  return distinctCollaborators.size;
-}
 
 /**
  * Distinct collaborator count across teams the owner *owns* (not
@@ -248,8 +227,7 @@ async function getTeamOwnerTier(
 /**
  * Throws a typed ConvexError if adding a seat to `teamId` would
  * exceed the team owner's plan's hard cap. Paid tiers (basic/pro/
- * enterprise) have no hard cap — overage is billed at the per-seat
- * rate via `monthlyTotalCents` in `getMySubscription`.
+ * enterprise) have no collaborator cap.
  *
  * Use at invite-send time and again at invite-accept time. The
  * accept-time check matters because multiple invites can be sent
@@ -260,7 +238,7 @@ export async function assertCanAddWorkspaceSeat(
   teamId: Id<"teams">,
 ) {
   const { ownerClerkId, tierKey } = await getTeamOwnerTier(ctx, teamId);
-  // Paid tiers allow overage seats at $5/mo each.
+  // Paid tiers include unlimited collaborators.
   if (tierKey !== "free") return;
 
   const { seats, pendingInvites } = await computeOwnedWorkspaceSeats(
@@ -279,88 +257,6 @@ export async function assertCanAddWorkspaceSeat(
       includedSeats: tier.includedSeats,
       message: `Free workspaces are capped at ${tier.includedSeats} seats. Upgrade in Billing & usage to invite more people.`,
     });
-  }
-}
-
-/**
- * Auto-prune seats when a workspace drops to the free tier. Called
- * from the webhook sync and the demo-mode cancel mutation when a
- * paid subscription becomes inactive. Removes the most recently
- * added non-owner members across the owner's owned teams until the
- * total collaborator count fits the free-tier cap.
- *
- * Pending invites also get cleaned — otherwise they'd accept into a
- * over-cap workspace and immediately bounce on the assert. Folder
- * permission rows for kicked members are not touched (cheap to
- * re-grant on re-invite; safer than over-deleting).
- */
-async function pruneSeatsToFreeCap(
-  ctx: MutationCtx,
-  ownerClerkId: string,
-): Promise<void> {
-  const cap = TIERS.free.includedSeats;
-
-  const ownedTeams = await ctx.db
-    .query("teams")
-    .withIndex("by_owner", (q) => q.eq("ownerClerkId", ownerClerkId))
-    .collect();
-  if (ownedTeams.length === 0) return;
-
-  // Cancel every pending invite — none of them are going to fit, and
-  // leaving them around just produces "you're at the cap" failures
-  // on accept.
-  for (const team of ownedTeams) {
-    const invites = await ctx.db
-      .query("teamInvites")
-      .withIndex("by_team", (q) => q.eq("teamId", team._id))
-      .collect();
-    for (const invite of invites) {
-      await ctx.db.delete(invite._id);
-    }
-  }
-
-  // Collect every non-owner membership row across the owner's owned
-  // teams. Then build the set of distinct users we want to keep,
-  // oldest-first up to the cap. A user who appears in two of the
-  // owner's teams counts as ONE seat — so once they're in the keep
-  // set, every row of theirs stays.
-  type Membership = {
-    _id: Id<"teamMembers">;
-    _creationTime: number;
-    userClerkId: string;
-  };
-  const memberships: Membership[] = [];
-  for (const team of ownedTeams) {
-    const teamMembers = await ctx.db
-      .query("teamMembers")
-      .withIndex("by_team", (q) => q.eq("teamId", team._id))
-      .collect();
-    for (const m of teamMembers) {
-      if (m.userClerkId === ownerClerkId) continue;
-      memberships.push({
-        _id: m._id,
-        _creationTime: m._creationTime,
-        userClerkId: m.userClerkId,
-      });
-    }
-  }
-
-  // Pick the oldest membership per distinct user. Walk in ascending
-  // creation order so the earliest-joined collaborators win the seats.
-  memberships.sort((a, b) => a._creationTime - b._creationTime);
-  const keepUsers = new Set<string>();
-  keepUsers.add(ownerClerkId);
-  for (const m of memberships) {
-    if (keepUsers.size >= cap) break;
-    keepUsers.add(m.userClerkId);
-  }
-
-  // Drop every membership row belonging to a user who didn't make
-  // the keep-set. Users in the keep-set retain ALL their rows.
-  for (const m of memberships) {
-    if (!keepUsers.has(m.userClerkId)) {
-      await ctx.db.delete(m._id);
-    }
   }
 }
 
@@ -394,11 +290,14 @@ export const getMySubscription = query({
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", ownerClerkId))
       .unique();
 
-    const seatCount = await computeSeatCount(ctx, ownerClerkId);
+    const { seats: seatCount } = await computeOwnedWorkspaceSeats(
+      ctx,
+      ownerClerkId,
+    );
 
     // Normalize the stored plan key — legacy rows still say "studio".
     // When a sub exists but isn't active/trialing, treat the user as
-    // free-tier so quotas (50 GB) kick in rather than the formerly-paid
+    // free-tier so quotas (25 GB) kick in rather than the formerly-paid
     // limits.
     const normalizedKey = normalizePlanKey(sub?.plan);
     const isLive = sub?.status === "active" || sub?.status === "trialing";
@@ -409,11 +308,15 @@ export const getMySubscription = query({
       ? {
           ...sub,
           plan: effectiveKey,
-          baseCents: isLive ? sub.baseCents : 0,
-          perSeatCents: isLive ? sub.perSeatCents : 0,
-          includedSeats: isLive
-            ? sub.includedSeats
-            : effectiveTier.includedSeats,
+          // Canonical tier values win over stale row snapshots so old
+          // seat-priced subscriptions render the current storage model.
+          baseCents: isLive ? effectiveTier.baseCents : 0,
+          perSeatCents: isLive ? effectiveTier.perSeatCents : 0,
+          includedSeats: effectiveTier.includedSeats,
+          storageLimitBytes:
+            sub.storageLimitBytes ??
+            LEGACY_STORAGE_BYTES[effectiveKey] ??
+            effectiveTier.storageBytes,
         }
       : {
           ownerClerkId,
@@ -422,10 +325,15 @@ export const getMySubscription = query({
           baseCents: DEFAULT_TIER.baseCents,
           perSeatCents: DEFAULT_TIER.perSeatCents,
           includedSeats: DEFAULT_TIER.includedSeats,
+          storageLimitBytes: DEFAULT_TIER.storageBytes,
           currency: DEFAULT_TIER.currency,
+          // Present so the returned union always carries the field; a
+          // workspace with no Stripe subscription has no cadence.
+          billingCadence: undefined as "monthly" | "annual" | undefined,
           currentPeriodEnd: undefined,
           stripeCustomerId: undefined,
           stripeSubscriptionId: undefined,
+          cancelAtPeriodEnd: false,
           canceledAt: undefined,
         };
 
@@ -439,7 +347,10 @@ export const getMySubscription = query({
     return {
       ...effective,
       seatCount,
-      overageSeats: Math.max(0, seatCount - effective.includedSeats),
+      overageSeats:
+        effective.perSeatCents > 0
+          ? Math.max(0, seatCount - effective.includedSeats)
+          : 0,
       monthlyCents,
     };
   },
@@ -461,6 +372,7 @@ export const listTiers = query({
       baseCents: v.number(),
       perSeatCents: v.number(),
       includedSeats: v.number(),
+      unlimitedSeats: v.boolean(),
       storageBytes: v.number(),
       currency: v.string(),
       features: v.array(v.string()),
@@ -481,6 +393,7 @@ export const listTiers = query({
       baseCents: t.baseCents,
       perSeatCents: t.perSeatCents,
       includedSeats: t.includedSeats,
+      unlimitedSeats: t.unlimitedSeats,
       storageBytes: t.storageBytes,
       currency: t.currency,
       features: [...t.features],
@@ -499,6 +412,7 @@ export const getTier = query({
       baseCents: tier.baseCents,
       perSeatCents: tier.perSeatCents,
       includedSeats: tier.includedSeats,
+      unlimitedSeats: tier.unlimitedSeats,
       storageBytes: tier.storageBytes,
       currency: tier.currency,
       features: [...tier.features],
@@ -518,9 +432,8 @@ export const getTier = query({
  *   • `includedSeats` — the tier's included seat count.
  *   • `hardCapped`    — true on free tier when seatsUsed + pendingInvites
  *                       has reached includedSeats. Paid tiers never
- *                       hard-cap; they bill overage at perSeatCents.
- *   • `perSeatCents`  — the per-seat overage rate (0 on free since
- *                       overage isn't allowed).
+ *                       hard-cap; collaborators are included.
+ *   • `perSeatCents`  — retained for legacy/enterprise metering.
  */
 export const getTeamSeatUsage = query({
   args: { teamId: v.id("teams") },
@@ -533,6 +446,7 @@ export const getTeamSeatUsage = query({
     seatsUsed: number;
     pendingInvites: number;
     includedSeats: number;
+    unlimitedSeats: boolean;
     perSeatCents: number;
     hardCapped: boolean;
   } | null> => {
@@ -552,6 +466,7 @@ export const getTeamSeatUsage = query({
       seatsUsed: seats,
       pendingInvites,
       includedSeats: tier.includedSeats,
+      unlimitedSeats: tier.unlimitedSeats,
       perSeatCents: tier.perSeatCents,
       hardCapped:
         tierKey === "free" && seats + pendingInvites >= tier.includedSeats,
@@ -698,7 +613,7 @@ export const getMyStorageUsage = query({
     if (!identity) return null;
 
     // Resolve the user's effective tier from their workspace
-    // subscription. No row / non-live status = free tier (50 GB).
+    // subscription. No row / non-live status = free tier (25 GB).
     const sub = await ctx.db
       .query("workspaceSubscriptions")
       .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
@@ -708,27 +623,32 @@ export const getMyStorageUsage = query({
       sub && isLive ? normalizePlanKey(sub.plan) : "free";
     const tier = TIERS[key];
 
-    // Usage is summed across every team the user belongs to —
-    // that's what the user perceives as "their" storage even though
-    // the rows live under different team scopes.
-    const memberships = await ctx.db
-      .query("teamMembers")
-      .withIndex("by_user", (q) => q.eq("userClerkId", identity.subject))
+    // A workspace owner pays for storage in teams they own. Storage in
+    // somebody else's workspace belongs to that owner's subscription.
+    const ownedTeams = await ctx.db
+      .query("teams")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", identity.subject))
       .collect();
 
     let hotBytes = 0;
     let coldBytes = 0;
     let driveBytes = 0;
-    for (const m of memberships) {
-      const b = await getTeamStorageBreakdown(ctx, m.teamId);
+    for (const team of ownedTeams) {
+      const b = await getTeamStorageBreakdown(ctx, team._id);
       hotBytes += b.hotBytes;
       coldBytes += b.coldBytes;
       driveBytes += b.driveBytes;
     }
-    // Billed usage = hot + cold (drive sources don't count against cap).
-    const usedBytes = hotBytes + coldBytes;
+    // All Snip-managed object storage counts, including desktop-drive
+    // source files. Otherwise the most expensive storage path is free.
+    const usedBytes = hotBytes + coldBytes + driveBytes;
 
-    const limitBytes = tier.storageBytes;
+    const limitBytes =
+      isLive && sub
+        ? (sub.storageLimitBytes ??
+          LEGACY_STORAGE_BYTES[key] ??
+          tier.storageBytes)
+        : tier.storageBytes;
     const percent =
       limitBytes > 0
         ? Math.min(100, Math.round((usedBytes / limitBytes) * 100))
@@ -830,6 +750,9 @@ export const toggleAddOn = mutation({
     enabled: v.boolean(),
   },
   handler: async (ctx, args) => {
+    if (process.env.STRIPE_SECRET_KEY?.trim()) {
+      throw new Error("Use the billed add-on action for Stripe subscriptions.");
+    }
     const user = await requireUser(ctx);
     const sub = await requireLivePaidSubscription(ctx, user.subject);
     const next = { ...(sub.addOns ?? {}), [args.addOn]: args.enabled };
@@ -846,11 +769,53 @@ export const toggleAddOn = mutation({
 export const setCustomDomain = mutation({
   args: { hostname: v.union(v.string(), v.null()) },
   handler: async (ctx, args) => {
+    if (process.env.STRIPE_SECRET_KEY?.trim()) {
+      throw new Error("Use the billed add-on action for Stripe subscriptions.");
+    }
     const user = await requireUser(ctx);
     const sub = await requireLivePaidSubscription(ctx, user.subject);
     const hostname = args.hostname?.trim() || undefined;
     const next = { ...(sub.addOns ?? {}), customDomain: hostname };
     await ctx.db.patch(sub._id, { addOns: next });
+  },
+});
+
+/** Stripe action/webhook reconciliation for one add-on subscription item. */
+export const recordAddOnBillingState = internalMutation({
+  args: {
+    ownerClerkId: v.string(),
+    stripeSubscriptionId: v.string(),
+    addOn: v.union(
+      v.literal("whiteLabel"),
+      v.literal("customDomain"),
+      v.literal("apiTier"),
+    ),
+    enabled: v.boolean(),
+    stripeSubscriptionItemId: v.optional(v.string()),
+    customDomain: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const sub = await ctx.db
+      .query("workspaceSubscriptions")
+      .withIndex("by_owner", (q) => q.eq("ownerClerkId", args.ownerClerkId))
+      .unique();
+    if (!sub || sub.stripeSubscriptionId !== args.stripeSubscriptionId) {
+      throw new Error("Workspace subscription changed while the add-on was updating.");
+    }
+    const addOns = { ...(sub.addOns ?? {}) };
+    const itemIds = { ...(sub.stripeAddOnItemIds ?? {}) };
+    if (args.addOn === "customDomain") {
+      addOns.customDomain = args.enabled ? args.customDomain : undefined;
+    } else {
+      addOns[args.addOn] = args.enabled;
+    }
+    itemIds[args.addOn] = args.enabled
+      ? args.stripeSubscriptionItemId
+      : undefined;
+    await ctx.db.patch(sub._id, {
+      addOns,
+      stripeAddOnItemIds: itemIds,
+    });
   },
 });
 
@@ -885,6 +850,7 @@ export const simulateActivate = mutation({
         baseCents: tier.baseCents,
         perSeatCents: tier.perSeatCents,
         includedSeats: tier.includedSeats,
+        storageLimitBytes: tier.storageBytes,
         currency: tier.currency,
         currentPeriodEnd: periodEnd,
         canceledAt: undefined,
@@ -899,6 +865,7 @@ export const simulateActivate = mutation({
       baseCents: tier.baseCents,
       perSeatCents: tier.perSeatCents,
       includedSeats: tier.includedSeats,
+      storageLimitBytes: tier.storageBytes,
       currency: tier.currency,
       currentPeriodEnd: periodEnd,
     });
@@ -906,11 +873,9 @@ export const simulateActivate = mutation({
 });
 
 /**
- * Demo-mode cancel: flips status to "canceled" and prunes any
- * over-cap collaborators (the workspace is now effectively free
- * tier). Real Stripe cancellations land via the webhook in
- * `syncWorkspaceSubscriptionFromWebhook`, which calls the same
- * prune.
+ * Demo-mode cancel: flips status to "canceled". Billing changes never
+ * delete or remove collaborators; the free-tier cap is enforced only
+ * when somebody tries to add another collaborator.
  */
 export const simulateCancel = mutation({
   args: {},
@@ -924,61 +889,6 @@ export const simulateCancel = mutation({
     await ctx.db.patch(existing._id, {
       status: "canceled",
       canceledAt: Date.now(),
-    });
-    // Workspace is now effectively free tier — trim collaborators
-    // back to the free cap so the next invite isn't immediately
-    // blocked.
-    await pruneSeatsToFreeCap(ctx, user.subject);
-  },
-});
-
-/**
- * Mutation called by the workspaceBillingActions checkout flow right
- * before redirecting the user to Stripe. Plants a "trialing" row with
- * the Stripe customer id so the UI shows pending status immediately;
- * the webhook fills in the real subscription details later.
- */
-export const recordPendingCheckout = mutation({
-  args: {
-    plan: v.string(),
-    stripeCustomerId: v.optional(v.string()),
-    cadence: v.optional(v.union(v.literal("monthly"), v.literal("annual"))),
-  },
-  handler: async (ctx, args) => {
-    const user = await requireUser(ctx);
-    const key = normalizePlanKey(args.plan);
-    if (key === "free") {
-      throw new Error("Pick a paid plan to start checkout.");
-    }
-    const tier = TIERS[key];
-    const cadence = args.cadence ?? "monthly";
-    const existing = await ctx.db
-      .query("workspaceSubscriptions")
-      .withIndex("by_owner", (q) => q.eq("ownerClerkId", user.subject))
-      .unique();
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        status: "trialing",
-        plan: tier.plan,
-        baseCents: tier.baseCents,
-        perSeatCents: tier.perSeatCents,
-        includedSeats: tier.includedSeats,
-        currency: tier.currency,
-        billingCadence: cadence,
-        stripeCustomerId: args.stripeCustomerId ?? existing.stripeCustomerId,
-      });
-      return;
-    }
-    await ctx.db.insert("workspaceSubscriptions", {
-      ownerClerkId: user.subject,
-      plan: tier.plan,
-      status: "trialing",
-      baseCents: tier.baseCents,
-      perSeatCents: tier.perSeatCents,
-      includedSeats: tier.includedSeats,
-      currency: tier.currency,
-      billingCadence: cadence,
-      stripeCustomerId: args.stripeCustomerId,
     });
   },
 });
@@ -1000,6 +910,16 @@ export const syncWorkspaceSubscriptionFromWebhook = internalMutation({
     plan: v.optional(v.string()),
     status: v.string(),
     currentPeriodEnd: v.optional(v.number()),
+    cancelAtPeriodEnd: v.optional(v.boolean()),
+    billingCadence: v.optional(v.union(v.literal("monthly"), v.literal("annual"))),
+    addOnItems: v.optional(
+      v.object({
+        whiteLabel: v.optional(v.string()),
+        customDomain: v.optional(v.string()),
+        customDomainHostname: v.optional(v.string()),
+        apiTier: v.optional(v.string()),
+      }),
+    ),
   },
   handler: async (ctx, args) => {
     // Locate the row. Prefer the explicit owner clerk id from metadata;
@@ -1039,7 +959,14 @@ export const syncWorkspaceSubscriptionFromWebhook = internalMutation({
       return;
     }
 
-    const tier = TIERS[normalizePlanKey(args.plan ?? existing?.plan)];
+    const tier =
+      TIERS[
+        normalizePlanKey(
+          resolvePlanFromStripePriceId(args.stripePriceId) ??
+            args.plan ??
+            existing?.plan,
+        )
+      ];
     const statusUnion = (
       ["none", "trialing", "active", "past_due", "canceled"] as const
     ).includes(args.status as never)
@@ -1052,16 +979,41 @@ export const syncWorkspaceSubscriptionFromWebhook = internalMutation({
       : ("canceled" as const);
 
     if (existing) {
+      const addOnItems = args.addOnItems;
+      const nextAddOns = addOnItems
+        ? {
+            ...(existing.addOns ?? {}),
+            whiteLabel: Boolean(addOnItems.whiteLabel),
+            apiTier: Boolean(addOnItems.apiTier),
+            customDomain: addOnItems.customDomain
+              ? (addOnItems.customDomainHostname ?? existing.addOns?.customDomain)
+              : undefined,
+          }
+        : existing.addOns;
       await ctx.db.patch(existing._id, {
         status: statusUnion,
         plan: tier.plan,
         baseCents: tier.baseCents,
         perSeatCents: tier.perSeatCents,
         includedSeats: tier.includedSeats,
+        storageLimitBytes:
+          existing.storageLimitBytes ??
+          LEGACY_STORAGE_BYTES[normalizePlanKey(existing.plan)] ??
+          tier.storageBytes,
         currency: tier.currency,
         currentPeriodEnd: args.currentPeriodEnd ?? existing.currentPeriodEnd,
         stripeCustomerId: args.stripeCustomerId ?? existing.stripeCustomerId,
         stripeSubscriptionId: args.stripeSubscriptionId,
+        cancelAtPeriodEnd: args.cancelAtPeriodEnd ?? false,
+        billingCadence: args.billingCadence ?? existing.billingCadence,
+        addOns: nextAddOns,
+        stripeAddOnItemIds: addOnItems
+          ? {
+              whiteLabel: addOnItems.whiteLabel,
+              customDomain: addOnItems.customDomain,
+              apiTier: addOnItems.apiTier,
+            }
+          : existing.stripeAddOnItemIds,
         canceledAt:
           statusUnion === "canceled"
             ? (existing.canceledAt ?? Date.now())
@@ -1075,22 +1027,30 @@ export const syncWorkspaceSubscriptionFromWebhook = internalMutation({
         baseCents: tier.baseCents,
         perSeatCents: tier.perSeatCents,
         includedSeats: tier.includedSeats,
+        storageLimitBytes: tier.storageBytes,
         currency: tier.currency,
         currentPeriodEnd: args.currentPeriodEnd,
         stripeCustomerId: args.stripeCustomerId,
         stripeSubscriptionId: args.stripeSubscriptionId,
+        cancelAtPeriodEnd: args.cancelAtPeriodEnd ?? false,
+        billingCadence: args.billingCadence,
+        addOns: args.addOnItems
+          ? {
+              whiteLabel: Boolean(args.addOnItems.whiteLabel),
+              apiTier: Boolean(args.addOnItems.apiTier),
+              customDomain: args.addOnItems.customDomain
+                ? args.addOnItems.customDomainHostname
+                : undefined,
+            }
+          : undefined,
+        stripeAddOnItemIds: args.addOnItems
+          ? {
+              whiteLabel: args.addOnItems.whiteLabel,
+              customDomain: args.addOnItems.customDomain,
+              apiTier: args.addOnItems.apiTier,
+            }
+          : undefined,
       });
-    }
-
-    // If the new effective tier is free (sub canceled, status "none",
-    // etc.), trim collaborators back to the free cap so the workspace
-    // doesn't sit over its limit. Paid → paid transitions don't need
-    // pruning since paid tiers allow overage.
-    const owner = args.ownerClerkId ?? existing?.ownerClerkId;
-    const effectivelyFree =
-      statusUnion === "canceled" || statusUnion === "none";
-    if (owner && effectivelyFree) {
-      await pruneSeatsToFreeCap(ctx, owner);
     }
   },
 });

@@ -95,33 +95,33 @@ export function ContractVersionsPanel({
         </div>
       ) : null}
 
-      <div className="border-t-2 border-[#1a1a1a] pt-3 space-y-2">
+      <div className="space-y-2 border-t border-[#F1F1F3] pt-3">
         {versions === undefined ? (
-          <div className="text-xs text-[#888]">Loading…</div>
+          <div className="text-xs text-[#6E6E73]">Loading…</div>
         ) : versions.length === 0 ? (
-          <div className="text-xs text-[#888] italic">
+          <div className="text-xs italic text-[#6E6E73]">
             No saved versions yet. Save one before risky edits.
           </div>
         ) : (
           versions.map((v) => (
             <div
               key={v._id}
-              className="border-2 border-[#1a1a1a] p-2.5 bg-[#f0f0e8]"
+              className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] p-2.5"
             >
               <div className="flex items-baseline justify-between gap-2">
-                <div className="font-bold text-xs uppercase tracking-wider">
+                <div className="text-xs font-semibold text-[#131315]">
                   v{v.versionNumber}
                 </div>
-                <span className="text-[10px] font-mono text-[#888]">
+                <span className="text-[10px] text-[#6E6E73]">
                   {formatRelativeTime(v._creationTime)}
                 </span>
               </div>
               {v.label ? (
-                <div className="mt-1 text-sm text-[#1a1a1a] truncate">
+                <div className="mt-1 truncate text-sm text-[#131315]">
                   {v.label}
                 </div>
               ) : null}
-              <div className="mt-1 text-[10px] font-mono text-[#888] truncate">
+              <div className="mt-1 truncate text-[10px] text-[#6E6E73]">
                 by {v.createdByName}
               </div>
               {!readOnly ? (
@@ -131,10 +131,10 @@ export function ContractVersionsPanel({
                     onClick={() =>
                       void handleRestore(
                         v._id,
-                        `v${v.versionNumber}${v.label ? ` — ${v.label}` : ""}`,
+                        `v${v.versionNumber}${v.label ? `, ${v.label}` : ""}`,
                       )
                     }
-                    className="inline-flex items-center gap-1 px-2 py-1 border-2 border-[#1a1a1a] text-[10px] font-bold uppercase tracking-wider hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+                    className="inline-flex items-center gap-1 rounded-full border border-[#D8D8DE] bg-white px-2.5 py-1 text-[11px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3]"
                   >
                     <RotateCcw className="h-3 w-3" />
                     Restore
@@ -145,7 +145,7 @@ export function ContractVersionsPanel({
                       if (!confirm(`Delete v${v.versionNumber}?`)) return;
                       void remove({ versionId: v._id });
                     }}
-                    className="inline-flex items-center justify-center w-7 h-7 border-2 border-[#1a1a1a] text-[#dc2626] hover:bg-[#dc2626] hover:text-[#f0f0e8] transition-colors"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#D8434F] transition-colors hover:bg-[#FFF5F5]"
                     title="Delete"
                     aria-label="Delete"
                   >

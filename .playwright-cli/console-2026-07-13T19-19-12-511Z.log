@@ -1,0 +1,10 @@
+[    2829ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5296/node_modules/.vite/deps/react-dom_client.js?v=76aae05e:20102
+[    3206ms] [WARNING] Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview @ https://outgoing-weevil-18.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js:18
+[    3629ms] [WARNING] Note: Some companies are required to obtain a license to use Remotion. See: https://remotion.dev/license
+Pass the `acknowledgeRemotionLicense` prop to `<Player />` function to make this message disappear. @ http://localhost:5296/node_modules/.vite/deps/chunk-GAYER6T6.js?v=76aae05e:934
+[ 7493199ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5296/@vite/client:864
+[ 7498558ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5296/node_modules/.vite/deps/react-dom_client.js?v=76aae05e:20102
+[ 7498806ms] [WARNING] Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview @ https://outgoing-weevil-18.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js:18
+[ 7499246ms] [WARNING] Note: Some companies are required to obtain a license to use Remotion. See: https://remotion.dev/license
+Pass the `acknowledgeRemotionLicense` prop to `<Player />` function to make this message disappear. @ http://localhost:5296/node_modules/.vite/deps/chunk-GAYER6T6.js?v=76aae05e:934
+[ 9572019ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5296/@vite/client:864

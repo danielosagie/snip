@@ -23,6 +23,7 @@ interface DesktopUpdateState {
   version: string | null;
   percent: number;
   error: string | null;
+  requiresManualInstall: boolean;
 }
 
 interface DesktopApi {
@@ -34,7 +35,7 @@ interface DesktopApi {
   update: {
     state: () => Promise<DesktopUpdateState>;
     check: () => Promise<{ ok: boolean; reason?: string }>;
-    install: () => Promise<{ ok: boolean; reason?: string }>;
+    install: () => Promise<{ ok: boolean; reason?: string; manual?: boolean }>;
     onStatus: (handler: (state: DesktopUpdateState) => void) => () => void;
   };
   settings: {

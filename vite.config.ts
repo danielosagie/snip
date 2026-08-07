@@ -22,6 +22,7 @@ export default defineConfig({
         enabled: true,
         autoStaticPathsDiscovery: false,
         crawlLinks: false,
+        concurrency: 1,
       },
       pages: [
         { path: "/" },

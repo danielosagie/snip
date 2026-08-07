@@ -1,14 +1,23 @@
 "use node";
 
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListPartsCommand,
   PutObjectCommand,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v } from "convex/values";
-import { action, ActionCtx, internalAction } from "./_generated/server";
+import {
+  action,
+  ActionCtx,
+  internalAction,
+} from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import {
@@ -35,9 +44,24 @@ import {
   isCloudflareStreamConfigured,
 } from "./cloudflareStream";
 import { resolvePlaybackProvider, defaultPlaybackProvider } from "./providers/playbackProvider";
+import { shouldDeferEncodingForPolicy } from "./encodingPolicy";
 
 const GIBIBYTE = 1024 ** 3;
-const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
+const TEBIBYTE = 1024 ** 4;
+/**
+ * Ceiling for a single presigned PUT. This is a protocol limit on one
+ * request body, not a limit on how big a file may be — anything larger
+ * must go through multipart.
+ */
+const MAX_SINGLE_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
+/**
+ * Ceiling for a stored object however it arrived. R2 and S3 both allow
+ * 5 TiB via multipart. Applying the single-PUT limit here instead was
+ * silently deleting successfully uploaded multi-GB files after the
+ * bytes had already landed.
+ */
+const MAX_OBJECT_SIZE_BYTES = 5 * TEBIBYTE;
+const MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024;
 
 // Mux ingest is gated by content type — only actual video types route to
 // the Mux pipeline. Everything else (docs, images, audio, source-control
@@ -242,13 +266,26 @@ function normalizeContentType(contentType: string | null | undefined): string {
     .toLowerCase();
 }
 
-function validateUploadRequestOrThrow(args: { fileSize: number; contentType: string }) {
-  if (!Number.isFinite(args.fileSize) || args.fileSize <= 0) {
-    throw new Error("File size must be greater than zero.");
+function validateUploadRequestOrThrow(
+  args: { fileSize: number; contentType: string },
+  // Multipart callers pass "multipart": the 5 GiB single-request ceiling
+  // does not apply to them.
+  transport: "single-put" | "multipart" = "single-put",
+) {
+  if (!Number.isFinite(args.fileSize) || args.fileSize < 0) {
+    throw new Error("File size can't be negative.");
   }
 
-  if (args.fileSize > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
-    throw new Error("File is too large for direct upload (5 GiB max).");
+  const ceiling =
+    transport === "multipart"
+      ? MAX_OBJECT_SIZE_BYTES
+      : MAX_SINGLE_PUT_FILE_SIZE_BYTES;
+  if (args.fileSize > ceiling) {
+    throw new Error(
+      transport === "multipart"
+        ? "File is too large to store (5 TiB max)."
+        : "File is too large for direct upload (5 GiB max).",
+    );
   }
 
   // Accept any content type. Mux processing is gated separately on whether
@@ -274,11 +311,26 @@ async function requireVideoMemberAccess(
   videoId: Id<"videos">
 ) {
   const video = (await ctx.runQuery(api.videos.get, { videoId })) as
-    | { role?: string }
+    | { role?: string; s3Key?: string }
     | null;
   if (!video || video.role === "viewer") {
     throw new Error("Requires member role or higher");
   }
+  return video;
+}
+
+async function allocateOriginalUploadKey(
+  ctx: ActionCtx,
+  videoId: Id<"videos">,
+  filename: string,
+) {
+  const ext = getExtensionFromKey(filename);
+  const loc = await ctx.runQuery(internal.videos.getProxyMirrorContext, {
+    videoId,
+  });
+  return loc?.teamSlug && loc?.projectId
+    ? `projects/${loc.teamSlug}/${loc.projectId}/originals/${videoId}/${Date.now()}.${ext}`
+    : `videos/${videoId}/${Date.now()}.${ext}`;
 }
 
 /**
@@ -384,19 +436,12 @@ export const getUploadUrl = action({
     });
 
     const s3 = getS3Client();
-    const ext = getExtensionFromKey(args.filename);
     // Originals live under the project tree so the drive's full-res toggle can
     // surface them (proxies sit alongside under proxies/). One copy, no
     // duplication — Mux ingests via a signed URL by key, so the path is free to
     // change. Fall back to the legacy videos/ path if we can't resolve the
     // project, so an upload never breaks on a lookup miss.
-    const loc = await ctx.runQuery(internal.videos.getProxyMirrorContext, {
-      videoId: args.videoId,
-    });
-    const key =
-      loc?.teamSlug && loc?.projectId
-        ? `projects/${loc.teamSlug}/${loc.projectId}/originals/${args.videoId}/${Date.now()}.${ext}`
-        : `videos/${args.videoId}/${Date.now()}.${ext}`;
+    const key = await allocateOriginalUploadKey(ctx, args.videoId, args.filename);
     const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
@@ -412,6 +457,154 @@ export const getUploadUrl = action({
     });
 
     return { url, uploadId: key };
+  },
+});
+
+export const startMultipartUpload = action({
+  args: {
+    videoId: v.id("videos"),
+    filename: v.string(),
+    fileSize: v.number(),
+    contentType: v.string(),
+  },
+  returns: v.object({
+    uploadId: v.string(),
+    key: v.string(),
+    partSize: v.number(),
+  }),
+  handler: async (ctx, args): Promise<{
+    uploadId: string;
+    key: string;
+    partSize: number;
+  }> => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    const contentType = validateUploadRequestOrThrow(args, "multipart");
+    const key = await allocateOriginalUploadKey(ctx, args.videoId, args.filename);
+    const result = await getS3Client().send(
+      new CreateMultipartUploadCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        ContentType: contentType,
+      }),
+    );
+    if (!result.UploadId) throw new Error("Storage did not start the multipart upload.");
+
+    await ctx.runMutation(internal.videos.setUploadInfo, {
+      videoId: args.videoId,
+      s3Key: key,
+      fileSize: args.fileSize,
+      contentType,
+    });
+    return {
+      uploadId: result.UploadId,
+      key,
+      partSize: MULTIPART_PART_SIZE_BYTES,
+    };
+  },
+});
+
+export const getMultipartPartUrl = action({
+  args: {
+    videoId: v.id("videos"),
+    uploadId: v.string(),
+    partNumber: v.number(),
+  },
+  returns: v.object({ url: v.string() }),
+  handler: async (ctx, args): Promise<{ url: string }> => {
+    const video = await requireVideoMemberAccess(ctx, args.videoId);
+    if (!video.s3Key) throw new Error("Upload target is missing.");
+    if (!Number.isInteger(args.partNumber) || args.partNumber < 1 || args.partNumber > 10_000) {
+      throw new Error("Invalid multipart part number.");
+    }
+    const url = await getSignedUrl(
+      getS3Client(),
+      new UploadPartCommand({
+        Bucket: BUCKET_NAME,
+        Key: video.s3Key,
+        UploadId: args.uploadId,
+        PartNumber: args.partNumber,
+      }),
+      { expiresIn: 3600 },
+    );
+    return { url };
+  },
+});
+
+export const completeMultipartUpload = action({
+  args: {
+    videoId: v.id("videos"),
+    uploadId: v.string(),
+    expectedParts: v.number(),
+  },
+  returns: v.object({ success: v.boolean() }),
+  handler: async (ctx, args): Promise<{ success: boolean }> => {
+    const video = await requireVideoMemberAccess(ctx, args.videoId);
+    if (!video.s3Key) throw new Error("Upload target is missing.");
+    const s3 = getS3Client();
+    const parts: Array<{ ETag: string; PartNumber: number }> = [];
+    let marker: string | undefined;
+    do {
+      const page = await s3.send(
+        new ListPartsCommand({
+          Bucket: BUCKET_NAME,
+          Key: video.s3Key,
+          UploadId: args.uploadId,
+          PartNumberMarker: marker,
+        }),
+      );
+      for (const part of page.Parts ?? []) {
+        if (part.ETag && part.PartNumber) {
+          parts.push({ ETag: part.ETag, PartNumber: part.PartNumber });
+        }
+      }
+      marker = page.IsTruncated ? page.NextPartNumberMarker : undefined;
+    } while (marker);
+
+    parts.sort((a, b) => a.PartNumber - b.PartNumber);
+    if (parts.length !== args.expectedParts) {
+      throw new Error(`Upload has ${parts.length} of ${args.expectedParts} parts.`);
+    }
+    await s3.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: BUCKET_NAME,
+        Key: video.s3Key,
+        UploadId: args.uploadId,
+        MultipartUpload: { Parts: parts },
+      }),
+    );
+    return { success: true };
+  },
+});
+
+export const cancelUploadObject = action({
+  args: {
+    videoId: v.id("videos"),
+    multipartUploadId: v.optional(v.string()),
+  },
+  returns: v.object({ success: v.boolean() }),
+  handler: async (ctx, args): Promise<{ success: boolean }> => {
+    const video = await requireVideoMemberAccess(ctx, args.videoId);
+    if (video.s3Key) {
+      try {
+        if (args.multipartUploadId) {
+          await getS3Client().send(
+            new AbortMultipartUploadCommand({
+              Bucket: BUCKET_NAME,
+              Key: video.s3Key,
+              UploadId: args.multipartUploadId,
+            }),
+          );
+        } else {
+          await getS3Client().send(
+            new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: video.s3Key }),
+          );
+        }
+      } catch (error) {
+        console.warn("upload object cleanup failed", error);
+      }
+    }
+    await ctx.runMutation(api.videos.cancelUpload, { videoId: args.videoId });
+    return { success: true };
   },
 });
 
@@ -474,18 +667,12 @@ export const getSharedBundleCover = action({
   },
 });
 
-export const markUploadComplete = action({
-  args: {
-    videoId: v.id("videos"),
-  },
-  returns: v.object({
-    success: v.boolean(),
-  }),
-  handler: async (ctx, args) => {
-    await requireVideoMemberAccess(ctx, args.videoId);
-
+async function markUploadCompleteImpl(
+  ctx: ActionCtx,
+  videoId: Id<"videos">,
+): Promise<{ success: boolean }> {
     const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
-      videoId: args.videoId,
+      videoId,
     });
 
     if (!video || !video.s3Key) {
@@ -501,16 +688,12 @@ export const markUploadComplete = action({
         }),
       );
       const contentLengthRaw = head.ContentLength;
-      if (
-        typeof contentLengthRaw !== "number" ||
-        !Number.isFinite(contentLengthRaw) ||
-        contentLengthRaw <= 0
-      ) {
-        throw new Error("Uploaded video file not found or empty.");
+      if (typeof contentLengthRaw !== "number" || !Number.isFinite(contentLengthRaw)) {
+        throw new Error("Uploaded file metadata is unavailable.");
       }
       const contentLength = contentLengthRaw;
-      if (contentLength > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
-        throw new Error("Video file is too large for direct upload.");
+      if (contentLength > MAX_OBJECT_SIZE_BYTES) {
+        throw new Error("Video file is too large to store.");
       }
 
       const normalizedContentType =
@@ -518,23 +701,32 @@ export const markUploadComplete = action({
         "application/octet-stream";
 
       await ctx.runMutation(internal.videos.reconcileUploadedObjectMetadata, {
-        videoId: args.videoId,
+        videoId,
         fileSize: contentLength,
         contentType: normalizedContentType,
       });
 
-      if (isMuxVideoType(normalizedContentType, video.s3Key)) {
+      // Empty files are legitimate filesystem objects, but they are not valid
+      // media inputs. Preserve them as generic ready files instead of rejecting
+      // the upload or feeding them to an encoder.
+      if (contentLength === 0) {
+        await ctx.runMutation(internal.videos.markAsReadyAsFile, {
+          videoId,
+          fileSize: 0,
+          contentType: normalizedContentType,
+        });
+      } else if (isMuxVideoType(normalizedContentType, video.s3Key)) {
         // Lazy encoding: when enabled, skip ingest and hold the video
         // in `encodingDeferred` state. The first watch triggers
         // `requestEncoding`, which runs the same pipeline. Cuts COGS
         // on the long tail of footage uploaded but never played.
         if (await shouldDeferEncoding(ctx, video.projectId)) {
           await ctx.runMutation(internal.videos.markAsEncodingDeferred, {
-            videoId: args.videoId,
+            videoId,
           });
         } else {
           await startEncoding(ctx, {
-            videoId: args.videoId,
+            videoId,
             s3Key: video.s3Key,
             projectId: video.projectId,
           });
@@ -545,7 +737,7 @@ export const markUploadComplete = action({
         // available for download. The video player will detect the absence
         // of a playback ID and render a generic file viewer instead.
         await ctx.runMutation(internal.videos.markAsReadyAsFile, {
-          videoId: args.videoId,
+          videoId,
           fileSize: contentLength,
           contentType: normalizedContentType,
         });
@@ -566,7 +758,7 @@ export const markUploadComplete = action({
           // No-op: preserve original processing failure.
         }
         await ctx.runMutation(internal.videos.markAsFailed, {
-          videoId: args.videoId,
+          videoId,
           uploadError: error instanceof Error ? error.message : undefined,
         });
         throw error;
@@ -578,13 +770,53 @@ export const markUploadComplete = action({
       // — the players fall back to original-file playback — instead of
       // showing a misleading "failed". A later backfill can re-encode it.
       await ctx.runMutation(internal.videos.markAsReadyOriginalOnly, {
-        videoId: args.videoId,
+        videoId,
         muxError: error instanceof Error ? error.message : "Mux ingest failed.",
       });
       return { success: true };
     }
 
     return { success: true };
+}
+
+export const markUploadComplete = action({
+  args: {
+    videoId: v.id("videos"),
+  },
+  returns: v.object({
+    success: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+    return await markUploadCompleteImpl(ctx, args.videoId);
+  },
+});
+
+/** Auth-free scheduled retry for a row already authorized and committed by an upload action. */
+export const markUploadCompleteInternal = internalAction({
+  args: { videoId: v.id("videos"), attempt: v.optional(v.number()) },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    const attempt = args.attempt ?? 1;
+    try {
+      const status = await ctx.runQuery(
+        internal.desktopBrowse.getVideoStatusForDesktop,
+        { videoId: args.videoId },
+      );
+      if (status !== "uploading" && status !== "failed") return null;
+      await markUploadCompleteImpl(ctx, args.videoId);
+    } catch (error) {
+      if (attempt >= 5) {
+        console.error(`upload ${args.videoId} finalize exhausted retries:`, error);
+        return null;
+      }
+      await ctx.scheduler.runAfter(
+        Math.min(15 * 60_000, 30_000 * 2 ** attempt),
+        internal.videoActions.markUploadCompleteInternal,
+        { videoId: args.videoId, attempt: attempt + 1 },
+      );
+    }
+    return null;
   },
 });
 
@@ -749,6 +981,43 @@ export const getPlaybackSession = action({
       return { url: urls.hlsUrl, posterUrl: urls.thumbnailUrl };
     }
 
+    if (!video.muxPlaybackId) {
+      throw new Error("Video not found or not ready");
+    }
+    const playbackId = await ensurePublicPlaybackId(ctx, {
+      videoId: args.videoId,
+      muxAssetId: video.muxAssetId,
+      muxPlaybackId: video.muxPlaybackId,
+    });
+    return buildPublicPlaybackSession(playbackId);
+  },
+});
+
+/**
+ * Lightweight authenticated playback session for project-card hover previews.
+ * Unlike a real watch, this deliberately does not update retention activity.
+ */
+export const getHoverPreviewSession = action({
+  args: { videoId: v.id("videos") },
+  returns: v.object({
+    url: v.string(),
+    posterUrl: v.string(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ url: string; posterUrl: string }> => {
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+    if (!video || video.status !== "ready") {
+      throw new Error("Video not found or not ready");
+    }
+    if (resolvePlaybackProvider(video) === "cloudflare_stream") {
+      if (!video.streamUid) throw new Error("Stream video is missing its uid");
+      const urls = buildStreamPlaybackUrls(video.streamUid);
+      return { url: urls.hlsUrl, posterUrl: urls.thumbnailUrl };
+    }
     if (!video.muxPlaybackId) {
       throw new Error("Video not found or not ready");
     }
@@ -1446,6 +1715,7 @@ export const getSharedFileAccess = action({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
       v.null(),
     ),
@@ -1460,7 +1730,12 @@ export const getSharedFileAccess = action({
     contentType: string | null;
     fileName: string | null;
     tokenExpiresAt: number | null;
-    paywall: { priceCents: number; currency: string; description?: string } | null;
+    paywall: {
+      priceCents: number;
+      currency: string;
+      description?: string;
+      mode?: "all" | "per_item";
+    } | null;
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
       grantToken: args.grantToken,
@@ -1568,6 +1843,7 @@ export const getSharedImagePreview = action({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
       v.null(),
     ),
@@ -1580,7 +1856,12 @@ export const getSharedImagePreview = action({
     url: string;
     contentType: string | null;
     tokenExpiresAt: number | null;
-    paywall: { priceCents: number; currency: string; description?: string } | null;
+    paywall: {
+      priceCents: number;
+      currency: string;
+      description?: string;
+      mode?: "all" | "per_item";
+    } | null;
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
       grantToken: args.grantToken,
@@ -1725,6 +2006,7 @@ export const getSharedPaywalledPlayback = action({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       }),
       v.null(),
     ),
@@ -1738,7 +2020,12 @@ export const getSharedPaywalledPlayback = action({
     url: string;
     posterUrl: string;
     tokenExpiresAt: number | null;
-    paywall: { priceCents: number; currency: string; description?: string } | null;
+    paywall: {
+      priceCents: number;
+      currency: string;
+      description?: string;
+      mode?: "all" | "per_item";
+    } | null;
     previewError: string | null;
   }> => {
     const resolved = await ctx.runQuery(api.videos.getByShareGrantWithPaywall, {
@@ -1906,7 +2193,7 @@ export const getSharedPaywalledPlayback = action({
         // action is idempotent and reuses the global overlay.
         await ctx.scheduler.runAfter(
           0,
-          api.videoActions.ensurePreviewAssetForVideo,
+          internal.videoActions.ensurePreviewAssetForVideo,
           { videoId: video._id },
         );
         return pending;
@@ -2046,7 +2333,7 @@ export const retryPreviewAssetForShareLink = action({
     });
     await ctx.scheduler.runAfter(
       0,
-      api.videoActions.ensurePreviewAssetForVideo,
+      internal.videoActions.ensurePreviewAssetForVideo,
       { videoId: video._id },
     );
     return { status: "ok" as const };
@@ -2054,14 +2341,13 @@ export const retryPreviewAssetForShareLink = action({
 });
 
 /**
- * Pre-warm the watermarked Mux preview asset for a video. Scheduled the
- * moment `markAsReady` flips a video to ready — by the time anyone creates
- * a paywalled share link, the preview asset is already ingesting (and
- * usually finished). Uses a single global overlay PNG; per-recipient
+ * Prepare the watermarked Mux preview asset for a paywalled video. Scheduled
+ * when an owner enables a video/share paywall, never for an ordinary upload.
+ * Uses a single global overlay PNG; per-recipient
  * forensic attribution rides in the signed playback JWT + Convex logs
  * issued at viewing time, not burned into the pixels. Idempotent.
  */
-export const ensurePreviewAssetForVideo = action({
+export const ensurePreviewAssetForVideo = internalAction({
   args: {
     videoId: v.id("videos"),
   },
@@ -2107,7 +2393,7 @@ export const ensurePreviewAssetForVideo = action({
       };
     }
 
-    const video = await ctx.runQuery(api.videos.getForPreviewGen, {
+    const video = await ctx.runQuery(internal.videos.getForPreviewGen, {
       videoId: args.videoId,
     });
     if (!video?.s3Key || !video.contentType) {
@@ -2135,7 +2421,7 @@ export const ensurePreviewAssetForVideo = action({
     if (video.status !== "ready") {
       return {
         status: "notReady" as const,
-        reason: `Source upload not finished (status=${video.status}). markAsReady will reschedule once Mux finishes the full asset.`,
+        reason: `Source upload not finished (status=${video.status}). Retry when the source is ready.`,
       };
     }
 
@@ -2300,7 +2586,7 @@ export const ensurePreviewAssetForShareLink = action({
       };
     }
 
-    const video = await ctx.runQuery(api.videos.getForPreviewGen, {
+    const video = await ctx.runQuery(internal.videos.getForPreviewGen, {
       videoId: targetVideoId,
     });
     if (!video?.s3Key || !video.contentType) {
@@ -2387,11 +2673,9 @@ export const ensurePreviewAssetForShareLink = action({
 // `requestEncoding` below, which runs the normal pipeline.
 //
 // Decision is driven by env: LAZY_ENCODE_DEFAULT={never|free|always}.
-//   never   — default; existing behavior, encode on upload.
-//   free    — defer for free-tier workspaces only.
-//   always  — defer everywhere (use during a Cloudflare Stream cutover,
-//             since Stream's storage is so cheap that delaying encode
-//             is essentially free).
+//   never   — opt out and encode every upload immediately.
+//   free    — default; defer for free-tier workspaces only.
+//   always  — defer everywhere (an explicit operator override).
 
 /**
  * Kicks off encoding for a video, routing to the provider chosen by
@@ -2452,21 +2736,11 @@ async function shouldDeferEncoding(
     internal.workspaceBilling.getProjectStoragePolicy,
     { projectId },
   );
-  // Drive-first workspaces never eagerly encode — the cloud ladder only
-  // materializes on the first watch (re-encode) or for paid delivery.
-  if (policy.driveFirst) return true;
-
-  const mode = (process.env.LAZY_ENCODE_DEFAULT ?? "never")
-    .trim()
-    .toLowerCase();
-  if (mode === "never" || mode === "off" || mode === "false" || mode === "") {
-    return false;
-  }
-  if (mode === "always" || mode === "all" || mode === "true") {
-    return true;
-  }
-  if (mode !== "free") return false;
-  return policy.tier === "free";
+  return shouldDeferEncodingForPolicy({
+    configuredMode: process.env.LAZY_ENCODE_DEFAULT,
+    tier: policy.tier,
+    driveFirst: policy.driveFirst,
+  });
 }
 
 /**
@@ -2544,38 +2818,489 @@ export const requestEncoding = action({
   },
 });
 
-/**
- * Link-unfurl preview for a /share/:token link. Returns the title +
- * description and a WATERMARKED preview-frame image URL for og:image, so
- * pasting a share link into iMessage / Slack / Discord shows the video
- * (watermarked), not a generic card.
- *
- * Security: prefers the signed watermarked preview asset — exactly what we
- * want a public crawler to fetch (low-res, watermarked, never the clean
- * original). A paywalled share whose preview isn't ready yet returns no image
- * (falls back to the default OG card) rather than ever leaking a clean frame.
- * Non-paywalled shares, which have no watermarked source, may use the real
- * public poster. Gating (anyone-access / no password / not expired) is
- * enforced by getUnfurlMedia, mirroring the title unfurl.
- */
+/** Link-unfurl and cover-picker media. */
+type ShareUnfurlItem = {
+  _id: Id<"videos">;
+  title: string;
+  kind: "video" | "image" | "document";
+  contentType: string | null;
+  thumbnailUrl: string | null;
+  s3Key: string | null;
+  muxPlaybackId: string | null;
+  muxPreviewAssetId: string | null;
+  muxPreviewPlaybackId: string | null;
+  muxPreviewReady: boolean;
+  imagePreviewS3Key: string | null;
+  imagePreviewReady: boolean;
+};
+
+type ShareUnfurlMedia = {
+  kind: "single" | "bundle";
+  shareLinkId: Id<"shareLinks">;
+  title: string;
+  description: string | null;
+  isPaywalled: boolean;
+  storedCoverVideoId: Id<"videos"> | null;
+  resolvedCoverVideoId: Id<"videos"> | null;
+  items: ShareUnfurlItem[];
+};
+
+type OgVideo = {
+  url: string;
+  width: number;
+  height: number;
+  type: "video/mp4";
+};
+
+const ogVideoValidator = v.object({
+  url: v.string(),
+  width: v.number(),
+  height: v.number(),
+  type: v.literal("video/mp4"),
+});
+
 function buildUnfurlThumb(playbackId: string, token?: string): string {
-  const u = new URL(`https://image.mux.com/${playbackId}/thumbnail.jpg`);
-  u.searchParams.set("width", "1200");
-  u.searchParams.set("height", "630");
-  u.searchParams.set("fit_mode", "smartcrop");
-  u.searchParams.set("time", "0");
-  if (token) u.searchParams.set("token", token);
-  return u.toString();
+  const url = new URL(`https://image.mux.com/${playbackId}/thumbnail.jpg`);
+  url.searchParams.set("width", "1200");
+  url.searchParams.set("height", "630");
+  url.searchParams.set("fit_mode", "smartcrop");
+  url.searchParams.set("time", "0");
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
 }
 
+function isAllowedStoredThumbnail(url: string | null): url is string {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    return (
+      parsed.hostname === "image.mux.com" ||
+      parsed.hostname === "videodelivery.net" ||
+      parsed.hostname.endsWith(".videodelivery.net") ||
+      parsed.hostname.endsWith(".cloudflarestream.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function imagePreviewKeyForShare(
+  videoId: Id<"videos">,
+  shareLinkId: Id<"shareLinks">,
+): string {
+  return `previews/images/${videoId}/${shareLinkId}.webp`;
+}
+
+async function getWatermarkedVideoThumb(
+  item: ShareUnfurlItem,
+): Promise<string | null> {
+  if (!item.muxPreviewReady || !item.muxPreviewPlaybackId) return null;
+  try {
+    const thumbnailToken = await signThumbnailToken(
+      item.muxPreviewPlaybackId,
+      "30d",
+    );
+    return buildUnfurlThumb(item.muxPreviewPlaybackId, thumbnailToken);
+  } catch {
+    return null;
+  }
+}
+
+async function getUnfurlImageSource(
+  item: ShareUnfurlItem,
+  isPaywalled: boolean,
+  shareLinkId: Id<"shareLinks">,
+  forceWatermarkedImage = false,
+): Promise<{ url: string; watermarked: boolean } | null> {
+  if (item.kind === "video") {
+    const url = await getWatermarkedVideoThumb(item);
+    return url ? { url, watermarked: true } : null;
+  }
+
+  if (item.kind === "image") {
+    if (isPaywalled || forceWatermarkedImage) {
+      try {
+        return {
+          url: await buildSignedBucketObjectUrl(
+            imagePreviewKeyForShare(item._id, shareLinkId),
+            { expiresIn: 10 * 60 },
+          ),
+          watermarked: true,
+        };
+      } catch {
+        return null;
+      }
+    }
+
+    if (item.s3Key) {
+      try {
+        return {
+          url: await buildSignedBucketObjectUrl(item.s3Key, {
+            expiresIn: 10 * 60,
+          }),
+          watermarked: false,
+        };
+      } catch {
+        return null;
+      }
+    }
+    return isAllowedStoredThumbnail(item.thumbnailUrl)
+      ? { url: item.thumbnailUrl, watermarked: false }
+      : null;
+  }
+
+  if (
+    isPaywalled ||
+    forceWatermarkedImage ||
+    !isAllowedStoredThumbnail(item.thumbnailUrl)
+  ) {
+    return null;
+  }
+  return { url: item.thumbnailUrl, watermarked: false };
+}
+
+async function getAuthenticatedPickerImage(
+  item: ShareUnfurlItem,
+): Promise<string | null> {
+  if (item.kind === "image" && item.s3Key) {
+    try {
+      return await buildSignedBucketObjectUrl(item.s3Key, {
+        expiresIn: 60 * 60,
+      });
+    } catch {
+      return null;
+    }
+  }
+  if (isAllowedStoredThumbnail(item.thumbnailUrl)) return item.thumbnailUrl;
+  if (item.muxPlaybackId) return buildUnfurlThumb(item.muxPlaybackId);
+  return null;
+}
+
+function parseAspectRatio(aspectRatio: string | undefined): number {
+  if (!aspectRatio) return 16 / 9;
+  const [width, height] = aspectRatio.split(":").map(Number);
+  return width > 0 && height > 0 ? width / height : 16 / 9;
+}
+
+async function getMuxMp4(
+  assetId: string | null,
+  playbackId: string | null,
+  signed: boolean,
+): Promise<OgVideo | null> {
+  if (!assetId || !playbackId) return null;
+  try {
+    const asset = await getMuxAsset(assetId);
+    const readyMp4s = (asset.static_renditions?.files ?? [])
+      .filter(
+        (file) =>
+          file.status === "ready" && file.ext === "mp4" && Boolean(file.name),
+      )
+      .sort(
+        (left, right) =>
+          Math.abs((left.height ?? 360) - 360) -
+          Math.abs((right.height ?? 360) - 360),
+      );
+    const staticMp4 = readyMp4s[0];
+    const playbackToken = signed
+      ? await signPlaybackToken(playbackId, "30d")
+      : undefined;
+    if (staticMp4?.name) {
+      return {
+        url: buildMuxRenditionDownloadUrl(
+          playbackId,
+          staticMp4.name,
+          playbackToken,
+        ),
+        width: staticMp4.width ?? 640,
+        height: staticMp4.height ?? 360,
+        type: "video/mp4",
+      };
+    }
+
+    // Legacy MP4 support exposes low/medium/high files but may not list them
+    // in static_renditions.files. medium.mp4 is the crawler-friendly balance.
+    if (
+      asset.mp4_support &&
+      asset.mp4_support !== "none" &&
+      !asset.mp4_support.startsWith("audio-only")
+    ) {
+      const height = 540;
+      return {
+        url: buildMuxRenditionDownloadUrl(
+          playbackId,
+          "medium.mp4",
+          playbackToken,
+        ),
+        width: Math.round(height * parseAspectRatio(asset.aspect_ratio)),
+        height,
+        type: "video/mp4",
+      };
+    }
+  } catch {
+    // A Mux lookup or signing failure must degrade to image-only unfurls.
+  }
+  return null;
+}
+
+async function getMuxMp4WithTimeout(
+  assetId: string | null,
+  playbackId: string | null,
+  signed: boolean,
+): Promise<OgVideo | null> {
+  return await Promise.race([
+    getMuxMp4(assetId, playbackId, signed),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+  ]);
+}
+
+function fnv1a(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function shareUnfurlFingerprint(meta: ShareUnfurlMedia): string {
+  return fnv1a(
+    JSON.stringify({
+      kind: meta.kind,
+      shareLinkId: meta.shareLinkId,
+      title: meta.title,
+      isPaywalled: meta.isPaywalled,
+      storedCoverVideoId: meta.storedCoverVideoId,
+      resolvedCoverVideoId: meta.resolvedCoverVideoId,
+      items: meta.items.map((item) => [
+        item._id,
+        item.kind,
+        item.thumbnailUrl,
+        item.s3Key,
+        item.muxPreviewAssetId,
+        item.muxPreviewPlaybackId,
+        item.muxPreviewReady,
+        item.imagePreviewS3Key,
+        item.imagePreviewReady,
+      ]),
+    }),
+  );
+}
+
+function convexSiteUrl(): string | null {
+  const explicit = process.env.CONVEX_SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, "");
+  const cloud = process.env.CONVEX_CLOUD_URL?.trim();
+  return cloud ? cloud.replace(".convex.cloud", ".convex.site").replace(/\/$/, "") : null;
+}
+
+function shareUnfurlImageUrl(
+  token: string,
+  meta: ShareUnfurlMedia,
+): string | null {
+  const siteUrl = convexSiteUrl();
+  if (!siteUrl) return null;
+  return `${siteUrl}/share-unfurl/${encodeURIComponent(token)}/${shareUnfurlFingerprint(meta)}.svg`;
+}
+
+const coverPickerItemValidator = v.object({
+  _id: v.id("videos"),
+  title: v.string(),
+  kind: v.union(
+    v.literal("video"),
+    v.literal("image"),
+    v.literal("document"),
+  ),
+  pickerImage: v.union(v.string(), v.null()),
+  publicImage: v.union(v.string(), v.null()),
+  paywalledImage: v.union(v.string(), v.null()),
+});
+
+type CoverPickerResult = {
+  resolvedCoverVideoId: Id<"videos"> | null;
+  items: Array<{
+    _id: Id<"videos">;
+    title: string;
+    kind: "video" | "image" | "document";
+    pickerImage: string | null;
+    publicImage: string | null;
+    paywalledImage: string | null;
+  }>;
+};
+
+/**
+ * Authenticated action used by the modal. It signs private image originals for
+ * the picker, while the preview URLs follow the same privacy branches as the
+ * crawler action. No source key or playback id reaches the browser.
+ */
+export const getShareCoverPicker = action({
+  args: {
+    videoId: v.optional(v.id("videos")),
+    bundleId: v.optional(v.id("shareBundles")),
+    folderId: v.optional(v.id("folders")),
+    videoIds: v.optional(v.array(v.id("videos"))),
+    coverVideoId: v.optional(v.id("videos")),
+  },
+  returns: v.object({
+    resolvedCoverVideoId: v.union(v.id("videos"), v.null()),
+    items: v.array(coverPickerItemValidator),
+  }),
+  handler: async (ctx, args): Promise<CoverPickerResult> => {
+    const media = (await ctx.runQuery(
+      internal.shareLinks.getCoverPickerMedia,
+      args,
+    )) as {
+      resolvedCoverVideoId: Id<"videos"> | null;
+      items: ShareUnfurlItem[];
+    };
+    const items = await Promise.all(
+      media.items.map(async (item) => {
+        const [pickerImage, publicSource, videoPreview] = await Promise.all([
+          getAuthenticatedPickerImage(item),
+          item.kind === "image" || item.kind === "document"
+            ? getUnfurlImageSource(
+                item,
+                false,
+                "picker" as Id<"shareLinks">,
+              )
+            : Promise.resolve(null),
+          item.kind === "video"
+            ? getWatermarkedVideoThumb(item)
+            : Promise.resolve(null),
+        ]);
+        return {
+          _id: item._id,
+          title: item.title,
+          kind: item.kind,
+          pickerImage,
+          publicImage: videoPreview ?? publicSource?.url ?? null,
+          // Video previews use a generic baked watermark. Still-image
+          // previews are per-link, so no honest paid preview exists until the
+          // share row has been created and its render job finishes.
+          paywalledImage: videoPreview,
+        };
+      }),
+    );
+    return { resolvedCoverVideoId: media.resolvedCoverVideoId, items };
+  },
+});
+
+const shareUnfurlResultValidator = v.union(
+  v.object({
+    kind: v.literal("video"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.literal(true),
+    video: v.union(ogVideoValidator, v.null()),
+  }),
+  v.object({
+    kind: v.literal("image"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.boolean(),
+    video: v.null(),
+  }),
+  v.object({
+    kind: v.literal("document"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.boolean(),
+    video: v.null(),
+  }),
+  v.object({
+    kind: v.literal("bundle"),
+    title: v.string(),
+    description: v.union(v.string(), v.null()),
+    image: v.union(v.string(), v.null()),
+    watermarked: v.boolean(),
+    video: v.null(),
+  }),
+);
+
+/**
+ * Rich, privacy-gated result for /share/:token. Video output never falls back
+ * to the clean playback id: only the baked preview asset can supply its frame
+ * or optional MP4. Password and invite links are rejected by getUnfurlMedia
+ * before this action receives even their title.
+ */
 export const getShareUnfurl = action({
   args: { token: v.string() },
+  returns: v.union(shareUnfurlResultValidator, v.null()),
+  handler: async (ctx, args) => {
+    const media = (await ctx.runQuery(internal.shareLinks.getUnfurlMedia, {
+      token: args.token,
+    })) as ShareUnfurlMedia | null;
+    if (!media) return null;
+
+    if (media.kind === "bundle") {
+      return {
+        kind: "bundle" as const,
+        title: media.title,
+        description: media.description,
+        image: media.items.length > 0
+          ? shareUnfurlImageUrl(args.token, media)
+          : null,
+        watermarked: true,
+        video: null,
+      };
+    }
+
+    const cover = media.items[0];
+    if (!cover) {
+      return {
+        kind: "document" as const,
+        title: media.title,
+        description: media.description,
+        image: null,
+        watermarked: false,
+        video: null,
+      };
+    }
+
+    if (cover.kind === "video") {
+      const [image, video] = await Promise.all([
+        getWatermarkedVideoThumb(cover),
+        cover.muxPreviewReady
+          ? getMuxMp4WithTimeout(
+              cover.muxPreviewAssetId,
+              cover.muxPreviewPlaybackId,
+              true,
+            )
+          : Promise.resolve(null),
+      ]);
+      return {
+        kind: "video" as const,
+        title: media.title,
+        description: media.description,
+        image,
+        watermarked: true as const,
+        video,
+      };
+    }
+
+    return {
+      kind: cover.kind,
+      title: media.title,
+      description: media.description,
+      image: shareUnfurlImageUrl(args.token, media),
+      watermarked: media.isPaywalled,
+      video: null,
+    };
+  },
+});
+
+/** Public watch-page metadata, kept separate from share-link privacy policy. */
+export const getWatchUnfurl = action({
+  args: { publicId: v.string() },
   returns: v.union(
     v.object({
       title: v.string(),
       description: v.union(v.string(), v.null()),
       image: v.union(v.string(), v.null()),
-      watermarked: v.boolean(),
+      video: v.union(ogVideoValidator, v.null()),
     }),
     v.null(),
   ),
@@ -2586,46 +3311,101 @@ export const getShareUnfurl = action({
     title: string;
     description: string | null;
     image: string | null;
-    watermarked: boolean;
+    video: OgVideo | null;
   } | null> => {
-    const meta = await ctx.runQuery(internal.shareLinks.getUnfurlMedia, {
-      token: args.token,
-    });
-    if (!meta) return null;
-
-    // Watermarked preview asset (signed) — the preferred unfurl frame.
-    if (meta.previewReady && meta.previewPlaybackId) {
-      let image: string | null = null;
-      try {
-        const token = await signThumbnailToken(meta.previewPlaybackId, "30d");
-        image = buildUnfurlThumb(meta.previewPlaybackId, token);
-      } catch {
-        image = null;
-      }
-      return {
-        title: meta.title,
-        description: meta.description,
-        image,
-        watermarked: true,
+    const result = (await ctx.runQuery(api.videos.getByPublicId, {
+      publicId: args.publicId,
+    })) as {
+      video: {
+        title: string;
+        description?: string;
+        thumbnailUrl?: string;
+        muxAssetId?: string;
+        muxPlaybackId?: string;
       };
-    }
-
-    // No watermarked source. Non-paywalled links can show the real frame;
-    // paywalled-but-not-ready shows nothing (never the clean original).
-    if (!meta.isPaywalled && meta.publicPlaybackId) {
-      return {
-        title: meta.title,
-        description: meta.description,
-        image: buildUnfurlThumb(meta.publicPlaybackId),
-        watermarked: false,
-      };
-    }
-
+    } | null;
+    if (!result?.video) return null;
+    const video = result.video;
+    const image = video.muxPlaybackId
+      ? buildUnfurlThumb(video.muxPlaybackId)
+      : isAllowedStoredThumbnail(video.thumbnailUrl ?? null)
+        ? video.thumbnailUrl ?? null
+        : null;
+    const ogVideo = await getMuxMp4WithTimeout(
+      video.muxAssetId ?? null,
+      video.muxPlaybackId ?? null,
+      false,
+    );
     return {
-      title: meta.title,
-      description: meta.description,
-      image: null,
-      watermarked: false,
+      title: video.title,
+      description: video.description ?? null,
+      image,
+      video: ogVideo,
+    };
+  },
+});
+
+/**
+ * Node-side preparation for the standard-runtime HTTP action. This keeps Mux
+ * JWT and S3 signing behind the same privacy query, then returns only six
+ * short-lived, approved image URLs for the HTTP action to fetch and inline.
+ */
+export const prepareShareUnfurlImage = internalAction({
+  args: {
+    token: v.string(),
+    requestedFingerprint: v.string(),
+  },
+  returns: v.union(
+    v.object({ status: v.literal("notFound") }),
+    v.object({
+      status: v.literal("ok"),
+      fingerprint: v.string(),
+      kind: v.union(v.literal("single"), v.literal("bundle")),
+      title: v.string(),
+      items: v.array(
+        v.object({
+          title: v.string(),
+          kind: v.union(
+            v.literal("video"),
+            v.literal("image"),
+            v.literal("document"),
+          ),
+          imageUrl: v.union(v.string(), v.null()),
+        }),
+      ),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const media = (await ctx.runQuery(internal.shareLinks.getUnfurlMedia, {
+      token: args.token,
+    })) as ShareUnfurlMedia | null;
+    if (!media) return { status: "notFound" as const };
+    const fingerprint = shareUnfurlFingerprint(media);
+    if (args.requestedFingerprint !== fingerprint) {
+      return { status: "notFound" as const };
+    }
+
+    const items = media.items.slice(0, media.items.length > 4 ? 6 : 4);
+    const sources = await Promise.all(
+      items.map((item) =>
+        getUnfurlImageSource(
+          item,
+          media.isPaywalled,
+          media.shareLinkId,
+          media.kind === "bundle",
+        ),
+      ),
+    );
+    return {
+      status: "ok" as const,
+      fingerprint,
+      kind: media.kind,
+      title: media.title,
+      items: items.map((item, index) => ({
+        title: item.title,
+        kind: item.kind,
+        imageUrl: sources[index]?.url ?? null,
+      })),
     };
   },
 });

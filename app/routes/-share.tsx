@@ -28,17 +28,8 @@ import {
   ShareItemMetadata,
   type ShareItemMeta,
 } from "@/components/share/ShareItemMetadata";
-
-function formatPrice(cents: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency.toUpperCase(),
-    }).format(cents / 100);
-  } catch {
-    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
-  }
-}
+import { ItemUnlockControl } from "@/components/share/ItemUnlockControl";
+import { formatUsdCents } from "@/lib/money";
 
 export default function SharePage() {
   const params = useParams({ strict: false });
@@ -85,7 +76,7 @@ export default function SharePage() {
     previewError?: string | null;
   } | null>(null);
   // Owner-only verification toggle. Defaults to "client" so an owner
-  // viewing their own link still exercises the real watermark pipeline —
+  // viewing their own link still exercises the real watermark pipeline.
   // they can flip to "owner" to bypass the paywall and stream full-res.
   const [viewAs, setViewAs] = useState<"client" | "owner">("client");
   const [isRetryingPreview, setIsRetryingPreview] = useState(false);
@@ -93,6 +84,9 @@ export default function SharePage() {
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [isCreatingCheckout, setIsCreatingCheckout] = useState(false);
+  const [checkoutItemId, setCheckoutItemId] = useState<string | null>(null);
+  const [purchaseItemId, setPurchaseItemId] = useState<string | null>(null);
+  const [confirmingItemId, setConfirmingItemId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [commentText, setCommentText] = useState("");
@@ -113,52 +107,97 @@ export default function SharePage() {
   const [coverReload, setCoverReload] = useState(0);
   const [downloadSheetOpen, setDownloadSheetOpen] = useState(false);
   const [rightTab, setRightTab] = useState<"comments" | "info">("comments");
+  const [activeItemId, setActiveItemId] = useState<Id<"videos"> | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
   const playerSectionRef = useRef<HTMLDivElement | null>(null);
-
-  // Live unlock-state subscription. Convex reactivity flips this from
-  // paid:false to paid:true the instant the Stripe webhook fires, with no
-  // polling.
-  const unlockState = useQuery(
-    api.payments.getGrantUnlockState,
-    grantToken ? { grantToken } : "skip",
-  );
-
-  // Source of truth for paywall state is the live unlockState query — it
-  // works even when playbackSession failed to load (e.g. preview asset still
-  // ingesting). Playback mode is only used for the player UI.
-  const paywall = unlockState?.paywall ?? null;
-  const isPaid = Boolean(unlockState?.paid);
-  const isPaywalled = Boolean(paywall);
-  const isOwner = Boolean(unlockState?.isOwner);
-  // Drive-style role capabilities (Phase 3). Default canComment to true until
-  // the unlock state resolves so the composer doesn't flicker for the common
-  // commenter case.
-  const canComment = unlockState ? unlockState.canComment : true;
-  const canDownloadGrant = Boolean(unlockState?.canDownload);
-  const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
-
-  // For bundle shares, the active item is the one currently being viewed /
-  // commented on. Defaults to the first ready item once the summary loads.
-  const [activeItemId, setActiveItemId] = useState<Id<"videos"> | null>(null);
-
-  useEffect(() => {
-    setIsDownloading(false);
-    setDownloadError(null);
-  }, [token]);
 
   const { shareInfo, summary, videoData, comments } = useShareData({
     token,
     grantToken,
     itemVideoId: activeItemId,
   });
-
   const isBundle = summary?.kind === "bundle";
+  const queriedItemVideoId = isBundle
+    ? activeItemId
+    : summary?.single?.videoId ?? null;
+
+  const unlockState = useQuery(
+    api.payments.getGrantUnlockState,
+    grantToken
+      ? {
+          grantToken,
+          itemVideoId: queriedItemVideoId ?? undefined,
+        }
+      : "skip",
+  );
+
+  // Source of truth for paywall state is the live unlockState query. It
+  // works even when playbackSession failed to load (e.g. preview asset still
+  // ingesting). Playback mode is only used for the player UI.
+  const paywall = unlockState?.paywall ?? summary?.paywall ?? null;
+  const isPaid = Boolean(unlockState?.paid);
+  const isPaywalled = Boolean(paywall);
+  const perItemPricing = paywall?.mode === "per_item";
+  const isOwner = Boolean(unlockState?.isOwner);
+  // Drive-style role capabilities (Phase 3). Default canComment to true until
+  // the unlock state resolves so the composer doesn't flicker for the common
+  // commenter case.
+  const canComment = unlockState ? unlockState.canComment : true;
+  const canDownloadGrant = Boolean(unlockState?.canDownload);
+  const canDownloadShare = isOwner || Boolean(summary?.allowDownload);
+  const { suspectAutomation } = useAntiPiracyDefenses(isPaywalled);
+
+  useEffect(() => {
+    setIsDownloading(false);
+    setDownloadError(null);
+  }, [token]);
+
+  const itemPriceById = useMemo(
+    () =>
+      new Map<string, number>(
+        (summary?.itemPrices ?? []).map((price) => [
+          price.videoId,
+          price.priceCents,
+        ]),
+      ),
+    [summary?.itemPrices],
+  );
+  const unlockedItemIds = useMemo(
+    () => new Set<string>(summary?.unlockedVideoIds ?? []),
+    [summary?.unlockedVideoIds],
+  );
+  const allItemsUnlocked = Boolean(
+    perItemPricing &&
+      summary?.grantPaidAt &&
+      summary.unlockedVideoIds.length === 0,
+  );
+
+  useEffect(() => {
+    const search = new URLSearchParams(window.location.search);
+    setConfirmingItemId(
+      search.get("paid") === "1" ? search.get("item") : null,
+    );
+  }, [token]);
+
+  useEffect(() => {
+    if (
+      !confirmingItemId ||
+      (!allItemsUnlocked && !unlockedItemIds.has(confirmingItemId))
+    ) {
+      return;
+    }
+    setConfirmingItemId(null);
+    setPurchaseItemId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("paid");
+    url.searchParams.delete("item");
+    window.history.replaceState(window.history.state, "", url);
+  }, [allItemsUnlocked, confirmingItemId, unlockedItemIds]);
   // Memoized so the `?? []` fallback doesn't mint a fresh array reference on
   // every render. SharePage re-renders ~4×/sec while the video plays (via
   // onTimeUpdate → setCurrentTime); an unstable bundleItems made the
   // playback-loader effect below re-fire on each of those renders, re-minting
-  // the signed Mux URL and rebuilding HLS — the cause of the ~300ms stop/play
+  // the signed Mux URL and rebuilding HLS. This caused the ~300ms stop/play
   // stutter.
   const bundleItems = useMemo(
     () => summary?.bundle?.items ?? [],
@@ -177,7 +216,7 @@ export default function SharePage() {
     grantToken && summary && !isBundle ? { grantToken } : "skip",
   );
 
-  // One items list for the export sheet regardless of share shape — the
+  // One items list for the export sheet regardless of share shape. The
   // Canva-style download flow (pick quality → download, or unlock inline
   // when paywalled) is identical for a single file and a bundle.
   const sheetItems = useMemo(() => {
@@ -354,7 +393,7 @@ export default function SharePage() {
   }, [videoData?.video?.title]);
 
   // Load (and re-load) the playback session. Re-runs when unlockState.paid
-  // flips so payment immediately swaps preview → full-res. Also re-runs as
+  // flips so payment immediately swaps preview to full-res. Also re-runs as
   // signed-token expiry approaches via the heartbeat below.
   const reloadCounter = useRef(0);
   const [reloadTrigger, setReloadTrigger] = useState(0);
@@ -363,7 +402,7 @@ export default function SharePage() {
   // Without this gate, the effect below re-fires whenever any of its 10
   // useQuery/useAction deps re-resolve (notably `summary` and `bundleItems`,
   // which Convex re-emits on subscription ticks), and we end up hammering
-  // the action with the same dead token — dozens per second under network
+  // the action with the same dead token, dozens per second under network
   // flutter. Keying by `${token}::${itemId}` lets a paid checkout's new
   // grant still go through after the user reloads.
   const failedGrantKeysRef = useRef<Set<string>>(new Set());
@@ -498,7 +537,7 @@ export default function SharePage() {
     viewAs,
   ]);
 
-  // Heartbeat — refresh the signed Mux JWT before it expires. Token TTL is
+  // Heartbeat refreshes the signed Mux JWT before it expires. Token TTL is
   // 5 minutes; refresh at 4 minutes.
   useEffect(() => {
     if (!playbackSession?.tokenExpiresAt) return;
@@ -526,7 +565,7 @@ export default function SharePage() {
   }, [playbackSession?.mode]);
 
   // If the preview has been "pending" for a while, stop showing the
-  // optimistic "30–90 seconds" copy and tell the viewer the truth: they
+  // optimistic "30 to 90 seconds" copy and tell the viewer the truth: they
   // can pay now and we'll unlock full-res the moment it's ready.
   const [previewTakingLong, setPreviewTakingLong] = useState(false);
   useEffect(() => {
@@ -565,39 +604,43 @@ export default function SharePage() {
     }
   }, [activeItemId, grantToken, isRetryingPreview, retryPreviewAsset]);
 
-  const handlePay = useCallback(async () => {
+  const handlePay = useCallback(async (itemVideoId?: string) => {
     if (!grantToken || isCreatingCheckout) return;
     setIsCreatingCheckout(true);
+    setCheckoutItemId(itemVideoId ?? "all");
     setCheckoutError(null);
 
     // Demo bypass: if Stripe isn't configured, simulate the payment on the
     // server (flip grant.paidAt directly). Lets you exercise the full
-    // preview → paid swap without standing up Stripe.
+    // preview to paid swap without standing up Stripe.
     //
-    // Default to the real Stripe path while `demoStatus` is still loading —
+    // Default to the real Stripe path while `demoStatus` is still loading.
     // the server's `simulatePaymentForGrant` returns `stripeIsConfigured` on
     // prod deployments and we used to silently swallow it, so a fast click
     // before the query resolved produced no redirect.
     const stripeConfigured = demoStatus?.stripeConfigured ?? true;
-    if (!stripeConfigured) {
+    if (!stripeConfigured && !itemVideoId) {
       try {
         const result = await simulatePayment({ grantToken });
         if (result.status === "ok" || result.status === "alreadyPaid") {
           setReloadTrigger((n) => n + 1);
           setIsCreatingCheckout(false);
+          setCheckoutItemId(null);
           return;
         }
         if (result.status === "noPaywall") {
           setCheckoutError("This link is not paywalled.");
           setIsCreatingCheckout(false);
+          setCheckoutItemId(null);
           return;
         }
         if (result.status === "invalidGrant") {
           setCheckoutError("Session expired. Please reload.");
           setIsCreatingCheckout(false);
+          setCheckoutItemId(null);
           return;
         }
-        // `stripeIsConfigured` — the deployment actually has Stripe wired
+        // `stripeIsConfigured` means the deployment has Stripe wired
         // up; fall through to the real checkout path below instead of
         // silently bailing.
       } catch (err) {
@@ -605,14 +648,21 @@ export default function SharePage() {
           err instanceof Error ? err.message : "Demo payment failed.",
         );
         setIsCreatingCheckout(false);
+        setCheckoutItemId(null);
         return;
       }
     }
 
     try {
+      const successUrl = new URL(`/share/${token}`, window.location.origin);
+      successUrl.searchParams.set("paid", "1");
+      if (itemVideoId) successUrl.searchParams.set("item", itemVideoId);
       const result = await createCheckoutForGrant({
         grantToken,
-        successUrl: `${window.location.origin}/share/${token}?paid=1`,
+        itemVideoIds: itemVideoId
+          ? [itemVideoId as Id<"videos">]
+          : undefined,
+        successUrl: successUrl.toString(),
         cancelUrl: `${window.location.origin}/share/${token}`,
       });
       if (result.status === "ok" && result.url) {
@@ -623,7 +673,7 @@ export default function SharePage() {
         ok: "",
         disabled: "Payments aren't configured on this deployment.",
         noPaywall: "This link is not paywalled.",
-        alreadyPaid: "Already unlocked — reloading…",
+        alreadyPaid: "Already unlocked. Reloading…",
         teamNotConnected: "The agency hasn't connected Stripe yet.",
         invalidGrant: "Session expired. Please reload.",
       };
@@ -635,6 +685,7 @@ export default function SharePage() {
       setCheckoutError(err instanceof Error ? err.message : "Could not start checkout.");
     } finally {
       setIsCreatingCheckout(false);
+      setCheckoutItemId(null);
     }
   }, [
     createCheckoutForGrant,
@@ -766,7 +817,7 @@ export default function SharePage() {
   const handleDownload = useCallback(async () => {
     if (!grantToken || isDownloading) return;
 
-    // Bundles have no single downloadable target — the server resolves a video
+    // Bundles have no single downloadable target. The server resolves a video
     // by `itemVideoId`. Calling without one throws "Video not found". Require an
     // active item first. (Phase 4 replaces this with a multi-item download
     // sheet.)
@@ -803,9 +854,9 @@ export default function SharePage() {
 
   if (isBootstrappingShare) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA]">
         <DelayedAppear>
-          <div className="text-[#888]">Opening…</div>
+          <div className="text-[#6E6E73]">Opening…</div>
         </DelayedAppear>
       </div>
     );
@@ -813,16 +864,16 @@ export default function SharePage() {
 
   if (shareInfo.status === "missing" || shareInfo.status === "expired") {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
-              <AlertCircle className="h-6 w-6 text-[#dc2626]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
+              <AlertCircle className="h-6 w-6 text-[#8A2B34]" />
             </div>
             <CardTitle>Link expired or invalid</CardTitle>
             <CardDescription>
               This link is no longer valid. Ask whoever sent it to share a fresh
-              one — it only takes them a second.
+              one. It only takes them a second.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -839,18 +890,18 @@ export default function SharePage() {
 
   // The link is valid, the video is just still encoding (the owner shared it
   // right after upload). getByToken is reactive, so this flips to the player
-  // automatically the moment Mux finishes — no reload needed.
+  // automatically the moment Mux finishes. No reload needed.
   if (shareInfo.status === "processing") {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#888]/40 border-t-[#1a1a1a]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#E8E8EC] border-t-[#131315]" />
             </div>
             <CardTitle>Still processing</CardTitle>
             <CardDescription>
-              This video is still being prepared. The link works — it'll start
+              This video is still being prepared. The link works, and it&apos;ll start
               playing here automatically as soon as it's ready.
             </CardDescription>
           </CardHeader>
@@ -861,11 +912,11 @@ export default function SharePage() {
 
   if (shareInfo.status === "requiresPassword" && !grantToken) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <Lock className="h-6 w-6 text-[#888]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <Lock className="h-6 w-6 text-[#6E6E73]" />
             </div>
             <CardTitle>Password required</CardTitle>
             <CardDescription>
@@ -888,7 +939,7 @@ export default function SharePage() {
                 autoFocus
               />
               {passwordError && (
-                <p className="text-sm text-[#dc2626]">Incorrect password</p>
+                <p className="text-sm text-[#8A2B34]">Incorrect password</p>
               )}
               <Button type="submit" className="w-full" disabled={!passwordInput || isRequestingGrant}>
                 {isRequestingGrant ? "Verifying…" : "View video"}
@@ -905,11 +956,11 @@ export default function SharePage() {
   // reactively once they sign in, so a match flips this away automatically.
   if (shareInfo.status === "requiresAccess" && !grantToken) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <Lock className="h-6 w-6 text-[#888]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <Lock className="h-6 w-6 text-[#6E6E73]" />
             </div>
             <CardTitle>Access required</CardTitle>
             <CardDescription>
@@ -934,20 +985,20 @@ export default function SharePage() {
   }
 
   // Single-video shares fail closed when the video can't be loaded. Bundle
-  // shares are valid as long as the bundle row exists — they show an empty-
+  // shares are valid as long as the bundle row exists. They show an empty-
   // state if there are no ready items.
   if (!isBundle && !videoData?.video) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#e8e8e0] flex items-center justify-center mb-4 border-2 border-[#1a1a1a]">
-              <Video className="h-6 w-6 text-[#888]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F1F1F3]">
+              <Video className="h-6 w-6 text-[#6E6E73]" />
             </div>
             <CardTitle>Video not available</CardTitle>
             <CardDescription>
               This video isn't available right now. If the link is brand new it
-              may still be processing — try again in a minute.
+              may still be processing. Try again in a minute.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -968,19 +1019,21 @@ export default function SharePage() {
   const isPreviewPending = playbackSession?.mode === "preview_pending";
   const isPreviewUnavailable = playbackSession?.mode === "preview_unavailable";
   const isFullMode = playbackSession?.mode === "full";
-  // The watermarked-preview pipeline only runs for video uploads — image
+  // The watermarked-preview pipeline only runs for video uploads. Image
   // and file paywalled shares don't have a "preview asset" concept. The
   // owner viewAs toggle + retry controls are video-specific, so gate the
   // banner on the playback session's media kind.
   const isVideoPlayback = playbackSession?.kind === "video";
   const downloadAllowed = !isPaywalled || isPaid;
+  const isConfirmingActiveItem =
+    perItemPricing && confirmingItemId === queriedItemVideoId;
   // Mux auto-captions for the share player. The player attaches them only on
   // the Mux (HLS) source. Skipped for paywalled shares: those stream via a
   // signed playback id whose VTT would need its own signed token, and the
-  // watermarked preview asset carries a different track — not worth wiring up
+  // watermarked preview asset carries a different track, so it is not wired up
   // here. Free/public share links get captions just like the /watch page.
   // Captions ride the MAIN asset's public playback id. Pre-payment on a
-  // paywalled share we withhold them — the VTT is the full spoken content
+  // paywalled share we withhold them. The VTT is the full spoken content
   // of the full video, which would leak past the 360p watermarked preview.
   // Once paid (or on free links) they're on.
   const shareCaptionsVttUrl =
@@ -990,11 +1043,11 @@ export default function SharePage() {
 
   if (suspectAutomation && (isPreviewMode || isFullMode || isPreviewPending)) {
     return (
-      <div className="surface-client min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
+      <div className="surface-client surface-soft flex min-h-screen items-center justify-center bg-[#FAFAFA] p-4 text-[#131315]">
         <Card className="max-w-md w-full">
           <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-[#dc2626]/10 flex items-center justify-center mb-4 border-2 border-[#dc2626]">
-              <ShieldCheck className="h-6 w-6 text-[#dc2626]" />
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF5F5]">
+              <ShieldCheck className="h-6 w-6 text-[#8A2B34]" />
             </div>
             <CardTitle>Automation blocked</CardTitle>
             <CardDescription>
@@ -1008,34 +1061,33 @@ export default function SharePage() {
   }
 
   return (
-    <div className="surface-client min-h-screen bg-[#f0f0e8]">
-      <header className="bg-[#f0f0e8] border-b-2 border-[#1a1a1a] px-6 py-4">
+    <div className="surface-client surface-soft min-h-screen bg-[#FAFAFA] text-[#131315]">
+      <header className="border-b border-[#E8E8EC] bg-white px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <Link
             preload="intent"
             to="/"
-            className="text-[#888] hover:text-[#1a1a1a] text-sm flex items-center gap-2 font-bold"
+            className="flex items-center gap-2 text-sm font-semibold text-[#6E6E73] transition-colors hover:text-[#131315]"
           >
             snip
           </Link>
           {/* Canva-style export: this button ALWAYS opens the download
-              sheet — quality picker, item list, and (when paywalled) the
-              inline unlock CTA all live there, so paying and downloading
-              are one continuous surface instead of a disabled button. */}
+              sheet with the quality picker, item list, and paywall action.
+              Paying and downloading stay in one surface. */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => setDownloadSheetOpen(true)}
             disabled={!grantToken || sheetItems.length === 0}
             title={
-              paywall && !isPaid
-                ? "Preview free — pay once to unlock downloads"
+              paywall && !perItemPricing && !isPaid
+                ? "Preview free. Pay once to unlock downloads."
                 : undefined
             }
           >
             <Download className="h-4 w-4" />
-            {paywall && !isPaid
-              ? `Download — ${formatPrice(paywall.priceCents, paywall.currency)}`
+            {paywall && !perItemPricing && !isPaid
+              ? `Download ${formatUsdCents(paywall.priceCents)}`
               : "Download"}
           </Button>
         </div>
@@ -1045,7 +1097,7 @@ export default function SharePage() {
         {downloadError || checkoutError ? (
           <div
             role="alert"
-            className="border-2 border-[#dc2626] bg-[#dc2626]/10 px-4 py-3 text-sm text-[#7f1d1d]"
+            className="rounded-[11px] bg-[#FFF5F5] px-4 py-3 text-sm text-[#8A2B34]"
           >
             {downloadError ?? checkoutError}
           </div>
@@ -1062,9 +1114,9 @@ export default function SharePage() {
               isOwner={isOwner}
               onCoverChanged={() => setCoverReload((n) => n + 1)}
             />
-            <div className="flex items-center gap-4 text-sm text-[#888]">
+            <div className="flex items-center gap-4 text-sm text-[#6E6E73]">
               {video?.title ? (
-                <span className="font-mono text-[#1a1a1a]">{video.title}</span>
+                <span className="text-[#131315]">{video.title}</span>
               ) : null}
               {comments && <span>{comments.length} threads</span>}
               <WatchTogetherControl
@@ -1078,13 +1130,13 @@ export default function SharePage() {
           </div>
         ) : (
           <div>
-            <h1 className="text-2xl font-black text-[#1a1a1a]">{headerTitle}</h1>
+            <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[#131315]">{headerTitle}</h1>
             {headerDescription ? (
-              <p className="text-[#888] mt-1">{headerDescription}</p>
+              <p className="mt-1 text-[#6E6E73]">{headerDescription}</p>
             ) : null}
-            <div className="flex items-center gap-4 mt-2 text-sm text-[#888]">
+            <div className="mt-2 flex items-center gap-4 text-sm text-[#6E6E73]">
               {video?.duration ? (
-                <span className="font-mono">{formatDuration(video.duration)}</span>
+                <span>{formatDuration(video.duration)}</span>
               ) : null}
               {comments && <span>{comments.length} threads</span>}
               <WatchTogetherControl
@@ -1098,26 +1150,31 @@ export default function SharePage() {
           </div>
         )}
 
-        {isBundle ? (
-          <ShareFolderBrowser
-            bundleName={summary?.bundle?.name ?? "Shared files"}
-            folders={bundleFolders}
-            items={bundleItems}
-            activeItemId={activeItemId}
-            onSelectItem={handleSelectBundleItem}
-            grantToken={grantToken}
-            viewAs={viewAs}
-          />
+        {perItemPricing && !isBundle && queriedItemVideoId && !isPaid ? (
+          <section
+            aria-label="Item purchase"
+            className="rounded-[14px] border border-[#E8E8EC] bg-white p-4"
+          >
+            <ItemUnlockControl
+              priceCents={itemPriceById.get(queriedItemVideoId) ?? null}
+              unlocked={false}
+              expanded={purchaseItemId === queriedItemVideoId}
+              confirming={confirmingItemId === queriedItemVideoId}
+              busy={checkoutItemId === queriedItemVideoId}
+              onExpand={() => setPurchaseItemId(queriedItemVideoId)}
+              onConfirm={() => void handlePay(queriedItemVideoId)}
+            />
+          </section>
         ) : null}
 
         {paywall && isOwner && isVideoPlayback ? (
-          <section className="border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] p-5 flex flex-col gap-3">
+          <section className="flex flex-col gap-3 rounded-[14px] border border-[#26262A] bg-[#161618] p-5 text-white">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="text-xs font-mono uppercase tracking-widest opacity-80">
-                  Owner preview — payment not required
+                <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
+                  Owner preview, payment not required
                 </div>
-                <div className="font-black text-xl tracking-tight">
+                <div className="text-xl font-semibold tracking-[-0.02em]">
                   {isPreviewMode
                     ? "Watermarked preview ready"
                     : isPreviewPending
@@ -1129,19 +1186,19 @@ export default function SharePage() {
                           : "Loading"}
                 </div>
                 {isPreviewUnavailable && playbackSession?.previewError ? (
-                  <div className="text-xs font-mono opacity-80 mt-1">
+                  <div className="mt-1 text-xs text-[#A0A0A5]">
                     {playbackSession.previewError}
                   </div>
                 ) : null}
               </div>
-              <div className="flex items-center gap-0 border-2 border-[#f0f0e8] self-start">
+              <div className="flex items-center self-start rounded-full border border-[#26262A] bg-[#0A0A0B] p-0.5">
                 <button
                   type="button"
                   onClick={() => setViewAs("client")}
-                  className={`px-3 py-2 text-xs font-bold uppercase tracking-widest ${
+                  className={`rounded-full px-3 py-2 text-xs font-medium transition-colors ${
                     viewAs === "client"
-                      ? "bg-[#f0f0e8] text-[#1a1a1a]"
-                      : "text-[#f0f0e8] hover:bg-[#333]"
+                      ? "bg-white text-[#131315]"
+                      : "text-[#A0A0A5] hover:bg-[#26262A] hover:text-white"
                   }`}
                 >
                   Client (watermarked)
@@ -1149,10 +1206,10 @@ export default function SharePage() {
                 <button
                   type="button"
                   onClick={() => setViewAs("owner")}
-                  className={`px-3 py-2 text-xs font-bold uppercase tracking-widest border-l-2 border-[#f0f0e8] ${
+                  className={`rounded-full px-3 py-2 text-xs font-medium transition-colors ${
                     viewAs === "owner"
-                      ? "bg-[#f0f0e8] text-[#1a1a1a]"
-                      : "text-[#f0f0e8] hover:bg-[#333]"
+                      ? "bg-white text-[#131315]"
+                      : "text-[#A0A0A5] hover:bg-[#26262A] hover:text-white"
                   }`}
                 >
                   Full-res
@@ -1167,15 +1224,15 @@ export default function SharePage() {
                   size="sm"
                   onClick={() => void handleRetryPreview()}
                   disabled={isRetryingPreview || !grantToken}
-                  className="border-[#f0f0e8] text-[#f0f0e8] hover:bg-[#f0f0e8] hover:text-[#1a1a1a]"
+                  className="border-[#26262A] bg-[#161618] text-white hover:bg-[#26262A] hover:text-white"
                 >
                   {isRetryingPreview ? "Retrying…" : "Retry preview generation"}
                 </Button>
                 {retryError ? (
-                  <span className="text-[#ffd1d1]">{retryError}</span>
+                  <span className="text-[#D8434F]">{retryError}</span>
                 ) : (
-                  <span className="opacity-70">
-                    Re-runs the watermark + Mux ingest pipeline for this link.
+                  <span className="text-[#A0A0A5]">
+                    Runs the watermark and Mux ingest pipeline again.
                   </span>
                 )}
               </div>
@@ -1184,14 +1241,14 @@ export default function SharePage() {
         ) : null}
 
         {/* The paywall pitch + pay CTA live in the download sheet (header
-            Download button) — no banner above the player. The viewer watches
+            Download button). The viewer watches
             the watermarked preview undisturbed and pays when they go to
             export, Canva-style. */}
 
         {paywall && isPaid ? (
-          <section className="border-2 border-[#1a1a1a] bg-[#FFB380] text-[#1a1a1a] px-5 py-3 flex items-center gap-2 font-bold">
+          <section className="flex items-center gap-2 rounded-[11px] bg-[#F2FBF5] px-5 py-3 font-medium text-[#225B36]">
             <ShieldCheck className="h-4 w-4" />
-            Paid — full-resolution unlocked
+            Paid, full-resolution unlocked
           </section>
         ) : null}
 
@@ -1199,7 +1256,7 @@ export default function SharePage() {
           ref={playerSectionRef}
           className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 lg:items-start"
         >
-        <div className="relative border-2 border-[#1a1a1a] overflow-hidden">
+        <div className="relative overflow-hidden rounded-[14px] border border-[#26262A] bg-[#0A0A0B]">
           {playbackSession?.url && playbackSession.kind === "video" ? (
             <>
               <VideoPlayer
@@ -1221,13 +1278,13 @@ export default function SharePage() {
                     user?.fullName ??
                     `share/${token.slice(0, 8)}`
                   }
-                  secondary={isPreviewMode ? "PREVIEW — DO NOT REDISTRIBUTE" : undefined}
+                  secondary={isPreviewMode ? "PREVIEW. DO NOT REDISTRIBUTE" : undefined}
                   active={isPreviewMode}
                 />
               ) : null}
             </>
           ) : playbackSession?.url && playbackSession.kind === "image" ? (
-            <div className="relative bg-[#1a1a1a]">
+            <div className="relative bg-[#0A0A0B]">
               <img
                 src={playbackSession.url}
                 alt={video?.title ?? "Shared image"}
@@ -1244,7 +1301,7 @@ export default function SharePage() {
                     user?.fullName ??
                     `share/${token.slice(0, 8)}`
                   }
-                  secondary={isPreviewMode ? "PREVIEW — DO NOT REDISTRIBUTE" : undefined}
+                  secondary={isPreviewMode ? "PREVIEW. DO NOT REDISTRIBUTE" : undefined}
                   active={isPreviewMode}
                 />
               ) : null}
@@ -1257,7 +1314,7 @@ export default function SharePage() {
                 className="w-full h-[80vh] bg-white"
               />
             ) : playbackSession.fileKind === "audio" && playbackSession.url ? (
-              <div className="bg-[#1a1a1a] p-8 flex items-center justify-center">
+              <div className="flex items-center justify-center bg-[#0A0A0B] p-8">
                 <audio
                   controls
                   src={playbackSession.url}
@@ -1266,24 +1323,25 @@ export default function SharePage() {
                 />
               </div>
             ) : (
-              <div className="bg-[#e8e8e0] p-10 flex flex-col items-center justify-center gap-4 text-center">
-                <div className="text-xs font-mono font-bold uppercase tracking-widest text-[#888]">
+              <div className="flex flex-col items-center justify-center gap-4 bg-[#FAFAFA] p-10 text-center">
+                <div className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
                   {playbackSession.fileKind === "pdf"
                     ? "PDF"
                     : playbackSession.fileKind === "text"
                       ? "Text"
                       : "File"}
                 </div>
-                <div className="text-lg font-black text-[#1a1a1a]">
+                <div className="text-lg font-semibold text-[#131315]">
                   {playbackSession.fileName ?? video?.title ?? "Shared file"}
                 </div>
-                <div className="text-xs text-[#888] font-mono">
+                <div className="text-xs text-[#6E6E73]">
                   {playbackSession.contentType ?? "application/octet-stream"}
                 </div>
                 {playbackSession.mode === "locked" ? (
-                  <p className="text-sm text-[#1a1a1a] max-w-md">
-                    This file is locked until paid — use the Download button
-                    in the header to pay and unlock it.
+                  <p className="max-w-md text-sm text-[#131315]">
+                    {isConfirmingActiveItem
+                      ? "Confirming payment…"
+                      : "Locked. Choose Unlock above."}
                   </p>
                 ) : downloadAllowed ? (
                   <Button onClick={() => void handleDownload()}>
@@ -1291,14 +1349,14 @@ export default function SharePage() {
                     Download
                   </Button>
                 ) : (
-                  <p className="text-sm text-[#888] max-w-md">
+                  <p className="max-w-md text-sm text-[#6E6E73]">
                     The owner disabled downloads on this share link.
                   </p>
                 )}
               </div>
             )
           ) : (
-            <div className="relative aspect-video overflow-hidden rounded-xl border border-zinc-800/80 bg-black shadow-[0_10px_40px_rgba(0,0,0,0.45)]">
+            <div className="relative aspect-video overflow-hidden rounded-[14px] border border-[#26262A] bg-[#0A0A0B]">
               {(playbackSession?.posterUrl || video?.thumbnailUrl?.startsWith("http")) ? (
                 <img
                   src={playbackSession?.posterUrl ?? video?.thumbnailUrl ?? ""}
@@ -1316,14 +1374,14 @@ export default function SharePage() {
                       delivery.
                     </p>
                     {isOwner && playbackSession?.previewError ? (
-                      <p className="text-xs font-mono text-white/70 max-w-sm break-all">
+                      <p className="max-w-sm break-all text-xs text-white/70">
                         {playbackSession.previewError}
                       </p>
                     ) : null}
                     {paywall && !isPaid ? (
                       <p className="text-xs text-white/60 max-w-sm">
-                        You can still pay above — the full-resolution video
-                        unlocks immediately and doesn’t depend on the preview.
+                        You can still pay above. The full-resolution video
+                        unlocks immediately and doesn&apos;t depend on the preview.
                       </p>
                     ) : (
                       <p className="text-xs text-white/60 max-w-sm">
@@ -1338,9 +1396,11 @@ export default function SharePage() {
                     <p className="text-sm font-medium text-white/85">
                       {isPreviewPending
                         ? previewTakingLong
-                          ? "Still preparing the watermarked preview — this one’s taking longer than usual."
-                          : "Preparing watermarked preview… this usually takes 30–90 seconds."
-                        : playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
+                          ? "Still preparing the watermarked preview. This one is taking longer than usual."
+                          : "Preparing watermarked preview… this usually takes 30 to 90 seconds."
+                        : isConfirmingActiveItem
+                          ? "Confirming payment…"
+                          : playbackError ?? (isLoadingPlayback ? "Loading stream…" : "Preparing stream…")}
                     </p>
                     {isPreviewPending && paywall && !isPaid ? (
                       <p className="text-xs text-white/60 max-w-sm">
@@ -1355,16 +1415,16 @@ export default function SharePage() {
           )}
         </div>
 
-        <section className="border-2 border-[#1a1a1a] bg-[#e8e8e0] p-4 space-y-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
+        <section className="space-y-4 rounded-[14px] border border-[#E8E8EC] bg-white p-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
           <div className="flex items-center justify-between">
-            <div className="flex items-center border-2 border-[#1a1a1a]">
+            <div className="flex items-center rounded-full border border-[#D8D8DE] bg-white p-0.5">
               <button
                 type="button"
                 onClick={() => setRightTab("comments")}
-                className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                   rightTab === "comments"
-                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]"
+                    ? "bg-[#FFF0E6] text-[#D14E00]"
+                    : "text-[#6E6E73] hover:bg-[#FAFAFA] hover:text-[#131315]"
                 }`}
               >
                 Comments
@@ -1372,16 +1432,16 @@ export default function SharePage() {
               <button
                 type="button"
                 onClick={() => setRightTab("info")}
-                className={`px-3 py-1 text-xs font-bold uppercase tracking-widest border-l-2 border-[#1a1a1a] ${
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                   rightTab === "info"
-                    ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                    : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e0e0d6]"
+                    ? "bg-[#FFF0E6] text-[#D14E00]"
+                    : "text-[#6E6E73] hover:bg-[#FAFAFA] hover:text-[#131315]"
                 }`}
               >
                 Info
               </button>
             </div>
-            <span className="text-xs text-[#888] font-mono">{formatTimestamp(currentTime)}</span>
+            <span className="text-xs text-[#6E6E73]">{formatTimestamp(currentTime)}</span>
           </div>
 
           {rightTab === "info" ? (
@@ -1400,7 +1460,7 @@ export default function SharePage() {
             </a>
           ) : canComment ? (
             <form onSubmit={handleSubmitComment} className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-[#666]">
+              <div className="flex items-center gap-2 text-xs text-[#6E6E73]">
                 <Clock className="h-3.5 w-3.5" />
                 Comment at {formatTimestamp(currentTime)}
               </div>
@@ -1410,26 +1470,26 @@ export default function SharePage() {
                 placeholder="Leave a comment…"
                 className="min-h-[90px]"
               />
-              {commentError ? <p className="text-xs text-[#dc2626]">{commentError}</p> : null}
+              {commentError ? <p className="text-xs text-[#8A2B34]">{commentError}</p> : null}
               <Button type="submit" disabled={!commentText.trim() || isSubmittingComment}>
                 <MessageSquare className="mr-1.5 h-4 w-4" />
                 {isSubmittingComment ? "Posting…" : "Post comment"}
               </Button>
             </form>
           ) : (
-            <p className="text-xs text-[#888] border-2 border-dashed border-[#ccc] px-3 py-2">
-              You have view-only access — commenting is disabled for this link.
+            <p className="rounded-[11px] border border-[#E8E8EC] bg-[#FAFAFA] px-3 py-2 text-xs text-[#6E6E73]">
+              You have view-only access. Commenting is disabled for this link.
             </p>
           )}
 
           {comments === undefined ? (
             <DelayedAppear>
-              <p className="text-sm text-[#888]">Loading comments…</p>
+              <p className="text-sm text-[#6E6E73]">Loading comments…</p>
             </DelayedAppear>
           ) : comments.length === 0 ? (
-            <p className="text-sm text-[#888]">
+            <p className="text-sm text-[#6E6E73]">
               {canComment && isUserLoaded && user
-                ? "No comments yet — yours will pin to the exact frame you're watching."
+                ? "No comments yet. Yours will pin to the exact frame you're watching."
                 : "No comments yet."}
             </p>
           ) : (
@@ -1443,8 +1503,8 @@ export default function SharePage() {
                     key={comment._id}
                     id={`share-comment-${comment._id}`}
                     className={cn(
-                      "border-2 bg-[#f0f0e8] p-3 transition-colors",
-                      threadActive ? "border-[#C2410C] bg-[#FFEDD5]" : "border-[#1a1a1a]",
+                      "rounded-[11px] border border-[#E8E8EC] bg-white p-3 transition-colors",
+                      threadActive && "bg-[#FFF0E6]",
                     )}
                   >
                     <div
@@ -1460,10 +1520,10 @@ export default function SharePage() {
                       }}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-bold text-[#1a1a1a]">{comment.userName}</div>
+                        <div className="text-sm font-semibold text-[#131315]">{comment.userName}</div>
                         <button
                           type="button"
-                          className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                          className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                           onClick={(e) => {
                             e.stopPropagation();
                             focusComment(comment._id, comment.timestampSeconds, { play: true });
@@ -1472,12 +1532,12 @@ export default function SharePage() {
                           {formatTimestamp(comment.timestampSeconds)}
                         </button>
                       </div>
-                      <p className="text-sm text-[#1a1a1a] mt-1 whitespace-pre-wrap">{comment.text}</p>
-                      <p className="text-[11px] text-[#888] mt-1">{formatRelativeTime(comment._creationTime)}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-[#131315]">{comment.text}</p>
+                      <p className="mt-1 text-[11px] text-[#6E6E73]">{formatRelativeTime(comment._creationTime)}</p>
                     </div>
 
                     {comment.replies.length > 0 ? (
-                      <div className="mt-3 ml-4 border-l-2 border-[#1a1a1a] pl-3 space-y-2">
+                      <div className="ml-4 mt-3 space-y-2 border-l border-[#F1F1F3] pl-3">
                         {comment.replies.map((reply) => {
                           const replyActive = activeCommentId === reply._id;
                           return (
@@ -1488,7 +1548,7 @@ export default function SharePage() {
                               tabIndex={0}
                               className={cn(
                                 "text-sm cursor-pointer -ml-1 pl-1 transition-colors",
-                                replyActive && "bg-[#FFEDD5]",
+                                replyActive && "rounded-[10px] bg-[#FFF0E6]",
                               )}
                               onClick={() => focusComment(reply._id, reply.timestampSeconds)}
                               onKeyDown={(e) => {
@@ -1499,10 +1559,10 @@ export default function SharePage() {
                               }}
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <span className="font-bold text-[#1a1a1a]">{reply.userName}</span>
+                                <span className="font-semibold text-[#131315]">{reply.userName}</span>
                                 <button
                                   type="button"
-                                  className="font-mono text-xs text-[#FF6600] hover:text-[#1a1a1a]"
+                                  className="text-xs font-medium text-[#D14E00] transition-colors hover:text-[#131315]"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     focusComment(reply._id, reply.timestampSeconds, { play: true });
@@ -1511,7 +1571,7 @@ export default function SharePage() {
                                   {formatTimestamp(reply.timestampSeconds)}
                                 </button>
                               </div>
-                              <p className="text-[#1a1a1a] whitespace-pre-wrap">{reply.text}</p>
+                              <p className="whitespace-pre-wrap text-[#131315]">{reply.text}</p>
                             </div>
                           );
                         })}
@@ -1536,7 +1596,7 @@ export default function SharePage() {
                             autoFocus
                           />
                           {replyError ? (
-                            <p className="text-xs text-[#dc2626]">{replyError}</p>
+                            <p className="text-xs text-[#8A2B34]">{replyError}</p>
                           ) : null}
                           <div className="flex items-center gap-2">
                             <Button
@@ -1563,7 +1623,7 @@ export default function SharePage() {
                       ) : (
                         <button
                           type="button"
-                          className="mt-2 text-xs font-bold text-[#888] hover:text-[#C2410C]"
+                          className="mt-2 text-xs font-medium text-[#6E6E73] transition-colors hover:text-[#D14E00]"
                           onClick={() => {
                             setReplyingToId(comment._id);
                             setReplyText("");
@@ -1583,32 +1643,64 @@ export default function SharePage() {
           )}
         </section>
         </div>
+
+        {isBundle ? (
+          <ShareFolderBrowser
+            bundleName={summary?.bundle?.name ?? "Shared files"}
+            folders={bundleFolders}
+            items={bundleItems}
+            activeItemId={activeItemId}
+            onSelectItem={handleSelectBundleItem}
+            grantToken={grantToken}
+            viewAs={viewAs}
+            perItemPricing={perItemPricing}
+            itemPriceById={itemPriceById}
+            unlockedItemIds={unlockedItemIds}
+            allItemsUnlocked={allItemsUnlocked}
+            purchaseItemId={purchaseItemId}
+            checkoutItemId={checkoutItemId}
+            confirmingItemId={confirmingItemId}
+            onExpandPurchase={setPurchaseItemId}
+            onConfirmPurchase={(itemId) => void handlePay(itemId)}
+          />
+        ) : null}
       </main>
 
-      <footer className="border-t-2 border-[#1a1a1a] px-6 py-4 mt-8">
-        <div className="max-w-6xl mx-auto text-center text-sm text-[#888]">
+      <footer className="mt-8 border-t border-[#E8E8EC] bg-white px-6 py-4">
+        <div className="mx-auto max-w-6xl text-center text-sm text-[#6E6E73]">
           Shared via{" "}
-          <Link to="/" preload="intent" className="text-[#1a1a1a] hover:text-[#FF6600] font-bold">
+          <Link to="/" preload="intent" className="font-semibold text-[#131315] transition-colors hover:text-[#D14E00]">
             snip
           </Link>
         </div>
       </footer>
 
-      {/* Export sheet — mounts for BOTH share shapes (single video and
+      {/* Export sheet mounts for both share shapes (single video and
           bundle); the Canva-style flow is the same either way. */}
       <ShareDownloadSheet
         open={downloadSheetOpen}
         onOpenChange={setDownloadSheetOpen}
         items={sheetItems}
         grantToken={grantToken}
-        canDownload={canDownloadGrant}
+        canDownload={perItemPricing ? canDownloadShare : canDownloadGrant}
         isPaywalled={isPaywalled}
         isPaid={isPaid}
         paywallPriceLabel={
-          paywall ? formatPrice(paywall.priceCents, paywall.currency) : null
+          paywall && !perItemPricing
+            ? formatUsdCents(paywall.priceCents)
+            : null
         }
         onPay={() => void handlePay()}
         isPaying={isCreatingCheckout}
+        perItemPricing={perItemPricing}
+        itemPriceById={itemPriceById}
+        unlockedItemIds={unlockedItemIds}
+        allItemsUnlocked={allItemsUnlocked}
+        purchaseItemId={purchaseItemId}
+        checkoutItemId={checkoutItemId}
+        confirmingItemId={confirmingItemId}
+        onExpandItemPurchase={setPurchaseItemId}
+        onConfirmItemPurchase={(itemId) => void handlePay(itemId)}
       />
     </div>
   );

@@ -19,6 +19,29 @@ const connectStatusValidator = v.union(
   v.literal("disabled"),
 );
 
+export const connectRequirementsValidator = v.object({
+  currentlyDue: v.array(v.string()),
+  pastDue: v.array(v.string()),
+  disabledReason: v.union(v.string(), v.null()),
+});
+
+/**
+ * Flatten `account.requirements` into the shape we persist. Both writers
+ * (the refresh action and the account.updated webhook) go through this so
+ * the two paths can't drift. Type-only Stripe import keeps this callable
+ * from the V8 isolate.
+ */
+export function extractConnectRequirements(
+  account: Pick<import("stripe").Stripe.Account, "requirements">,
+) {
+  const r = account.requirements;
+  return {
+    currentlyDue: r?.currently_due ?? [],
+    pastDue: r?.past_due ?? [],
+    disabledReason: r?.disabled_reason ?? null,
+  };
+}
+
 export const getOnboardingStatus = query({
   args: { teamId: v.id("teams") },
   returns: v.object({
@@ -28,6 +51,7 @@ export const getOnboardingStatus = query({
     chargesEnabled: v.boolean(),
     payoutsEnabled: v.boolean(),
     canManageBilling: v.boolean(),
+    requirements: v.union(connectRequirementsValidator, v.null()),
   }),
   handler: async (ctx, args) => {
     const { membership } = await requireTeamAccess(ctx, args.teamId);
@@ -41,6 +65,9 @@ export const getOnboardingStatus = query({
       chargesEnabled: team.stripeConnectChargesEnabled ?? false,
       payoutsEnabled: team.stripeConnectPayoutsEnabled ?? false,
       canManageBilling: membership.role === "owner",
+      // null means "we have never refreshed this account", which the UI
+      // must not render as "nothing outstanding".
+      requirements: team.stripeConnectRequirements ?? null,
     };
   },
 });
@@ -71,6 +98,7 @@ export const recordAccountStatus = internalMutation({
     status: connectStatusValidator,
     chargesEnabled: v.boolean(),
     payoutsEnabled: v.boolean(),
+    requirements: v.optional(connectRequirementsValidator),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -78,6 +106,7 @@ export const recordAccountStatus = internalMutation({
       stripeConnectStatus: args.status,
       stripeConnectChargesEnabled: args.chargesEnabled,
       stripeConnectPayoutsEnabled: args.payoutsEnabled,
+      ...(args.requirements ? { stripeConnectRequirements: args.requirements } : {}),
     });
     return null;
   },
@@ -93,6 +122,7 @@ export const syncAccountFromWebhook = internalMutation({
     status: connectStatusValidator,
     chargesEnabled: v.boolean(),
     payoutsEnabled: v.boolean(),
+    requirements: v.optional(connectRequirementsValidator),
   },
   returns: v.union(v.id("teams"), v.null()),
   handler: async (ctx, args): Promise<Id<"teams"> | null> => {
@@ -108,6 +138,7 @@ export const syncAccountFromWebhook = internalMutation({
       stripeConnectStatus: args.status,
       stripeConnectChargesEnabled: args.chargesEnabled,
       stripeConnectPayoutsEnabled: args.payoutsEnabled,
+      ...(args.requirements ? { stripeConnectRequirements: args.requirements } : {}),
     });
     return team._id;
   },

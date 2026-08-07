@@ -9,7 +9,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
-import { identityName, requireProjectAccess, requireUser } from "./auth";
+import { getUser, identityName, requireProjectAccess, requireUser } from "./auth";
 import { prefEnabled } from "./notifications";
 import { generateUniqueToken } from "./security";
 import {
@@ -18,6 +18,7 @@ import {
   type ProjectType,
   type WizardAnswers,
 } from "./contractTemplates";
+import { recordItemVersion } from "./itemVersions";
 
 const projectTypeValidator = v.union(
   v.literal("logo_design"),
@@ -32,12 +33,10 @@ const projectTypeValidator = v.union(
 );
 
 /**
- * Multi-contract management. Replaces the singleton `projects.contract`
- * embedded field with a table of contracts, each with its own
- * recipients + fields + audit log. Documenso-equivalent signing flow
- * is implemented natively here — no external API calls. See the
- * schema notes on `contracts`, `contractRecipients`, `contractFields`
- * and `contractAuditEvents` for the data model.
+ * Document storage with an optional contract workflow. A document is the
+ * base object: title, editable HTML, versions, and project ownership. Only
+ * rows explicitly promoted to `docType: "contract"` may use the signing
+ * state machine, recipients, or signature fields.
  *
  * Status state machine:
  *   draft → pending → completed
@@ -103,12 +102,11 @@ async function requireContractAccess(
   return contract;
 }
 
-// Plain documents share the table but must never enter the signing
-// lifecycle. Server-side backstop for what the UI already hides —
-// rows without docType are legacy contracts.
-function assertNotDocument(contract: Doc<"contracts">, action: string) {
-  if ((contract.docType ?? "contract") === "document") {
-    throw new Error(`Documents don't support ${action}.`);
+function requireSigningCapability(contract: Doc<"contracts">) {
+  if ((contract.docType ?? "contract") !== "contract") {
+    throw new Error(
+      "Prepare this document for signing before adding recipients or signature fields.",
+    );
   }
 }
 
@@ -136,10 +134,13 @@ export const list = query({
     );
     visible.sort((a, b) => b._creationTime - a._creationTime);
 
-    // Attach recipient counts so the list UI can render the signer
-    // pill without an N+1 round trip.
+    // Only contracts have recipients. Plain document rows stay on the fast
+    // writing path and do not touch signing tables.
     const withCounts = await Promise.all(
       visible.map(async (contract) => {
+        if ((contract.docType ?? "contract") === "document") {
+          return { ...contract, recipientCount: 0, signedCount: 0 };
+        }
         const recipients = await ctx.db
           .query("contractRecipients")
           .withIndex("by_contract", (q) => q.eq("contractId", contract._id))
@@ -160,6 +161,10 @@ export const get = query({
   args: { contractId: v.id("contracts") },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "viewer");
+    if (contract.deletedAt) return null;
+    if ((contract.docType ?? "contract") === "document") {
+      return { contract, recipients: [], fields: [], audit: [] };
+    }
     const [recipients, fields, audit] = await Promise.all([
       ctx.db
         .query("contractRecipients")
@@ -177,6 +182,103 @@ export const get = query({
     recipients.sort((a, b) => a.order - b.order);
     audit.sort((a, b) => a.createdAt - b.createdAt);
     return { contract, recipients, fields, audit };
+  },
+});
+
+/** Point-in-time history for every item in the unified document editor. */
+export const listVersions = query({
+  args: { contractId: v.id("contracts") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "viewer");
+    const rows = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    return rows
+      .filter((row) => row.kind === "doc" && row.projectId === contract.projectId)
+      .sort((a, b) => b.versionNumber - a.versionNumber);
+  },
+});
+
+export const snapshotVersion = mutation({
+  args: {
+    contractId: v.id("contracts"),
+    label: v.optional(v.string()),
+    contentHtml: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    const user = await requireUser(ctx);
+    const existing = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    const versionNumber =
+      existing.reduce((max, row) => Math.max(max, row.versionNumber), 0) + 1;
+    return await recordItemVersion(ctx, {
+      lineageKey: String(args.contractId),
+      projectId: contract.projectId,
+      kind: "doc",
+      versionNumber,
+      label: args.label?.trim() || undefined,
+      createdByClerkId: user.subject,
+      createdByName: identityName(user),
+      contentHtml: args.contentHtml ?? contract.contentHtml,
+      wizardAnswers: contract.wizardAnswers,
+    });
+  },
+});
+
+export const restoreVersion = mutation({
+  args: { contractId: v.id("contracts"), versionId: v.id("itemVersions") },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    if (contract.status !== "draft") {
+      throw new Error("Only drafts can restore an earlier version.");
+    }
+    const version = await ctx.db.get(args.versionId);
+    if (
+      !version ||
+      version.kind !== "doc" ||
+      version.lineageKey !== String(args.contractId) ||
+      version.projectId !== contract.projectId
+    ) {
+      throw new Error("Version not found for this document.");
+    }
+    const siblings = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    for (const sibling of siblings) {
+      const isCurrent = sibling._id === version._id;
+      if (sibling.isCurrent !== isCurrent) {
+        await ctx.db.patch(sibling._id, { isCurrent });
+      }
+    }
+    const restoredHtml = version.contentHtml ?? contract.contentHtml ?? "";
+    await ctx.db.patch(args.contractId, {
+      contentHtml: restoredHtml,
+      wizardAnswers: version.wizardAnswers ?? contract.wizardAnswers,
+      lastSavedAt: Date.now(),
+    });
+    return restoredHtml;
+  },
+});
+
+export const removeVersion = mutation({
+  args: { contractId: v.id("contracts"), versionId: v.id("itemVersions") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "member");
+    const version = await ctx.db.get(args.versionId);
+    if (
+      version &&
+      version.kind === "doc" &&
+      version.lineageKey === String(args.contractId) &&
+      version.projectId === contract.projectId
+    ) {
+      await ctx.db.delete(version._id);
+    }
   },
 });
 
@@ -234,13 +336,15 @@ export const create = mutation({
   returns: v.id("contracts"),
   handler: async (ctx, args) => {
     const { user, project } = await requireProjectAccess(ctx, args.projectId, "member");
+    const title = args.title.trim().slice(0, 160);
+    if (!title) throw new Error("Title is required.");
 
     const contractId = await ctx.db.insert("contracts", {
       projectId: args.projectId,
       teamId: project.teamId,
-      title: args.title,
+      title,
       kind: args.kind,
-      docType: args.docType ?? "contract",
+      docType: args.docType ?? "document",
       contentHtml: args.contentHtml ?? "",
       status: "draft",
       createdByClerkId: user.subject,
@@ -248,12 +352,14 @@ export const create = mutation({
       lastSavedAt: Date.now(),
     });
 
-    await appendAudit(ctx, {
-      contractId,
-      action: "created",
-      actorName: identityName(user),
-      actorEmail: typeof user.email === "string" ? user.email : undefined,
-    });
+    if ((args.docType ?? "document") === "contract") {
+      await appendAudit(ctx, {
+        contractId,
+        action: "created",
+        actorName: identityName(user),
+        actorEmail: typeof user.email === "string" ? user.email : undefined,
+      });
+    }
 
     return contractId;
   },
@@ -274,11 +380,23 @@ export const update = mutation({
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
     if (contract.status !== "draft") {
-      throw new Error("Only draft contracts can be edited.");
+      throw new Error("Only draft contracts and documents can be edited.");
     }
     const patch: Partial<Doc<"contracts">> = { lastSavedAt: Date.now() };
-    if (args.title !== undefined) patch.title = args.title;
-    if (args.docType !== undefined) patch.docType = args.docType;
+    if (args.title !== undefined) {
+      const title = args.title.trim().slice(0, 160);
+      if (!title) throw new Error("Title is required.");
+      patch.title = title;
+    }
+    if (args.docType !== undefined && args.docType !== contract.docType) {
+      if ((contract.docType ?? "contract") === "contract") {
+        throw new Error("Contracts cannot be converted back into plain documents.");
+      }
+      if (args.docType !== "contract") {
+        throw new Error("Unsupported document conversion.");
+      }
+      patch.docType = "contract";
+    }
     if (args.contentHtml !== undefined) patch.contentHtml = args.contentHtml;
     if (args.priceCents !== undefined) patch.priceCents = args.priceCents;
     if (args.currency !== undefined) patch.currency = args.currency;
@@ -286,6 +404,35 @@ export const update = mutation({
     if (args.clientName !== undefined) patch.clientName = args.clientName;
     if (args.clientEmail !== undefined) patch.clientEmail = args.clientEmail;
     await ctx.db.patch(args.contractId, patch);
+  },
+});
+
+/**
+ * Explicitly promote a plain document into the signing workflow. This is
+ * intentionally one-way: once recipients or legal events exist, silently
+ * demoting the row would orphan contract-only state.
+ */
+export const promoteDocumentToContract = mutation({
+  args: { documentId: v.id("contracts") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const document = await requireContractAccess(ctx, args.documentId, "member");
+    if ((document.docType ?? "contract") !== "document") return null;
+    if (document.status !== "draft") {
+      throw new Error("Only draft documents can be prepared for signing.");
+    }
+    const user = await requireUser(ctx);
+    await ctx.db.patch(args.documentId, {
+      docType: "contract",
+      lastSavedAt: Date.now(),
+    });
+    await appendAudit(ctx, {
+      contractId: args.documentId,
+      action: "converted_to_contract",
+      actorName: identityName(user),
+      actorEmail: typeof user.email === "string" ? user.email : undefined,
+    });
+    return null;
   },
 });
 
@@ -305,11 +452,12 @@ export const applyWizard = mutation({
       ),
     }),
   },
+  returns: v.string(),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "the contract wizard");
+    requireSigningCapability(contract);
     if (contract.status !== "draft") {
-      throw new Error("Only draft contracts can run the wizard.");
+      throw new Error("Only draft items can run the wizard.");
     }
     const answers: WizardAnswers = {};
     for (const e of args.answers.entries) answers[e.key] = e.value;
@@ -352,6 +500,7 @@ export const applyWizard = mutation({
         typeof answers.deadline === "string" ? answers.deadline : undefined,
       lastSavedAt: Date.now(),
     });
+    return contentHtml;
   },
 });
 
@@ -361,10 +510,131 @@ export const softDelete = mutation({
     const contract = await requireContractAccess(ctx, args.contractId, "admin");
     if (contract.status === "pending") {
       throw new Error(
-        "Void the contract before deleting — recipients have outstanding signing links.",
+        "Void this item before deleting it because recipients have active signing links.",
       );
     }
-    await ctx.db.patch(args.contractId, { deletedAt: Date.now() });
+    const user = await requireUser(ctx);
+    await ctx.db.patch(args.contractId, {
+      deletedAt: Date.now(),
+      deletedByName: identityName(user),
+    });
+  },
+});
+
+export const restore = mutation({
+  args: { contractId: v.id("contracts") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "admin");
+    if (!contract.deletedAt) return;
+    if (contract.trashPurgeStartedAt) {
+      throw new Error("This item has passed its 30-day recovery window and is being permanently deleted.");
+    }
+    const project = await ctx.db.get(contract.projectId);
+    if (!project || project.deletedAt) {
+      throw new Error("Restore the parent project first.");
+    }
+    await ctx.db.patch(args.contractId, {
+      deletedAt: undefined,
+      deletedByName: undefined,
+    });
+  },
+});
+
+export const purge = mutation({
+  args: { contractId: v.id("contracts") },
+  handler: async (ctx, args) => {
+    const contract = await requireContractAccess(ctx, args.contractId, "admin");
+    if (!contract.deletedAt) {
+      throw new Error("Move this item to Recently deleted first.");
+    }
+    await ctx.scheduler.runAfter(
+      0,
+      internal.retentionActions.purgeReplacedAssets,
+      {
+        s3Keys: [
+          contract.docxS3Key,
+          contract.signablePdfS3Key,
+          contract.signedPdfS3Key,
+          contract.signedPackageS3Key,
+        ].filter((key): key is string => Boolean(key)),
+        muxAssetIds: [],
+      },
+    );
+    const [recipients, fields, audit, versions] = await Promise.all([
+      ctx.db
+        .query("contractRecipients")
+        .withIndex("by_contract", (q) => q.eq("contractId", args.contractId))
+        .collect(),
+      ctx.db
+        .query("contractFields")
+        .withIndex("by_contract", (q) => q.eq("contractId", args.contractId))
+        .collect(),
+      ctx.db
+        .query("contractAuditEvents")
+        .withIndex("by_contract", (q) => q.eq("contractId", args.contractId))
+        .collect(),
+      ctx.db
+        .query("itemVersions")
+        .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+        .collect(),
+    ]);
+    for (const row of [...recipients, ...fields, ...audit, ...versions]) {
+      await ctx.db.delete(row._id);
+    }
+    await ctx.db.delete(args.contractId);
+  },
+});
+
+export const listDeleted = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getUser(ctx);
+    if (!user) return [];
+    const memberships = await ctx.db
+      .query("teamMembers")
+      .withIndex("by_user", (q) => q.eq("userClerkId", user.subject))
+      .collect();
+    const all: Array<{
+      _id: Id<"contracts">;
+      title: string;
+      docType: "contract" | "document";
+      projectId: Id<"projects">;
+      projectName: string;
+      teamName: string;
+      teamSlug: string;
+      deletedAt: number;
+      deletedByName?: string;
+    }> = [];
+    for (const membership of memberships) {
+      const team = await ctx.db.get(membership.teamId);
+      if (!team) continue;
+      const projects = await ctx.db
+        .query("projects")
+        .withIndex("by_team", (q) => q.eq("teamId", team._id))
+        .collect();
+      for (const project of projects) {
+        if (project.deletedAt) continue;
+        const items = await ctx.db
+          .query("contracts")
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
+          .collect();
+        for (const item of items) {
+          if (typeof item.deletedAt !== "number") continue;
+          all.push({
+            _id: item._id,
+            title: item.title,
+            docType: item.docType ?? "contract",
+            projectId: project._id,
+            projectName: project.name,
+            teamName: team.name,
+            teamSlug: team.slug,
+            deletedAt: item.deletedAt,
+            deletedByName: item.deletedByName,
+          });
+        }
+      }
+    }
+    return all.sort((a, b) => b.deletedAt - a.deletedAt);
   },
 });
 
@@ -385,7 +655,7 @@ export const addRecipient = mutation({
   returns: v.id("contractRecipients"),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "signing recipients");
+    requireSigningCapability(contract);
     if (contract.status !== "draft") {
       throw new Error("Recipients can only be added to draft contracts.");
     }
@@ -423,6 +693,7 @@ export const removeRecipient = mutation({
     const recipient = await ctx.db.get(args.recipientId);
     if (!recipient) throw new Error("Recipient not found.");
     const contract = await requireContractAccess(ctx, recipient.contractId, "member");
+    requireSigningCapability(contract);
     if (contract.status !== "draft") {
       throw new Error("Recipients can only be removed from draft contracts.");
     }
@@ -472,7 +743,7 @@ export const addField = mutation({
   returns: v.id("contractFields"),
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "signature fields");
+    requireSigningCapability(contract);
     if (contract.status !== "draft") {
       throw new Error("Fields can only be edited on draft contracts.");
     }
@@ -512,6 +783,7 @@ export const updateField = mutation({
     const field = await ctx.db.get(args.fieldId);
     if (!field) throw new Error("Field not found.");
     const contract = await requireContractAccess(ctx, field.contractId, "member");
+    requireSigningCapability(contract);
     if (contract.status !== "draft") {
       throw new Error("Fields can only be edited on draft contracts.");
     }
@@ -540,6 +812,7 @@ export const removeField = mutation({
     const field = await ctx.db.get(args.fieldId);
     if (!field) return;
     const contract = await requireContractAccess(ctx, field.contractId, "member");
+    requireSigningCapability(contract);
     if (contract.status !== "draft") {
       throw new Error("Fields can only be edited on draft contracts.");
     }
@@ -550,10 +823,13 @@ export const removeField = mutation({
 // ─── State machine: send for signature ───────────────────────────────
 
 export const sendForSignature = mutation({
-  args: { contractId: v.id("contracts") },
+  args: {
+    contractId: v.id("contracts"),
+    contentHtml: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const contract = await requireContractAccess(ctx, args.contractId, "member");
-    assertNotDocument(contract, "sending for signature");
+    requireSigningCapability(contract);
     if (contract.status !== "draft") {
       throw new Error("Only draft contracts can be sent.");
     }
@@ -568,12 +844,32 @@ export const sendForSignature = mutation({
     }
 
     const now = Date.now();
+    const contentHtml = args.contentHtml ?? contract.contentHtml ?? "";
+    // Preserve the exact editable state as a named history entry before it is
+    // frozen. Documents and contracts share this same lifecycle.
+    const existingVersions = await ctx.db
+      .query("itemVersions")
+      .withIndex("by_lineage", (q) => q.eq("lineageKey", String(args.contractId)))
+      .collect();
+    await recordItemVersion(ctx, {
+      lineageKey: String(args.contractId),
+      projectId: contract.projectId,
+      kind: "doc",
+      versionNumber:
+        existingVersions.reduce((max, row) => Math.max(max, row.versionNumber), 0) + 1,
+      label: "Sent for signature",
+      createdByClerkId: user.subject,
+      createdByName: identityName(user),
+      contentHtml,
+      wizardAnswers: contract.wizardAnswers,
+    });
     // Freeze the exact body the recipients will sign + hash it. This is the
     // record they're bound to; the hash makes any later edit detectable.
-    const frozenContentHtml = contract.contentHtml;
+    const frozenContentHtml = contentHtml;
     const contentHash = await sha256Hex(frozenContentHtml);
     await ctx.db.patch(args.contractId, {
       status: "pending",
+      contentHtml,
       sentForSignatureAt: now,
       frozenContentHtml,
       contentHash,

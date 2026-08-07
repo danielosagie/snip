@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { seoHead } from "@/lib/seo";
-import { ContractDocEditorPage } from "./-contractDocEditor";
+import { DocumentEditorPage } from "./-contractDocEditor";
 
 // NOTE the `contract_` (un-nested) filename: the legacy single-contract
 // editor at /…/contract renders no <Outlet/>, so a route nested inside
@@ -20,5 +20,5 @@ export const Route = createFileRoute(
 });
 
 function ContractEditorRoute() {
-  return <ContractDocEditorPage mode="contract" />;
+  return <DocumentEditorPage mode="contract" />;
 }

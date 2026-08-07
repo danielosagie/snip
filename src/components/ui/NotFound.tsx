@@ -2,29 +2,30 @@ import { Link } from "@tanstack/react-router";
 
 export function NotFound() {
   return (
-    <div className="min-h-screen bg-[#f0f0e8] text-[#1a1a1a] flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
-      <div className="max-w-4xl w-full border-2 border-[#1a1a1a] bg-white relative z-10 p-8 md:p-16 flex flex-col items-start shadow-[12px_12px_0_0_#1a1a1a]">
-        <div className="font-mono text-sm md:text-base text-[#888888] mb-4 uppercase tracking-widest border-b-2 border-[#1a1a1a] pb-2 w-full">
-          Status Code // 404
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#FAFAFA] p-6 font-sans text-[#131315]">
+      <div className="relative z-10 flex w-full max-w-xl flex-col items-start rounded-[14px] border border-[#E8E8EC] bg-white p-8 md:p-10">
+        <div className="mb-4 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
+          Error 404
         </div>
-        
-        <h1 className="text-7xl md:text-[10rem] font-black leading-none tracking-tighter mb-6">
-          NOT FOUND.
+
+        <h1 className="mb-3 text-[32px] font-semibold leading-10 tracking-[-0.02em]">
+          Page not found
         </h1>
-        
-        <p className="text-xl md:text-2xl max-w-2xl mb-12 leading-relaxed">
-          The requested path doesn't exist. It might have been moved, deleted, or you typed the URL incorrectly.
+
+        <p className="mb-8 max-w-md text-sm leading-5 text-[#6E6E73]">
+          The requested path doesn't exist. It may have moved, been deleted,
+          or the URL is incorrect.
         </p>
 
         <Link
           to="/"
-          className="inline-flex items-center justify-center bg-[#1a1a1a] text-[#f0f0e8] font-bold text-lg px-10 py-5 uppercase tracking-wide hover:bg-[#FF6600] transition-colors"
+          className="inline-flex h-9 items-center justify-center rounded-full bg-[#131315] px-4 text-[13px] font-medium text-white transition-colors hover:bg-[#131315] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#131315] focus-visible:ring-offset-2 focus-visible:ring-offset-white"
         >
-          Return to Base
+          Go home
         </Link>
       </div>
 
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[35vw] font-black text-[#1a1a1a] opacity-[0.03] pointer-events-none select-none tracking-tighter z-0 overflow-hidden w-full text-center">
+      <div className="pointer-events-none absolute left-1/2 top-1/2 z-0 w-full -translate-x-1/2 -translate-y-1/2 select-none overflow-hidden text-center text-[35vw] font-semibold tracking-tighter text-[#F1F1F3]">
         404
       </div>
     </div>

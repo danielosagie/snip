@@ -60,24 +60,24 @@ export default function CompareFrameio() {
   return (
     <MarketingLayout>
       {/* Hero */}
-      <section className="px-6 pt-20 pb-24 md:pt-28 md:pb-32 border-b-2 border-[var(--border)] bg-[var(--background)]">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-[14vw] sm:text-[10vw] md:text-[8vw] font-black leading-[0.85] tracking-tighter uppercase">
+      <section className="border-b border-[#E8E8EC] bg-white px-6 pb-24 pt-20 md:pb-32 md:pt-28">
+        <div className="mx-auto max-w-5xl">
+          <h1 className="text-[42px] font-semibold leading-[1.05] tracking-[-0.055em] text-[#131315] sm:text-[54px] md:text-[64px]">
             snip vs
             <br />
             Frame.io
           </h1>
-          <div className="mt-10 md:mt-14 max-w-2xl">
-            <p className="text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight">
+          <div className="mt-10 max-w-2xl md:mt-14">
+            <p className="text-[24px] font-semibold leading-tight tracking-[-0.02em] text-[#131315] md:text-[32px]">
               We're not better.
               <br />
               We're cheaper and faster.
               <br />
-              <span className="text-[var(--foreground-muted)]">
+              <span className="text-[#6E6E73]">
                 That might be better.
               </span>
             </p>
-            <p className="mt-6 text-lg text-[var(--foreground-muted)] font-medium max-w-lg">
+            <p className="mt-6 max-w-lg text-[16px] leading-6 text-[#6E6E73]">
               Frame.io is a great product built for enterprise teams with
               enterprise budgets. snip is a scrappy little tool that does the
               important stuff for $25/month flat. No per-seat math. No PhD in
@@ -88,24 +88,24 @@ export default function CompareFrameio() {
       </section>
 
       {/* Side-by-side comparison table */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[var(--border)] bg-[var(--surface-alt)]">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-16 text-center">
-            FEATURE
+      <section className="border-b border-[#E8E8EC] bg-[#FAFAFA] px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="mb-12 text-center text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Feature
             <br />
-            FIGHT.
+            fight.
           </h2>
 
-          <div className="border-2 border-[var(--border)] shadow-[8px_8px_0px_0px_var(--shadow-color)] bg-[var(--background)]">
+          <div className="overflow-x-auto rounded-[14px] border border-[#E8E8EC] bg-white">
             {/* Header row */}
-            <div className="grid grid-cols-3 border-b-2 border-[var(--border)] bg-[var(--surface-strong)] text-[var(--foreground-inverse)]">
-              <div className="p-4 md:p-6 font-black uppercase tracking-wider text-sm">
+            <div className="grid min-w-[680px] grid-cols-3 border-b border-[#F1F1F3] bg-[#FAFAFA]">
+              <div className="p-4 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5] md:p-6">
                 Feature
               </div>
-              <div className="p-4 md:p-6 font-black uppercase tracking-wider text-sm border-l-2 border-[var(--border)]">
+              <div className="p-4 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5] md:p-6">
                 Frame.io
               </div>
-              <div className="p-4 md:p-6 font-black uppercase tracking-wider text-sm border-l-2 border-[var(--border)] text-[var(--accent-light)]">
+              <div className="p-4 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5] md:p-6">
                 snip
               </div>
             </div>
@@ -114,46 +114,46 @@ export default function CompareFrameio() {
             {comparisonRows.map((row, i) => (
               <div
                 key={row.feature}
-                className={`grid grid-cols-3 ${i < comparisonRows.length - 1 ? "border-b-2 border-[var(--border)]" : ""}`}
+                className={`grid min-w-[680px] grid-cols-3 ${i < comparisonRows.length - 1 ? "border-b border-[#F1F1F3]" : ""}`}
               >
-                <div className="p-4 md:p-6 flex flex-col justify-center">
-                  <span className="font-black uppercase tracking-tight text-lg">
+                <div className="flex flex-col justify-center p-4 md:p-6">
+                  <span className="text-[14px] font-semibold leading-5 text-[#131315]">
                     {row.feature}
                   </span>
-                  <span className="text-xs text-[var(--foreground-muted)] mt-1 hidden md:block">
+                  <span className="mt-1 hidden text-[12px] leading-[18px] text-[#6E6E73] md:block">
                     {row.note}
                   </span>
                 </div>
-                <div className="p-4 md:p-6 border-l-2 border-[var(--border)] flex items-center text-[var(--foreground-muted)] font-medium">
+                <div className="flex items-center gap-2 p-4 text-[14px] leading-5 text-[#6E6E73] before:text-[#A0A0A5] before:content-['×'] md:p-6">
                   {row.frameio}
                 </div>
-                <div className="p-4 md:p-6 border-l-2 border-[var(--border)] flex items-center font-bold text-[var(--accent)]">
+                <div className="flex items-center gap-2 p-4 text-[14px] font-medium leading-5 text-[#131315] before:text-[#FF6600] before:content-['✓'] md:p-6">
                   {row.snip}
                 </div>
               </div>
             ))}
           </div>
 
-          <p className="text-center text-sm text-[var(--foreground-muted)] mt-6 md:hidden">
+          <p className="mt-6 text-center text-[13px] leading-5 text-[#6E6E73] md:hidden">
             * Frame.io pricing based on their Team plan at $19/user/month.
           </p>
         </div>
       </section>
 
       {/* Cost savings calculator */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[var(--border)] bg-[var(--background)]">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-4 text-center">
-            DO THE
+      <section className="border-b border-[#E8E8EC] bg-white px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="mb-4 text-center text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Do the
             <br />
-            MATH.
+            math.
           </h2>
-          <p className="text-center text-lg text-[var(--foreground-muted)] font-medium mb-16 max-w-lg mx-auto">
+          <p className="mx-auto mb-16 max-w-lg text-center text-[15px] leading-6 text-[#6E6E73]">
             Frame.io charges $19 per user per month. snip starts at $25 per month.
             Not per user. Flat pricing. Here's what that means annually.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {teamSizes.map((size) => {
               const savings = annualSavings(size);
               const frameioAnnual = FRAMEIO_PRICE_PER_USER * size * 12;
@@ -162,39 +162,39 @@ export default function CompareFrameio() {
               return (
                 <div
                   key={size}
-                  className="border-2 border-[var(--border)] bg-[var(--background)] shadow-[6px_6px_0px_0px_var(--shadow-color)] hover:-translate-y-1 hover:translate-x-1 hover:shadow-[4px_4px_0px_0px_var(--shadow-color)] transition-all flex flex-col"
+                  className="flex flex-col overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white"
                 >
-                  <div className="border-b-2 border-[var(--border)] bg-[var(--surface-strong)] text-[var(--foreground-inverse)] p-5">
-                    <span className="text-4xl font-black">{size}</span>
-                    <span className="text-sm font-bold uppercase tracking-wider text-[var(--foreground-muted)] ml-2">
+                  <div className="border-b border-[#F1F1F3] bg-[#FAFAFA] p-5">
+                    <span className="text-4xl font-semibold tracking-tight text-[#131315]">{size}</span>
+                    <span className="ml-2 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                       {size === 1 ? "person" : "people"}
                     </span>
                   </div>
-                  <div className="p-5 flex flex-col flex-grow">
-                    <div className="flex justify-between items-baseline mb-1">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--foreground-muted)]">
+                  <div className="flex flex-grow flex-col p-5">
+                    <div className="mb-1 flex items-baseline justify-between gap-3">
+                      <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                         Frame.io
                       </span>
-                      <span className="font-black text-[var(--foreground-muted)] line-through">
+                      <span className="font-medium tabular-nums text-[#6E6E73] line-through">
                         ${frameioAnnual.toLocaleString()}/yr
                       </span>
                     </div>
-                    <div className="flex justify-between items-baseline mb-4">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--accent)]">
+                    <div className="mb-4 flex items-baseline justify-between gap-3">
+                      <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                         snip
                       </span>
-                      <span className="font-black text-[var(--accent)]">
+                      <span className="font-semibold tabular-nums text-[#D14E00]">
                         ${snipAnnual}/yr
                       </span>
                     </div>
-                    <div className="border-t-2 border-[var(--border-subtle)] pt-4 mt-auto">
-                      <div className="text-3xl font-black text-[var(--accent)]">
+                    <div className="mt-auto border-t border-[#F1F1F3] pt-4">
+                      <div className="text-3xl font-semibold tracking-tight tabular-nums text-[#D14E00]">
                         ${savings.toLocaleString()}
                       </div>
-                      <div className="text-xs font-bold uppercase tracking-wider text-[var(--foreground-muted)]">
+                      <div className="mt-1 font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
                         saved per year
                       </div>
-                      <p className="text-sm text-[var(--foreground-muted)] mt-2 italic">
+                      <p className="mt-2 text-[13px] leading-5 text-[#6E6E73]">
                         {savingsCommentary[size]}
                       </p>
                     </div>
@@ -207,31 +207,31 @@ export default function CompareFrameio() {
       </section>
 
       {/* Honest "who should use what" */}
-      <section className="px-6 py-24 md:py-32 border-b-2 border-[var(--border)] bg-[var(--surface-alt)]">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none mb-4 text-center">
-            HONEST
+      <section className="border-b border-[#E8E8EC] bg-[#FAFAFA] px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="mb-4 text-center text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Honest
             <br />
-            ADVICE.
+            advice.
           </h2>
-          <p className="text-center text-lg text-[var(--foreground-muted)] font-medium mb-16 max-w-lg mx-auto">
+          <p className="mx-auto mb-16 max-w-lg text-center text-[15px] leading-6 text-[#6E6E73]">
             We could trash-talk Frame.io but that would be dishonest and also
             they have way more employees than us. Here's the real deal.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             {/* Use Frame.io if... */}
-            <div className="border-2 border-[var(--border)] bg-[var(--background)] shadow-[8px_8px_0px_0px_var(--shadow-color)]">
-              <div className="border-b-2 border-[var(--border)] p-6">
-                <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter">
+            <div className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
+              <div className="border-b border-[#F1F1F3] p-6">
+                <h3 className="text-[20px] font-semibold leading-7 tracking-[-0.5px] text-[#131315]">
                   Use Frame.io if...
                 </h3>
               </div>
               <div className="p-6">
                 <ul className="space-y-5">
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       You need enterprise compliance docs (SOC 2, etc.) for your
@@ -239,8 +239,8 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       You're deeply embedded in Adobe Premiere and After Effects
@@ -248,8 +248,8 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       You have 100+ people with complex multi-stage approval
@@ -257,8 +257,8 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--foreground-muted)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#A0A0A5]">
+                      ×
                     </span>
                     <span className="font-medium">
                       Budget isn't a concern and you want every feature
@@ -266,7 +266,7 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                 </ul>
-                <p className="text-sm text-[var(--foreground-muted)] mt-6 pt-4 border-t-2 border-[var(--border-subtle)]">
+                <p className="mt-6 border-t border-[#F1F1F3] pt-4 text-[13px] leading-5 text-[#6E6E73]">
                   Genuinely, Frame.io is solid software. If this is you, go use
                   it. We won't be offended. (Okay maybe a little.)
                 </p>
@@ -274,17 +274,17 @@ export default function CompareFrameio() {
             </div>
 
             {/* Use snip if... */}
-            <div className="border-2 border-[var(--border)] bg-[var(--surface-strong)] text-[var(--foreground-inverse)] shadow-[8px_8px_0px_0px_var(--shadow-accent)]">
-              <div className="border-b-2 border-[var(--border)] p-6">
-                <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter text-[var(--accent-light)]">
+            <div className="overflow-hidden rounded-[14px] bg-[#0A0A0B] text-white">
+              <div className="border-b border-[#26262A] p-6">
+                <h3 className="text-[20px] font-semibold leading-7 tracking-[-0.5px] text-white">
                   Use snip if...
                 </h3>
               </div>
               <div className="p-6">
                 <ul className="space-y-5">
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You're a small-to-mid team that just needs to share cuts
@@ -292,8 +292,8 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You're an agency tired of doing per-seat multiplication
@@ -301,8 +301,8 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You're a freelancer who just needs to show a cut to a
@@ -310,8 +310,8 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-[var(--accent-light)] font-black text-lg shrink-0 mt-0.5">
-                      --
+                    <span className="mt-0.5 shrink-0 text-[#FF6600]">
+                      ✓
                     </span>
                     <span className="font-medium">
                       You value speed and simplicity over a feature checklist
@@ -319,7 +319,7 @@ export default function CompareFrameio() {
                     </span>
                   </li>
                 </ul>
-                <p className="text-sm text-[var(--foreground-muted)] mt-6 pt-4 border-t border-[#333]">
+                <p className="mt-6 border-t border-[#26262A] pt-4 text-[13px] leading-5 text-[#A0A0A5]">
                   We do less than Frame.io. Proudly. Turns out "upload, share,
                   comment" is 90% of what anyone actually needs.
                 </p>
@@ -330,24 +330,24 @@ export default function CompareFrameio() {
       </section>
 
       {/* CTA */}
-      <section className="px-6 py-32 bg-[var(--background)]">
-        <div className="max-w-4xl mx-auto text-center flex flex-col items-center">
-          <h2 className="text-7xl md:text-9xl font-black uppercase tracking-tighter leading-[0.8] mb-4">
-            START
+      <section className="bg-[#0A0A0B] px-6 py-32 text-white">
+        <div className="mx-auto flex max-w-4xl flex-col items-center text-center">
+          <h2 className="mb-4 text-[36px] font-medium leading-[1.25] tracking-[-1.8px] text-white sm:text-[60px]">
+            Start
             <br />
-            NOW.
+            now.
           </h2>
-          <p className="text-xl md:text-2xl text-[var(--foreground-muted)] font-medium mb-12 max-w-md">
+          <p className="mb-10 max-w-md text-[16px] leading-6 text-[#A0A0A5]">
             $25/month. Unlimited seats. No sales call required. No credit card to
             start.
           </p>
           <Link
             to="/sign-up"
-            className="bg-[var(--surface-strong)] text-[var(--foreground-inverse)] px-12 py-6 border-2 border-[var(--border)] text-2xl font-black uppercase tracking-wider hover:bg-[var(--accent)] hover:border-[var(--accent)] transition-colors shadow-[12px_12px_0px_0px_var(--shadow-accent)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[8px_8px_0px_0px_var(--shadow-accent)]"
+            className="rounded-full bg-white px-6 py-3 text-[14px] font-medium leading-5 text-[#131315] transition-opacity hover:opacity-90"
           >
-            TRY SNIP FREE
+            Try snip free
           </Link>
-          <p className="text-sm text-[var(--foreground-muted)] mt-6">
+          <p className="mt-6 text-[13px] leading-5 text-[#A0A0A5]">
             Or keep paying $19/user/month. We don't judge.
             <br />
             (We judge a little.)

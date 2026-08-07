@@ -24,7 +24,9 @@ export function useHeadings(editor: Editor | null): Heading[] {
   const [headings, setHeadings] = useState<Heading[]>([]);
   useEffect(() => {
     if (!editor) return;
+    let cancelled = false;
     const compute = () => {
+      if (cancelled || editor.isDestroyed) return;
       const hs: Heading[] = [];
       editor.state.doc.descendants((node, pos) => {
         if (node.type.name === "heading") {
@@ -35,13 +37,25 @@ export function useHeadings(editor: Editor | null): Heading[] {
           });
         }
       });
-      setHeadings(hs);
+      setHeadings((current) => {
+        if (
+          current.length === hs.length &&
+          current.every(
+            (heading, index) =>
+              heading.level === hs[index]?.level &&
+              heading.text === hs[index]?.text &&
+              heading.pos === hs[index]?.pos,
+          )
+        ) {
+          return current;
+        }
+        return hs;
+      });
     };
     compute();
-    editor.on("update", compute);
     editor.on("transaction", compute);
     return () => {
-      editor.off("update", compute);
+      cancelled = true;
       editor.off("transaction", compute);
     };
   }, [editor]);
@@ -64,7 +78,7 @@ export function DocumentOutline({
   const headings = useHeadings(editor);
 
   const goTo = (pos: number) => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed) return;
     editor.chain().focus().setTextSelection(pos + 1).scrollIntoView().run();
     // In the sheet, jumping to a heading dismisses the overlay so the
     // reader lands on the scrolled-to spot.
@@ -73,8 +87,8 @@ export function DocumentOutline({
 
   const list =
     headings.length === 0 ? (
-      <p className="px-1 py-2 text-xs text-[#888] leading-relaxed">
-        Headings you add (H1–H3) appear here.
+      <p className="px-2.5 py-3 text-sm leading-5 text-[#6E6E73]">
+        Add a heading to create a section.
       </p>
     ) : (
       <ul className="space-y-0.5">
@@ -84,10 +98,10 @@ export function DocumentOutline({
               type="button"
               onClick={() => goTo(h.pos)}
               className={cn(
-                "w-full truncate text-left px-2 py-1 text-sm hover:bg-[#FFEDD5] transition-colors",
-                h.level === 1 && "font-bold text-[#1a1a1a]",
-                h.level === 2 && "pl-4 text-[#1a1a1a]",
-                h.level === 3 && "pl-6 text-[#666] text-xs",
+                "w-full truncate rounded-[8px] px-2.5 py-2 text-left text-sm text-[#131315] transition-colors hover:bg-[#F1F1F3]",
+                h.level === 1 && "font-medium",
+                h.level === 2 && "pl-5",
+                h.level === 3 && "pl-8 text-[13px] text-[#6E6E73]",
               )}
               title={h.text}
             >
@@ -99,7 +113,7 @@ export function DocumentOutline({
     );
 
   if (inSheet) {
-    return <div className="flex-1 overflow-y-auto p-2">{list}</div>;
+    return <div className="flex-1 overflow-y-auto p-3">{list}</div>;
   }
 
   if (!open) {
@@ -109,7 +123,7 @@ export function DocumentOutline({
         onClick={() => onOpenChange(true)}
         title="Show sections"
         aria-label="Show sections"
-        className="hidden lg:inline-flex h-8 w-8 items-center justify-center border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#1a1a1a] hover:text-[#f0f0e8] transition-colors"
+        className="hidden h-8 w-8 items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#131315] transition-colors hover:bg-[#F7F7F8] lg:inline-flex"
       >
         <PanelLeft className="h-4 w-4" />
       </button>
@@ -117,9 +131,9 @@ export function DocumentOutline({
   }
 
   return (
-    <aside className="border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[4px_4px_0px_0px_#1a1a1a] flex flex-col self-start">
-      <div className="flex items-center justify-between border-b-2 border-[#1a1a1a] px-3 py-2">
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+    <aside className="flex flex-col self-start rounded-[14px] border border-[#E8E8EC] bg-white">
+      <div className="flex items-center justify-between border-b border-[#E8E8EC] px-3 py-2.5">
+        <span className="text-[13px] text-[#A0A0A5]">
           Sections
         </span>
         <button
@@ -127,12 +141,12 @@ export function DocumentOutline({
           onClick={() => onOpenChange(false)}
           title="Hide sections"
           aria-label="Hide sections"
-          className="text-[#888] hover:text-[#1a1a1a]"
+          className="rounded-[8px] p-1 text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315]"
         >
           <PanelLeftClose className="h-4 w-4" />
         </button>
       </div>
-      <div className="p-2 max-h-[60vh] overflow-y-auto">{list}</div>
+      <div className="max-h-[60vh] overflow-y-auto p-3">{list}</div>
     </aside>
   );
 }

@@ -62,7 +62,20 @@ you need.
 - `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_BASIC_MONTHLY` (the team subscription)
 - `STRIPE_PRICE_PRO_MONTHLY`
-- `VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS` (optional, default 0 — set to e.g. 100 for 1%)
+- `VIDEOINFRA_PLATFORM_FEE_BASIS_POINTS` (recommended 500 for a 5% delivery fee)
+- `VIDEOINFRA_PLATFORM_FEE_FIXED_CENTS` (recommended 30 to cover fixed card-processing cost)
+- `STRIPE_PRICE_ADDON_WHITE_LABEL_MONTHLY` / `_ANNUAL` ($20/mo)
+- `STRIPE_PRICE_ADDON_CUSTOM_DOMAIN_MONTHLY` / `_ANNUAL` ($10/mo)
+- `STRIPE_PRICE_ADDON_API_TIER_MONTHLY` / `_ANNUAL` ($30/mo)
+
+Add-on Price IDs must be recurring USD prices. Annual prices should equal ten
+months of the monthly amount. Enabling or disabling an add-on creates/deletes a
+Stripe Subscription Item with proration; missing or mismatched IDs fail safely
+without enabling the feature locally.
+
+Recently Deleted keeps files recoverable for 30 days. The daily Convex cron
+then permanently removes source objects, Mux/Stream assets, generated previews,
+and their database rows. Restores are blocked once that purge has begun.
 
 For Stripe Connect you also need to **enable Connect in the Stripe Dashboard**
 under Connect → Settings. Express accounts are created on-demand by

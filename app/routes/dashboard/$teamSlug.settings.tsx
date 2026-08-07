@@ -1,4 +1,5 @@
 import { Outlet, createFileRoute, Link, useLocation, useParams } from "@tanstack/react-router";
+import { softTabClass } from "@/components/soft";
 
 /**
  * Layout route for `/dashboard/$teamSlug/settings/*`. Renders a tab
@@ -29,8 +30,8 @@ function TeamSettingsLayout() {
 
   return (
     <div className="h-full flex flex-col">
-      <nav className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-6 pt-4">
-        <div className="max-w-3xl mx-auto flex gap-1">
+      <nav className="surface-soft border-b border-[#E8E8EC] bg-[#FAFAFA] px-4 pt-4 pb-3 sm:px-8 lg:px-14">
+        <div className="flex max-w-[1120px] flex-wrap gap-1.5">
           {TABS.map((tab) => {
             const target = `${basePath}${tab.suffix}`;
             // Active match: exact for the index, prefix for sub-routes.
@@ -38,15 +39,7 @@ function TeamSettingsLayout() {
               ? pathname === basePath || pathname === `${basePath}/`
               : pathname.startsWith(target);
             return (
-              <Link
-                key={tab.label}
-                to={target}
-                className={
-                  isActive
-                    ? "px-4 py-2 text-sm font-bold border-2 border-[#1a1a1a] border-b-0 bg-[#f0f0e8] text-[#1a1a1a] -mb-[2px] relative z-10"
-                    : "px-4 py-2 text-sm font-bold text-[#666] hover:text-[#1a1a1a] border-2 border-transparent"
-                }
-              >
+              <Link key={tab.label} to={target} className={softTabClass(isActive)}>
                 {tab.label}
               </Link>
             );

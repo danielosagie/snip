@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { seoHead } from "@/lib/seo";
-import { ContractDocEditorPage } from "./-contractDocEditor";
+import { DocumentEditorPage } from "./-contractDocEditor";
 
 // Plain documents share the contracts table (docType: "document") but
 // get their own /doc/ URL space — nothing about a document should be
@@ -21,5 +21,5 @@ export const Route = createFileRoute(
 });
 
 function DocumentEditorRoute() {
-  return <ContractDocEditorPage mode="document" />;
+  return <DocumentEditorPage mode="document" />;
 }

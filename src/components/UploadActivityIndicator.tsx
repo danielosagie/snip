@@ -1,82 +1,105 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
-import { Loader2 } from "lucide-react";
+import { HardDriveUpload, Loader2 } from "lucide-react";
 import { api } from "@convex/_generated/api";
+import { formatBytes } from "@/lib/utils";
+import { formatTransferTime } from "@/components/upload/UploadProgress";
 
-/**
- * Global, always-mounted upload indicator for the dashboard. Shows a brutalist
- * pill while the signed-in user has uploads in flight — most importantly DRIVE
- * drops, which otherwise produce no app-side feedback (the file lands in Finder
- * via the FUSE cache, but the upload to R2 is async through the WebDAV server).
- *
- * Two signals, merged by filename:
- *   • NATIVE (desktop only) — rclone's VFS upload queue, pushed over
- *     window.api.drive.onActivity. Fires the INSTANT a drop is queued, before
- *     the byte transfer (and thus the Convex row) exists. Gives sub-second feel.
- *   • CONVEX (everywhere) — videos.listMyActiveUploads, reactive. Confirms the
- *     upload and tracks it through Mux ingest until status flips to "ready".
- *
- * On the web (or desktop builds without the drive bridge) the native signal is
- * simply absent and the Convex query drives the pill on its own.
- */
 const STALE_MS = 24 * 60 * 60 * 1000;
+
+interface DriveTransfer {
+  name?: string;
+  size?: number | null;
+  bytes?: number;
+  percentage?: number;
+  speed?: number;
+  eta?: number | null;
+  status?: "queued" | "uploading";
+}
 
 type DriveBridge = {
   drive?: {
-    onActivity?: (
-      cb: (p: { uploading?: Array<{ name?: string }> }) => void,
-    ) => () => void;
+    onActivity?: (cb: (payload: { uploading?: DriveTransfer[] }) => void) => () => void;
   };
 };
 
 export function UploadActivityIndicator() {
   const active = useQuery(api.videos.listMyActiveUploads);
-  const [nativeNames, setNativeNames] = useState<string[]>([]);
+  const [nativeTransfers, setNativeTransfers] = useState<DriveTransfer[]>([]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const bridge = (window as unknown as { api?: DriveBridge }).api;
     if (!bridge?.drive?.onActivity) return;
-    return bridge.drive.onActivity((p) => {
-      const names = Array.isArray(p?.uploading)
-        ? p.uploading.map((u) => u?.name).filter((n): n is string => Boolean(n))
-        : [];
-      setNativeNames(names);
+    return bridge.drive.onActivity((payload) => {
+      setNativeTransfers(Array.isArray(payload?.uploading) ? payload.uploading : []);
     });
   }, []);
 
-  const now = Date.now();
-  const convexNames = (active ?? [])
-    .filter((u) => now - u.createdAt < STALE_MS)
-    .map((u) => u.title);
+  const convexNames = useMemo(() => {
+    const now = Date.now();
+    const nativeNames = new Set(nativeTransfers.map((item) => item.name).filter(Boolean));
+    return (active ?? [])
+      .filter((upload) => now - upload.createdAt < STALE_MS && !nativeNames.has(upload.title))
+      .map((upload) => upload.title);
+  }, [active, nativeTransfers]);
 
-  // Union by filename: native gives the instant signal, Convex confirms + holds
-  // it through processing, so each file shows exactly once across both sources.
-  const names = Array.from(new Set([...nativeNames, ...convexNames]));
-  if (names.length === 0) return null;
+  if (nativeTransfers.length === 0 && convexNames.length === 0) return null;
 
-  const count = names.length;
-  const shown = names.slice(0, 2);
-  const more = count - shown.length;
+  const speed = nativeTransfers.reduce((total, item) => total + (item.speed ?? 0), 0);
+  const eta = nativeTransfers.reduce<number | null>((longest, item) => {
+    if (item.eta == null) return longest;
+    return longest == null ? item.eta : Math.max(longest, item.eta);
+  }, null);
+  const total = nativeTransfers.length + convexNames.length;
 
   return (
-    <div
-      className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-2 fade-in duration-200"
-      role="status"
-      aria-live="polite"
+    <section
+      className="fixed right-4 top-10 z-40 w-[min(380px,calc(100vw-2rem))] overflow-hidden bg-[var(--surface)] shadow-[0_14px_42px_rgba(26,26,26,0.2),0_2px_8px_rgba(26,26,26,0.12)]"
+      aria-label="Cloud drive activity"
     >
-      <div className="flex items-center gap-2.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] px-3.5 py-2.5 text-[#f0f0e8] shadow-[4px_4px_0px_0px_#C2410C]">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#FDBA74]" />
-        <div className="min-w-0">
-          <p className="text-sm font-bold leading-tight">
-            Uploading {count} {count === 1 ? "file" : "files"}…
-          </p>
-          <p className="truncate font-mono text-[11px] leading-tight text-[#9a9a92]">
-            {shown.join(", ")}
-            {more > 0 ? ` +${more} more` : ""}
+      <header className="flex min-h-12 items-center gap-3 bg-[var(--surface-strong)] px-3 py-2 text-[var(--foreground-inverse)]">
+        <HardDriveUpload className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">Cloud drive · {total} active</p>
+          <p className="font-mono text-[10px] tabular-nums text-[var(--foreground-subtle)]">
+            {speed > 0 ? `${formatBytes(speed)}/s` : "Syncing with project folders"}
+            {eta ? ` · ${formatTransferTime(eta)} remaining` : ""}
           </p>
         </div>
-      </div>
-    </div>
+      </header>
+      <ul className="divide-y divide-[var(--border-subtle)]">
+        {nativeTransfers.slice(0, 4).map((transfer, index) => {
+          const percent = Math.round(transfer.percentage ?? 0);
+          return (
+            <li key={`${transfer.name ?? "transfer"}-${index}`} className="px-3 py-2.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="truncate text-xs font-semibold text-[var(--foreground)]">{transfer.name ?? "File"}</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--foreground-muted)]">
+                  {transfer.status === "queued" ? "Queued" : `${percent}%`}
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden bg-[var(--surface-alt)]">
+                <div
+                  className="h-full bg-[var(--accent)] transition-[width] duration-150 ease-out motion-reduce:transition-none"
+                  style={{ width: `${percent}%` }}
+                />
+              </div>
+              <p className="mt-1 font-mono text-[10px] tabular-nums text-[var(--foreground-muted)]">
+                {typeof transfer.bytes === "number" ? formatBytes(transfer.bytes) : "0 B"}
+                {typeof transfer.size === "number" ? ` of ${formatBytes(transfer.size)}` : ""}
+                {(transfer.speed ?? 0) > 0 ? ` · ${formatBytes(transfer.speed ?? 0)}/s` : ""}
+              </p>
+            </li>
+          );
+        })}
+        {convexNames.slice(0, Math.max(0, 4 - nativeTransfers.length)).map((name) => (
+          <li key={name} className="flex items-center gap-2 px-3 py-2.5 text-xs text-[var(--foreground-muted)]">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent)] motion-reduce:animate-none" />
+            <span className="truncate">Preparing {name}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

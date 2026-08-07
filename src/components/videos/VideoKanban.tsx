@@ -40,24 +40,24 @@ const COLUMNS: Array<{
 }> = [
   {
     status: "review",
-    label: "In Review",
-    description: "Sent to client. Waiting on feedback.",
-    accent: "#FF6600",
-    background: "#e8e8e0",
+    label: "In review",
+    description: "Needs feedback",
+    accent: "#D14E00",
+    background: "#FAFAFA",
   },
   {
     status: "rework",
-    label: "Needs Rework",
-    description: "Client requested changes.",
-    accent: "#b45309",
-    background: "#f5e9d8",
+    label: "Needs rework",
+    description: "Changes requested",
+    accent: "#74521D",
+    background: "#FAFAFA",
   },
   {
     status: "done",
     label: "Done",
-    description: "Approved. Ready for delivery.",
-    accent: "#1a1a1a",
-    background: "#dde6dd",
+    description: "Ready to deliver",
+    accent: "#225B36",
+    background: "#FAFAFA",
   },
 ];
 
@@ -123,29 +123,28 @@ export function VideoKanban({ teamSlug, projectId, videos, canEdit }: Props) {
               overColumn === col.status ? setOverColumn(null) : undefined
             }
             className={cn(
-              "border-2 border-[#1a1a1a] flex flex-col min-h-[300px] transition-colors",
-              isOver ? "bg-[#FFB380]/30" : "",
+              "flex min-h-[300px] flex-col overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-[#FAFAFA] transition-colors",
+              isOver ? "border-[#FF6600] bg-[#FFF0E6]" : "",
             )}
             style={{ background: isOver ? undefined : col.background }}
           >
             <header
-              className="px-3 py-2 border-b-2 border-[#1a1a1a] flex items-center justify-between"
-              style={{ background: col.accent, color: "#f0f0e8" }}
+              className="flex items-center justify-between border-b border-[#F1F1F3] bg-[#FAFAFA] px-3 py-2.5"
             >
               <div>
-                <div className="font-black text-sm tracking-tight">
+                <div className="text-sm font-semibold tracking-tight" style={{ color: col.accent }}>
                   {col.label}
                 </div>
-                <div className="text-[10px] font-mono opacity-80">
+                <div className="sr-only">
                   {col.description}
                 </div>
               </div>
-              <div className="font-mono text-lg font-black">{items.length}</div>
+              <div className="rounded-full bg-[#F1F1F3] px-2 py-0.5 text-xs font-medium text-[#6E6E73]">{items.length}</div>
             </header>
 
             <div className="flex-1 p-2 space-y-2 overflow-y-auto">
               {items.length === 0 ? (
-                <div className="text-xs text-[#888] px-1 py-3">
+                <div className="px-1 py-3 text-xs text-[#A0A0A5]">
                   {canEdit ? "Drop a video here." : "No videos."}
                 </div>
               ) : (
@@ -194,7 +193,7 @@ function KanbanCard({
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       className={cn(
-        "border-2 border-[#1a1a1a] bg-[#f0f0e8] transition-opacity",
+        "overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white transition-opacity",
         dragging ? "opacity-40" : "opacity-100",
         canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-default",
       )}
@@ -207,7 +206,7 @@ function KanbanCard({
           if (dragging) e.preventDefault();
         }}
       >
-        <div className="aspect-video bg-[#1a1a1a] relative overflow-hidden border-b-2 border-[#1a1a1a]">
+        <div className="relative aspect-video overflow-hidden border-b border-[#E8E8EC] bg-[#0A0A0B]">
           {video.thumbnailUrl?.startsWith("http") ? (
             <img
               src={video.thumbnailUrl}
@@ -216,29 +215,29 @@ function KanbanCard({
               draggable={false}
             />
           ) : (
-            <div className="h-full w-full bg-[#1a1a1a]" />
+            <div className="h-full w-full bg-[#0A0A0B]" />
           )}
           {video.duration ? (
-            <div className="absolute bottom-1 right-1 bg-[#1a1a1a]/85 text-[#f0f0e8] text-[10px] font-mono px-1.5 py-0.5">
+            <div className="absolute bottom-1 right-1 rounded-full bg-[#161618]/90 px-1.5 py-0.5 font-mono text-[10px] text-white">
               {formatDuration(video.duration)}
             </div>
           ) : null}
           {!isReady ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-[#f0f0e8] text-xs font-bold uppercase">
+            <div className="absolute inset-0 flex items-center justify-center bg-[#0A0A0B]/60 text-xs font-medium capitalize text-white">
               {video.status}
             </div>
           ) : null}
         </div>
         <div className="p-2.5">
-          <div className="font-bold text-sm text-[#1a1a1a] truncate">
+          <div className="truncate text-sm font-semibold text-[#131315]">
             {video.title}
           </div>
           {video.description ? (
-            <div className="text-xs text-[#888] truncate mt-0.5">
+            <div className="mt-0.5 truncate text-xs text-[#6E6E73]">
               {video.description}
             </div>
           ) : null}
-          <div className="flex items-center gap-3 mt-2 text-[10px] text-[#888]">
+          <div className="mt-2 flex items-center gap-3 text-[11px] text-[#A0A0A5]">
             <span className="flex items-center gap-1">
               <Eye className="h-3 w-3" />
               {video.uploaderName}

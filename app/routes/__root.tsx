@@ -17,7 +17,10 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      {
+        name: "viewport",
+        content: "width=device-width, initial-scale=1, viewport-fit=cover",
+      },
       { title: "snip — video review for creative teams" },
       {
         name: "description",
@@ -88,9 +91,10 @@ function RootDocument({ children }: { children: ReactNode }) {
   const themeInitScript = `
     (() => {
       try {
-        const storedStyle = localStorage.getItem("snip-style");
-        if (storedStyle === "classic" || storedStyle === "soft") {
-          document.documentElement.setAttribute("data-style", storedStyle);
+        // "classic" is retired; a stale stored value must not resurrect it.
+        document.documentElement.setAttribute("data-style", "soft");
+        if (localStorage.getItem("snip-style") === "classic") {
+          localStorage.removeItem("snip-style");
         }
         const stored = localStorage.getItem("snip-theme") || localStorage.getItem("lawn-theme");
         if (stored === "light" || stored === "dark") {
@@ -108,6 +112,11 @@ function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
+        {/* Canonical-host enforcement is a server-side redirect in
+            vercel.json (snipfilm.vercel.app -> www.snip.film). It must NOT
+            be a client script: the desktop shell's will-navigate guard
+            cancels JS navigation to a foreign origin, which blanked the
+            whole app window. HTTP redirects during load bypass that guard. */}
         <HeadContent />
       </head>
       <body className="h-full antialiased" suppressHydrationWarning>

@@ -72,16 +72,15 @@ export function CommentList({
 
   if (comments === undefined) {
     return (
-      <div className="p-4 text-center text-[#888]">Loading...</div>
+      <div className="p-4 text-center text-[#6E6E73]">Loading...</div>
     );
   }
 
   if (comments.length === 0) {
     return (
       <div className="h-full flex items-center justify-center p-6">
-        <p className="text-[#888] text-sm text-center">
-          No comments yet.<br />
-          Click on the timeline to add one.
+        <p className="text-center text-sm text-[#6E6E73]">
+          No comments yet.
         </p>
       </div>
     );
@@ -89,11 +88,11 @@ export function CommentList({
 
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col divide-y divide-[#1a1a1a]/10 dark:divide-white/10">
+      <div className="flex flex-col gap-2 p-3">
         {comments.map((comment) => (
           <div
             key={comment._id}
-            className="relative"
+            className="relative overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white"
             ref={(el) => {
               if (el) itemRefs.current.set(comment._id as string, el);
               else itemRefs.current.delete(comment._id as string);
@@ -106,8 +105,8 @@ export function CommentList({
               canResolve={canResolve}
             />
             {comment.replies.length > 0 && (
-              <div className="pl-14 pr-4 pb-4 space-y-4 relative">
-                <div className="absolute left-[1.35rem] top-0 bottom-6 w-px bg-[#1a1a1a]/10 dark:bg-white/10" />
+              <div className="relative space-y-4 border-t border-[#F1F1F3] bg-[#FAFAFA] pb-4 pl-14 pr-4">
+                <div className="absolute bottom-6 left-[1.35rem] top-0 w-px bg-[#E8E8EC]" />
                 {comment.replies.map((reply) => (
                   <CommentItem
                     key={reply._id}

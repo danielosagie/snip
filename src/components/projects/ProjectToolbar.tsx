@@ -29,6 +29,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { projectPath } from "@/lib/routes";
+import {
+  SNIP_VIDEOS_DRAG_TYPE,
+  SNIP_VIDEO_DRAG_TYPE,
+  readDraggedVideoIds,
+} from "@/lib/projectDrag";
 
 /**
  * Single-row toolbar that sits under the DashboardHeader on a project
@@ -41,12 +46,17 @@ export type ProjectViewMode = "grid" | "list" | "kanban";
 export type ProjectSortMode = "name" | "newest" | "oldest" | "type" | "size";
 
 const SORT_LABEL: Record<ProjectSortMode, string> = {
-  name: "Name (A→Z)",
+  name: "Name A to Z",
   newest: "Newest first",
   oldest: "Oldest first",
   type: "File type",
   size: "File size",
 };
+
+const SOFT_MENU_CONTENT =
+  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
+const SOFT_MENU_ITEM =
+  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
 
 interface Props {
   teamSlug: string;
@@ -71,6 +81,10 @@ interface Props {
     videoId: Id<"videos">,
     targetFolderId: Id<"folders"> | null,
   ) => void;
+  onDropVideosOnBreadcrumb?: (
+    videoIds: Id<"videos">[],
+    targetFolderId: Id<"folders"> | null,
+  ) => void;
   onDropFolderOnBreadcrumb?: (
     folderId: Id<"folders">,
     targetFolderId: Id<"folders"> | null,
@@ -91,6 +105,7 @@ export function ProjectToolbar({
   onKindFilterChange,
   availableKindBuckets,
   onDropVideoOnBreadcrumb,
+  onDropVideosOnBreadcrumb,
   onDropFolderOnBreadcrumb,
 }: Props) {
   const toggleKind = (bucket: FileKindBucket) => {
@@ -123,7 +138,7 @@ export function ProjectToolbar({
   const crumbs = breadcrumbs ?? [];
 
   return (
-    <div className="border-b-2 border-[#1a1a1a] bg-[#f0f0e8] flex items-center gap-2 px-4 sm:px-6 py-2 min-w-0">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-[#E8E8EC] bg-[#FFF] px-2 py-2.5 sm:flex-nowrap sm:px-6">
       {/* Breadcrumbs — only when inside a folder. Project root is
           implicit (it's where you land); the back-up drop target is
           the leftmost crumb. When at root there's no breadcrumb row
@@ -137,6 +152,7 @@ export function ProjectToolbar({
             active={false}
             onClick={() => goToFolder(null)}
             onDropVideo={(id) => onDropVideoOnBreadcrumb?.(id, null)}
+            onDropVideos={(ids) => onDropVideosOnBreadcrumb?.(ids, null)}
             onDropFolder={(id) => onDropFolderOnBreadcrumb?.(id, null)}
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -146,11 +162,14 @@ export function ProjectToolbar({
             const last = i === crumbs.length - 1;
             return (
               <span key={c._id} className="flex items-center gap-1 min-w-0">
-                <ChevronRight className="h-3.5 w-3.5 text-[#888] flex-shrink-0" />
+                <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-[#A0A0A5]" />
                 <BreadcrumbSegment
                   active={last}
                   onClick={() => goToFolder(c._id)}
                   onDropVideo={(id) => onDropVideoOnBreadcrumb?.(id, c._id)}
+                  onDropVideos={(ids) =>
+                    onDropVideosOnBreadcrumb?.(ids, c._id)
+                  }
                   onDropFolder={(id) => onDropFolderOnBreadcrumb?.(id, c._id)}
                 >
                   <span className="truncate max-w-[16ch]">{c.name}</span>
@@ -166,27 +185,27 @@ export function ProjectToolbar({
           on the wrapper does the spacing. */}
       <div
         className={cn(
-          "flex-1 flex flex-row items-center justify-between gap-6 min-w-0",
-          currentFolderId ? "ml-2" : "",
+          "basis-full flex-1 flex flex-row items-center justify-between gap-2 min-w-0 sm:basis-auto sm:gap-6",
+          currentFolderId ? "sm:ml-2" : "",
         )}
       >
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <label className="flex-1 max-w-md flex items-center gap-2 px-1 py-1">
-            <Search className="h-3.5 w-3.5 text-[#888]" />
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 sm:gap-2">
+          <label className="field-shell flex min-h-11 max-w-md flex-1 items-center gap-2 rounded-[10px] border border-[#E8E8EC] bg-white px-3 transition-[border-color,box-shadow] sm:min-h-9">
+            <Search className="h-4 w-4 text-[#A0A0A5]" />
             <input
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search this folder…"
-              className="flex-1 bg-transparent outline-none text-sm placeholder:text-[#888] min-w-0"
+              placeholder="Search this folder"
+              className="field-bare min-w-0 flex-1 text-[13px] text-[#131315] placeholder:text-[#A0A0A5]"
               aria-label="Search files and folders"
             />
             {search ? (
               <button
                 type="button"
                 onClick={() => onSearchChange("")}
-                className="text-[10px] font-mono text-[#888] hover:text-[#1a1a1a] uppercase"
+                className="rounded-full px-2 py-1 text-[11px] font-medium text-[#A0A0A5] hover:bg-[#F1F1F3] hover:text-[#6E6E73]"
               >
-                clear
+                Clear
               </button>
             ) : null}
           </label>
@@ -195,20 +214,26 @@ export function ProjectToolbar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] text-xs font-bold uppercase tracking-wider hover:bg-[#e8e8e0] transition-colors flex-shrink-0"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-full border border-[#D8D8DE] bg-white text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] sm:h-9 sm:w-auto sm:px-3"
               >
-                <ArrowUpDown className="h-3.5 w-3.5" />
-                <span className="font-mono normal-case hidden md:inline">
+                <ArrowUpDown className="h-4 w-4" />
+                <span className="hidden md:inline">
                   {SORT_LABEL[sort]}
                 </span>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[180px]">
+            <DropdownMenuContent
+              align="end"
+              className={cn(SOFT_MENU_CONTENT, "min-w-[180px]")}
+            >
               {(Object.keys(SORT_LABEL) as ProjectSortMode[]).map((key) => (
                 <DropdownMenuItem
                   key={key}
                   onClick={() => onSortChange(key)}
-                  className={cn("font-mono", sort === key ? "font-bold" : "")}
+                  className={cn(
+                    SOFT_MENU_ITEM,
+                    sort === key ? "bg-[#F1F1F3]" : "",
+                  )}
                 >
                   {sort === key ? (
                     <Check className="mr-2 h-4 w-4" />
@@ -230,20 +255,23 @@ export function ProjectToolbar({
                 <button
                   type="button"
                   className={cn(
-                    "inline-flex items-center gap-1.5 px-2 py-1 border-2 border-[#1a1a1a] text-xs font-bold uppercase tracking-wider transition-colors flex-shrink-0",
+                    "inline-flex h-11 w-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-full border border-[#D8D8DE] text-[13px] font-medium transition-colors sm:h-9 sm:w-auto sm:px-3",
                     activeKindCount > 0
-                      ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                      : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0]",
+                      ? "border-[#F0D2C3] bg-[#FFF0E6] text-[#D14E00]"
+                      : "bg-white text-[#131315] hover:bg-[#F1F1F3]",
                   )}
                   aria-label="Filter by kind"
                 >
-                  <ListFilter className="h-3.5 w-3.5" />
-                  <span className="font-mono normal-case hidden md:inline">
-                    {activeKindCount > 0 ? `Kind · ${activeKindCount}` : "Kind"}
+                  <ListFilter className="h-4 w-4" />
+                  <span className="hidden md:inline">
+                    {activeKindCount > 0 ? `Kind ${activeKindCount}` : "Kind"}
                   </span>
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[180px]">
+              <DropdownMenuContent
+                align="end"
+                className={cn(SOFT_MENU_CONTENT, "min-w-[180px]")}
+              >
                 {offeredBuckets.map((bucket) => {
                   const on = kindFilter.has(bucket);
                   return (
@@ -255,7 +283,10 @@ export function ProjectToolbar({
                         e.preventDefault();
                         toggleKind(bucket);
                       }}
-                      className={cn("font-mono", on ? "font-bold" : "")}
+                      className={cn(
+                        SOFT_MENU_ITEM,
+                        on ? "bg-[#F1F1F3]" : "",
+                      )}
                     >
                       {on ? (
                         <Check className="mr-2 h-4 w-4" />
@@ -269,7 +300,10 @@ export function ProjectToolbar({
                 {activeKindCount > 0 ? (
                   <DropdownMenuItem
                     onClick={() => onKindFilterChange(new Set())}
-                    className="font-mono text-[#888] border-t border-[#ccc] mt-1 pt-1"
+                    className={cn(
+                      SOFT_MENU_ITEM,
+                      "mt-1 border-t border-[#F1F1F3] text-[#6E6E73]",
+                    )}
                   >
                     <span className="mr-2 inline-block w-4" />
                     Clear filter
@@ -283,42 +317,42 @@ export function ProjectToolbar({
         {/* View-mode toggle — own group, pinned to the far right of
             the row. The `gap-6` on the parent guarantees breathing
             room between it and the search/sort cluster. */}
-        <div className="flex items-center border-2 border-[#1a1a1a] p-0.5 flex-shrink-0">
+        <div className="flex flex-shrink-0 items-center gap-0.5 rounded-[8px] bg-[#F1F1F3] p-0.5">
           <button
             onClick={() => onViewModeChange("grid")}
             aria-label="Grid view"
             className={cn(
-              "p-1 transition-colors",
+              "inline-flex h-10 w-10 items-center justify-center rounded-[7px] border border-transparent text-[#6E6E73] transition-colors sm:h-8 sm:w-8",
               viewMode === "grid"
-                ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                : "text-[#888] hover:text-[#1a1a1a]",
+                ? "border-[#E8E8EC] bg-white text-[#131315] shadow-sm"
+                : "hover:bg-white/60 hover:text-[#131315]",
             )}
           >
-            <Grid3X3 className="h-3.5 w-3.5" />
+            <Grid3X3 className="h-4 w-4" />
           </button>
           <button
             onClick={() => onViewModeChange("list")}
             aria-label="List view"
             className={cn(
-              "p-1 transition-colors",
+              "inline-flex h-10 w-10 items-center justify-center rounded-[7px] border border-transparent text-[#6E6E73] transition-colors sm:h-8 sm:w-8",
               viewMode === "list"
-                ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                : "text-[#888] hover:text-[#1a1a1a]",
+                ? "border-[#E8E8EC] bg-white text-[#131315] shadow-sm"
+                : "hover:bg-white/60 hover:text-[#131315]",
             )}
           >
-            <LayoutList className="h-3.5 w-3.5" />
+            <LayoutList className="h-4 w-4" />
           </button>
           <button
             onClick={() => onViewModeChange("kanban")}
             aria-label="Kanban view"
             className={cn(
-              "p-1 transition-colors",
+              "inline-flex h-10 w-10 items-center justify-center rounded-[7px] border border-transparent text-[#6E6E73] transition-colors sm:h-8 sm:w-8",
               viewMode === "kanban"
-                ? "bg-[#1a1a1a] text-[#f0f0e8]"
-                : "text-[#888] hover:text-[#1a1a1a]",
+                ? "border-[#E8E8EC] bg-white text-[#131315] shadow-sm"
+                : "hover:bg-white/60 hover:text-[#131315]",
             )}
           >
-            <Columns3 className="h-3.5 w-3.5" />
+            <Columns3 className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -336,12 +370,14 @@ function BreadcrumbSegment({
   active,
   onClick,
   onDropVideo,
+  onDropVideos,
   onDropFolder,
   children,
 }: {
   active: boolean;
   onClick: () => void;
   onDropVideo: (videoId: Id<"videos">) => void;
+  onDropVideos: (videoIds: Id<"videos">[]) => void;
   onDropFolder: (folderId: Id<"folders">) => void;
   children: React.ReactNode;
 }) {
@@ -352,6 +388,14 @@ function BreadcrumbSegment({
       onClick={onClick}
       onDragOver={(e) => {
         if (active) return;
+        const types = e.dataTransfer.types;
+        if (
+          !types.includes(SNIP_VIDEO_DRAG_TYPE) &&
+          !types.includes(SNIP_VIDEOS_DRAG_TYPE) &&
+          !types.includes("application/x-snip-folder")
+        ) {
+          return;
+        }
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         if (!over) setOver(true);
@@ -361,20 +405,24 @@ function BreadcrumbSegment({
         e.preventDefault();
         setOver(false);
         if (active) return;
-        const videoId = e.dataTransfer.getData("application/x-snip-video");
-        if (videoId) {
-          onDropVideo(videoId as Id<"videos">);
+        const videoIds = readDraggedVideoIds(e.dataTransfer);
+        if (videoIds.length > 1) {
+          onDropVideos(videoIds);
+          return;
+        }
+        if (videoIds.length === 1) {
+          onDropVideo(videoIds[0]);
           return;
         }
         const folderId = e.dataTransfer.getData("application/x-snip-folder");
         if (folderId) onDropFolder(folderId as Id<"folders">);
       }}
       className={cn(
-        "inline-flex items-center gap-1 px-1.5 py-0.5 text-sm font-bold transition-colors min-w-0",
+        "inline-flex min-w-0 items-center gap-1 rounded-[8px] px-2 py-1 text-[13px] font-medium transition-colors",
         active
-          ? "text-[#1a1a1a]"
-          : "text-[#888] hover:text-[#1a1a1a]",
-        over ? "bg-[#FF6600] text-[#f0f0e8]" : "",
+          ? "text-[#131315]"
+          : "text-[#6E6E73] hover:bg-[#F1F1F3] hover:text-[#131315]",
+        over ? "bg-[#FFF0E6] text-[#D14E00]" : "",
       )}
     >
       {children}

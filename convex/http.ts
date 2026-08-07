@@ -21,11 +21,271 @@ import {
   normalizeTimelinePresencePayload,
 } from "../src/components/presence/model";
 import { isFeatureEnabled } from "./featureFlags";
+import { resolvePlanFromStripePriceId } from "./billingHelpers";
+import { extractConnectRequirements } from "./stripeConnect";
 
 const http = httpRouter();
 
+const recordMilestonePaymentSucceeded = makeFunctionReference<
+  "mutation",
+  {
+    stripeCheckoutSessionId: string;
+    stripePaymentIntentId?: string;
+  },
+  null
+>("invoices:recordMilestonePaymentSucceeded");
+
+const recordMilestonePaymentRefunded = makeFunctionReference<
+  "mutation",
+  { stripePaymentIntentId: string },
+  null
+>("invoices:recordMilestonePaymentRefunded");
+
+type ShareUnfurlImageItem = {
+  title: string;
+  kind: "video" | "image" | "document";
+  imageUrl: string | null;
+};
+
+type PreparedShareUnfurlImage =
+  | { status: "notFound" }
+  | {
+      status: "ok";
+      fingerprint: string;
+      kind: "single" | "bundle";
+      title: string;
+      items: ShareUnfurlImageItem[];
+    };
+
+function escapeSvgText(input: string): string {
+  return input
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+async function fetchImageDataUri(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const contentType = response.headers.get("content-type")?.split(";")[0];
+    if (!contentType?.startsWith("image/")) return null;
+    const declaredLength = Number(response.headers.get("content-length") ?? 0);
+    if (declaredLength > 15 * 1024 * 1024) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > 15 * 1024 * 1024) return null;
+    return `data:${contentType};base64,${bytesToBase64(bytes)}`;
+  } catch {
+    return null;
+  }
+}
+
+function renderUnfurlCard(params: {
+  item: ShareUnfurlImageItem;
+  imageDataUri: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  index: number;
+}): string {
+  const { item, imageDataUri, x, y, width, height, index } = params;
+  const captionHeight = 48;
+  const mediaHeight = height - captionHeight;
+  const title = escapeSvgText(
+    item.title.length > 34 ? `${item.title.slice(0, 33)}…` : item.title,
+  );
+  return `
+    <g>
+      <rect x="${x}" y="${y}" width="${width}" height="${height}" rx="14" fill="#FFFFFF" stroke="#E8E8EC"/>
+      <clipPath id="media-${index}">
+        <path d="M ${x + 14} ${y} H ${x + width - 14} Q ${x + width} ${y} ${x + width} ${y + 14} V ${y + mediaHeight} H ${x} V ${y + 14} Q ${x} ${y} ${x + 14} ${y} Z"/>
+      </clipPath>
+      ${
+        imageDataUri
+          ? `<image href="${imageDataUri}" x="${x}" y="${y}" width="${width}" height="${mediaHeight}" preserveAspectRatio="xMidYMid slice" clip-path="url(#media-${index})"/>`
+          : `<rect x="${x}" y="${y}" width="${width}" height="${mediaHeight}" fill="#F1F1F3" clip-path="url(#media-${index})"/>
+             <text x="${x + width / 2}" y="${y + mediaHeight / 2 + 7}" text-anchor="middle" font-family="Geist Mono, ui-monospace, monospace" font-size="18" letter-spacing="2" fill="#A0A0A5">${item.kind.toUpperCase()}</text>`
+      }
+      <line x1="${x}" y1="${y + mediaHeight}" x2="${x + width}" y2="${y + mediaHeight}" stroke="#F1F1F3"/>
+      <text x="${x + 16}" y="${y + mediaHeight + 30}" font-family="Inter Tight, Arial, sans-serif" font-size="18" font-weight="600" fill="#131315">${title}</text>
+    </g>`;
+}
+
+function renderShareUnfurlSvg(params: {
+  kind: "single" | "bundle";
+  title: string;
+  items: ShareUnfurlImageItem[];
+  inlineImages: Array<string | null>;
+}): string {
+  const { kind, title, items, inlineImages } = params;
+  const singleItem = items[0];
+  if (kind === "single" && singleItem?.kind === "image") {
+    const image = inlineImages[0];
+    if (!image) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+        <rect width="1200" height="630" fill="#FAFAFA"/>
+        <rect x="48" y="48" width="1104" height="534" rx="14" fill="#FFFFFF" stroke="#E8E8EC"/>
+        <text x="600" y="320" text-anchor="middle" font-family="Geist Mono, ui-monospace, monospace" font-size="18" letter-spacing="2" fill="#A0A0A5">IMAGE</text>
+      </svg>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+      <rect width="1200" height="630" fill="#FAFAFA"/>
+      <image href="${image}" x="0" y="0" width="1200" height="630" preserveAspectRatio="xMidYMid slice"/>
+    </svg>`;
+  }
+
+  const columns = items.length > 4 ? 3 : 2;
+  const rows = Math.max(1, Math.ceil(items.length / columns));
+  const gap = 18;
+  const left = 48;
+  const top = 116;
+  const availableWidth = 1200 - left * 2;
+  const availableHeight = 630 - top - 42;
+  const cardWidth = (availableWidth - gap * (columns - 1)) / columns;
+  const cardHeight = (availableHeight - gap * (rows - 1)) / rows;
+  const cards = items
+    .map((item, index) =>
+      renderUnfurlCard({
+        item,
+        imageDataUri: inlineImages[index] ?? null,
+        x: left + (index % columns) * (cardWidth + gap),
+        y: top + Math.floor(index / columns) * (cardHeight + gap),
+        width: cardWidth,
+        height: cardHeight,
+        index,
+      }),
+    )
+    .join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+    <rect width="1200" height="630" fill="#FAFAFA"/>
+    <rect x="48" y="40" width="36" height="36" rx="10" fill="#FF6600"/>
+    <text x="66" y="65" text-anchor="middle" font-family="Inter Tight, Arial, sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">S</text>
+    <text x="100" y="65" font-family="Inter Tight, Arial, sans-serif" font-size="24" font-weight="650" fill="#131315">${escapeSvgText(title.slice(0, 62))}</text>
+    <text x="1152" y="64" text-anchor="end" font-family="Geist Mono, ui-monospace, monospace" font-size="15" letter-spacing="1.8" fill="#A0A0A5">SNIP.FILM</text>
+    ${cards}
+  </svg>`;
+}
+
+/**
+ * Versioned OG image endpoint. Source URLs come from the Node action only
+ * after its privacy gate. The HTTP action fetches and inlines the image bytes
+ * so crawler rendering never depends on remote SVG subresource requests.
+ */
+http.route({
+  pathPrefix: "/share-unfurl/",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 3 || parts[0] !== "share-unfurl") {
+      return new Response("Not found", { status: 404 });
+    }
+    const token = decodeURIComponent(parts[1]);
+    const requestedFingerprint = parts[2].replace(/\.svg$/, "");
+    const prepared = (await ctx.runAction(
+      internal.videoActions.prepareShareUnfurlImage,
+      { token, requestedFingerprint },
+    )) as PreparedShareUnfurlImage;
+    if (prepared.status === "notFound") {
+      return new Response("Not found", { status: 404 });
+    }
+    if (
+      request.headers.get("if-none-match") === `"${prepared.fingerprint}"`
+    ) {
+      return new Response(null, {
+        status: 304,
+        headers: { ETag: `"${prepared.fingerprint}"` },
+      });
+    }
+
+    const inlineImages = await Promise.all(
+      prepared.items.map((item) =>
+        item.imageUrl
+          ? fetchImageDataUri(item.imageUrl)
+          : Promise.resolve(null),
+      ),
+    );
+    const svg = renderShareUnfurlSvg({
+      kind: prepared.kind,
+      title: prepared.title,
+      items: prepared.items,
+      inlineImages,
+    });
+    return new Response(svg, {
+      status: 200,
+      headers: {
+        "content-type": "image/svg+xml; charset=utf-8",
+        "cache-control": "public, max-age=31536000, immutable",
+        ETag: `"${prepared.fingerprint}"`,
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }),
+});
+
 function getSubscriptionPriceId(subscription: Stripe.Subscription): string | undefined {
-  return subscription.items.data[0]?.price?.id;
+  return subscription.items.data.find((item) =>
+    Boolean(resolvePlanFromStripePriceId(item.price?.id)),
+  )?.price?.id;
+}
+
+type AddOnKey = "whiteLabel" | "customDomain" | "apiTier";
+
+const ADD_ON_PRICE_ENV: Record<AddOnKey, readonly string[]> = {
+  whiteLabel: [
+    "STRIPE_PRICE_ADDON_WHITE_LABEL_MONTHLY",
+    "STRIPE_PRICE_ADDON_WHITE_LABEL_ANNUAL",
+  ],
+  customDomain: [
+    "STRIPE_PRICE_ADDON_CUSTOM_DOMAIN_MONTHLY",
+    "STRIPE_PRICE_ADDON_CUSTOM_DOMAIN_ANNUAL",
+  ],
+  apiTier: [
+    "STRIPE_PRICE_ADDON_API_TIER_MONTHLY",
+    "STRIPE_PRICE_ADDON_API_TIER_ANNUAL",
+  ],
+};
+
+function getSubscriptionAddOnItems(subscription: Stripe.Subscription) {
+  const result: {
+    whiteLabel?: string;
+    customDomain?: string;
+    customDomainHostname?: string;
+    apiTier?: string;
+  } = {};
+  let configuredOrFound = false;
+  for (const addOn of Object.keys(ADD_ON_PRICE_ENV) as AddOnKey[]) {
+    const configuredPrices = ADD_ON_PRICE_ENV[addOn]
+      .map((name) => process.env[name]?.trim())
+      .filter((id): id is string => Boolean(id));
+    if (configuredPrices.length) configuredOrFound = true;
+    const item = subscription.items.data.find(
+      (candidate) =>
+        candidate.metadata?.snip_add_on === addOn ||
+        configuredPrices.includes(candidate.price.id),
+    );
+    if (!item) continue;
+    configuredOrFound = true;
+    result[addOn] = item.id;
+    if (addOn === "customDomain") {
+      const hostname = item.metadata?.custom_domain_hostname;
+      if (hostname) result.customDomainHostname = hostname;
+    }
+  }
+  return configuredOrFound ? result : undefined;
 }
 
 function getSubscriptionOrgId(subscription: Stripe.Subscription): string | undefined {
@@ -47,6 +307,16 @@ function getSubscriptionPlanMetadata(
 ): string | undefined {
   const plan = subscription.metadata.plan;
   return typeof plan === "string" && plan.length > 0 ? plan : undefined;
+}
+
+function getSubscriptionCadence(
+  subscription: Stripe.Subscription,
+): "monthly" | "annual" | undefined {
+  return subscription.metadata.cadence === "annual"
+    ? "annual"
+    : subscription.metadata.cadence === "monthly"
+      ? "monthly"
+      : undefined;
 }
 
 function getSubscriptionPeriodEnd(
@@ -96,6 +366,9 @@ async function syncBothBillingSurfaces(
         plan: getSubscriptionPlanMetadata(subscription),
         status: subscription.status,
         currentPeriodEnd: getSubscriptionPeriodEnd(subscription),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+        billingCadence: getSubscriptionCadence(subscription),
+        addOnItems: getSubscriptionAddOnItems(subscription),
       },
     ),
   ]);
@@ -149,9 +422,11 @@ registerRoutes(http, components.stripe, {
         status: deriveConnectStatusFromAccount(account),
         chargesEnabled: account.charges_enabled ?? false,
         payoutsEnabled: account.payouts_enabled ?? false,
+        requirements: extractConnectRequirements(account),
       });
     },
-    // Client paid for a paywalled share link.
+    // Client payment fulfillment. New kinds route explicitly; sessions that
+    // predate metadata.kind continue through the legacy payment path.
     "checkout.session.completed": async (
       ctx,
       event: Stripe.Event & { type: "checkout.session.completed" },
@@ -159,10 +434,26 @@ registerRoutes(http, components.stripe, {
       const session = event.data.object as Stripe.Checkout.Session;
       // Subscriptions are handled separately by customer.subscription.created above.
       if (session.mode !== "payment") return;
+      if (session.payment_status !== "paid") return;
       const paymentIntentId =
         typeof session.payment_intent === "string"
           ? session.payment_intent
           : session.payment_intent?.id;
+      switch (session.metadata?.kind) {
+        case "invoice_milestone":
+          await ctx.runMutation(recordMilestonePaymentSucceeded, {
+            stripeCheckoutSessionId: session.id,
+            stripePaymentIntentId: paymentIntentId,
+          });
+          break;
+        case "share_item":
+        case "share_all":
+        case "video":
+        default:
+          // Fulfillment is driven by the server-recorded payment kind. The
+          // default keeps metadata-less legacy Checkout Sessions working.
+          break;
+      }
       await ctx.runMutation(internal.payments.recordPaymentSucceeded, {
         stripeCheckoutSessionId: session.id,
         stripePaymentIntentId: paymentIntentId,
@@ -179,6 +470,10 @@ registerRoutes(http, components.stripe, {
           ? charge.payment_intent
           : charge.payment_intent?.id;
       if (!paymentIntentId) return;
+      await ctx.runMutation(
+        recordMilestonePaymentRefunded,
+        { stripePaymentIntentId: paymentIntentId },
+      );
       await ctx.runMutation(internal.payments.recordPaymentRefunded, {
         stripePaymentIntentId: paymentIntentId,
       });

@@ -36,7 +36,7 @@ const { Readable } = require("stream");
 const DAV_HEADERS = {
   DAV: "1",
   "MS-Author-Via": "DAV",
-  Allow: "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL, DELETE, MOVE",
+  Allow: "OPTIONS, GET, HEAD, PROPFIND, PUT, MKCOL, DELETE, MOVE, COPY, PROPPATCH",
 };
 
 function xmlEscape(s) {
@@ -68,7 +68,7 @@ function rfc1123(ts) {
   return new Date(ts).toUTCString();
 }
 
-function buildPropfindResponse({ href, isCollection, size, contentType, mtime }) {
+function buildPropfindResponse({ href, isCollection, size, contentType, mtime, etag }) {
   const lastMod = rfc1123(mtime ?? Date.now());
   const resourceType = isCollection
     ? "<D:resourcetype><D:collection/></D:resourcetype>"
@@ -81,6 +81,7 @@ function buildPropfindResponse({ href, isCollection, size, contentType, mtime })
     !isCollection && contentType
       ? `<D:getcontenttype>${xmlEscape(contentType)}</D:getcontenttype>`
       : "";
+  const etagProp = !isCollection && etag ? `<D:getetag>${xmlEscape(etag)}</D:getetag>` : "";
   return [
     "<D:response>",
     `<D:href>${xmlEscape(href)}</D:href>`,
@@ -90,6 +91,7 @@ function buildPropfindResponse({ href, isCollection, size, contentType, mtime })
     `<D:getlastmodified>${lastMod}</D:getlastmodified>`,
     sizeProp,
     typeProp,
+    etagProp,
     "</D:prop>",
     "<D:status>HTTP/1.1 200 OK</D:status>",
     "</D:propstat>",
@@ -160,11 +162,12 @@ function contentTypeFromExt(ext) {
 }
 
 function isHidden(name) {
-  // Finder + macOS spam .DS_Store, ._ AppleDouble files, and the volume's
-  // .VolumeIcon.icns. Quietly 404 these so we don't waste a Convex round-trip
-  // checking projects/videos with junk names.
+  // Reject only Finder metadata noise. Legitimate dotfiles (.env, .gitignore,
+  // editor lock files) are real cloud-drive content and must remain writable.
   return (
-    name.startsWith(".") ||
+    name === ".DS_Store" ||
+    name.startsWith("._") ||
+    name === ".VolumeIcon.icns" ||
     name === "Icon\r" ||
     name === "Icon\r\r"
   );
@@ -250,6 +253,14 @@ async function handle(req, res, { convexCall, pushLog, preferProxy, uploadObject
   }
   if (method === "MOVE") {
     return handleMove(req, res, segments, { convexCall, pushLog });
+  }
+  if (method === "COPY") {
+    return handleCopy(req, res, segments, { convexCall, pushLog });
+  }
+  if (method === "PROPPATCH") {
+    // Finder uses this for optional metadata such as custom mtimes. Snip owns
+    // canonical modified/version fields, so acknowledge without mutating them.
+    return sendMultistatus(res, []);
   }
 
   res.writeHead(405, { ...DAV_HEADERS, "content-type": "text/plain" });
@@ -353,6 +364,7 @@ async function handlePropfind(req, res, segments, depth, { convexCall, pushLog, 
         size: node.size,
         contentType: node.contentType || contentTypeFromExt(ext),
         mtime: node.updatedAt,
+        etag: node.etag,
       },
     ]);
   }
@@ -379,6 +391,7 @@ async function handlePropfind(req, res, segments, depth, { convexCall, pushLog, 
       size: vd.size,
       contentType: vd.contentType || contentTypeFromExt(vd.ext),
       mtime: vd.updatedAt,
+      etag: vd.etag,
     });
   }
   return sendMultistatus(res, entries);
@@ -424,8 +437,9 @@ async function handlePut(req, res, segments, { convexCall, pushLog, uploadObject
   const [teamSlug, projectName, ...rest] = segments;
   const fileName = rest.pop();
   const folderPath = rest;
-  const declaredSize = Number(req.headers["content-length"] || "0");
-  if (!Number.isFinite(declaredSize) || declaredSize <= 0) {
+  const contentLengthHeader = req.headers["content-length"];
+  const declaredSize = Number(contentLengthHeader);
+  if (contentLengthHeader === undefined || !Number.isFinite(declaredSize) || declaredSize < 0) {
     return forbidden(res, "Content-Length is required for uploads.");
   }
   const contentType =
@@ -466,42 +480,65 @@ async function handlePut(req, res, segments, { convexCall, pushLog, uploadObject
     if (uploadObject && declaredSize > SINGLE_PUT_MAX) {
       await uploadObject({ key: upload.s3Key, body: req, contentType });
     } else {
-      const putRes = await fetch(upload.uploadUrl, {
+      const putInit = {
         method: "PUT",
-        body: Readable.toWeb(req),
-        duplex: "half",
         headers: {
           "content-type": contentType,
           "content-length": String(declaredSize),
         },
-      });
+      };
+      if (declaredSize > 0) {
+        putInit.body = Readable.toWeb(req);
+        putInit.duplex = "half";
+      }
+      const putRes = await fetch(upload.uploadUrl, putInit);
       if (!putRes.ok) {
         const body = await putRes.text().catch(() => "");
         throw new Error(`S3 rejected upload (${putRes.status}): ${body.slice(0, 200)}`);
       }
     }
   } catch (err) {
+    await convexCall("action", "desktopUploadActions:abortUploadForDesktop", {
+      teamSlug,
+      projectName,
+      folderPath,
+      s3Key: upload.s3Key,
+    }).catch(() => {});
     pushLog?.(`webdav: upload of ${fileName} failed: ${err.message}`);
     return forbidden(res, `Upload failed: ${err.message}`);
   }
 
-  // Kick off finalize (Mux ingest for video/*, status flip for everything
-  // else). We don't await heavy work — markUploadComplete returns quickly
-  // because Mux ingest is a follow-up webhook.
+  // Publish only after the candidate bytes exist. The backend atomically swaps
+  // an overwrite and schedules processing retries without exposing half a file.
   try {
-    await convexCall("action", "desktopBrowse:completeUploadForDesktop", {
+    const committed = await convexCall("action", "desktopUploadActions:commitUploadForDesktop", {
+      mode: upload.mode,
+      teamSlug,
+      projectName,
+      folderPath,
+      fileName,
+      size: declaredSize,
+      contentType,
+      s3Key: upload.s3Key,
       videoId: upload.videoId,
+      previousS3Key: upload.previousS3Key,
     });
+    if (committed.processingPending) {
+      pushLog?.(`webdav: ${fileName} stored; media processing retry scheduled`);
+    }
   } catch (err) {
-    pushLog?.(
-      `webdav: completeUploadForDesktop(${upload.videoId}) failed: ${err.message}`,
-    );
-    // The bytes are in S3; the row is in Convex. The next dashboard refresh
-    // will reconcile. We still return 201 because the WebDAV PUT itself
-    // succeeded and rclone retrying would re-upload the same bytes.
+    await convexCall("action", "desktopUploadActions:abortUploadForDesktop", {
+      teamSlug,
+      projectName,
+      folderPath,
+      s3Key: upload.s3Key,
+    }).catch(() => {});
+    pushLog?.(`webdav: commit of ${fileName} failed: ${err.message}`);
+    res.writeHead(409, { "content-type": "text/plain" });
+    return res.end(`Commit failed: ${err.message}`);
   }
-  res.writeHead(201, { "content-type": "text/plain" });
-  res.end("created");
+  res.writeHead(upload.mode === "overwrite" ? 204 : 201, { "content-type": "text/plain" });
+  res.end(upload.mode === "overwrite" ? undefined : "created");
 }
 
 async function handleMkcol(req, res, segments, { convexCall, pushLog }) {
@@ -528,120 +565,103 @@ async function handleMkcol(req, res, segments, { convexCall, pushLog }) {
   return res.end("created");
 }
 
+function destinationSegments(req) {
+  const raw = req.headers.destination;
+  if (!raw || Array.isArray(raw)) throw new Error("Destination header is required.");
+  const url = new URL(raw, `http://${req.headers.host || "127.0.0.1"}`);
+  return parsePath(url.pathname).segments;
+}
+
+function operationError(res, error, fallbackStatus = 409) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  const status =
+    lower.includes("not found") || lower.includes("doesn't exist")
+      ? 404
+      : lower.includes("not writable") || lower.includes("requires") || lower.includes("viewer")
+        ? 403
+        : lower.includes("already exists") || lower.includes("overwrite")
+          ? 412
+          : fallbackStatus;
+  res.writeHead(status, { ...DAV_HEADERS, "content-type": "text/plain" });
+  return res.end(message);
+}
+
 async function handleDelete(req, res, segments, { convexCall, pushLog }) {
-  // Finder issues DELETE when a file or folder is dragged to the Trash. The
-  // target must sit inside a project: /team/project/<folder…|file>. Anything
-  // shallower (a team or project, or the root) is not a drive-deletable node.
-  if (segments.length < 3) {
-    res.writeHead(403, { "content-type": "text/plain" });
-    return res.end("Only files and folders inside a project can be deleted.");
-  }
-  const [teamSlug, projectName, ...folderPath] = segments;
-  let result;
+  if (segments.length < 3) return forbidden(res, "Only project contents can be deleted.");
+  const [teamSlug, projectName, ...itemPath] = segments;
   try {
-    // removePathForDesktop resolves the trailing segments to a file (soft-
-    // delete) or a folder (empty-only delete) the same way PROPFIND does, then
-    // mutates Convex. It carries the paired user's identity, so the user's
-    // real permissions still gate the delete (viewers are refused).
-    result = await convexCall("mutation", "desktopBrowse:removePathForDesktop", {
+    await convexCall("mutation", "desktopBrowse:deletePathForDesktop", {
       teamSlug,
       projectName,
-      folderPath,
+      itemPath,
     });
-  } catch (err) {
-    pushLog?.(
-      `webdav: DELETE ${segments.join("/")} failed: ${err.message}`,
-    );
-    res.writeHead(500, { "content-type": "text/plain" });
-    return res.end(err.message);
-  }
-  const status = result?.status;
-  if (status === "deleted") {
-    res.writeHead(204);
+    res.writeHead(204, DAV_HEADERS);
     return res.end();
+  } catch (error) {
+    pushLog?.(`webdav: DELETE ${segments.join("/")} failed: ${error.message}`);
+    return operationError(res, error);
   }
-  if (status === "not_found") return notFound(res);
-  if (status === "not_empty") {
-    // 409 Conflict is the WebDAV-correct answer for "collection not empty".
-    res.writeHead(409, { "content-type": "text/plain" });
-    return res.end("Folder isn't empty. Move or delete its contents first.");
-  }
-  // forbidden (viewer role, or the project root) → 403.
-  return forbidden(res, "You don't have permission to delete this.");
 }
 
 async function handleMove(req, res, segments, { convexCall, pushLog }) {
-  // Finder issues MOVE on a rename (same parent, new leaf name) or a drag
-  // between folders (new parent). Both source and destination must sit inside
-  // a project, and the Destination header is a URL we resolve the same way as
-  // the request path.
-  if (segments.length < 3) {
-    res.writeHead(403, { "content-type": "text/plain" });
-    return res.end("Only files and folders inside a project can be moved.");
-  }
-  const destHeader = req.headers["destination"];
-  if (!destHeader) {
-    res.writeHead(400, { "content-type": "text/plain" });
-    return res.end("MOVE requires a Destination header.");
-  }
-  // The Destination header is an absolute or absolute-path URL; pull its path
-  // and run it through the SAME parsePath the request URL uses so the segments
-  // line up (mountpoint prefix stripped, each segment decoded).
-  let destPathname;
+  if (segments.length < 3) return forbidden(res, "Only project contents can be moved.");
+  let destination;
   try {
-    destPathname = destHeader.toString().startsWith("/")
-      ? destHeader.toString()
-      : new URL(destHeader.toString()).pathname;
-  } catch {
-    res.writeHead(400, { "content-type": "text/plain" });
-    return res.end("Malformed Destination header.");
+    destination = destinationSegments(req);
+  } catch (error) {
+    return operationError(res, error, 400);
   }
-  const { segments: destSegments } = parsePath(destPathname);
-  if (destSegments.some(isHidden)) {
-    // Finder/AppleDouble junk destination — nothing to do, but don't 500.
-    return notFound(res);
-  }
-  if (destSegments.length < 3) {
-    res.writeHead(403, { "content-type": "text/plain" });
-    return res.end("Destination must be inside a project.");
-  }
-
-  const [teamSlug, projectName, ...sourcePath] = segments;
-  const [destTeam, destProject, ...destPath] = destSegments;
-  // Cross-team or cross-project moves can't be a metadata patch (the bytes
-  // live under the source project's key prefix); refuse rather than corrupt.
-  if (destTeam !== teamSlug || destProject !== projectName) {
-    return forbidden(res, "Can only move within the same project.");
-  }
-
-  let result;
+  if (destination.length < 3) return forbidden(res, "Destination must be inside a project.");
+  const [teamSlug, projectName, ...itemPath] = segments;
+  const [destinationTeamSlug, destinationProjectName, ...destinationPath] = destination;
+  const overwrite = String(req.headers.overwrite || "T").toUpperCase() !== "F";
   try {
-    result = await convexCall("mutation", "desktopBrowse:movePathForDesktop", {
+    const result = await convexCall("mutation", "desktopBrowse:movePathForDesktop", {
       teamSlug,
       projectName,
-      sourcePath,
-      destPath,
+      itemPath,
+      destinationTeamSlug,
+      destinationProjectName,
+      destinationPath,
+      overwrite,
     });
-  } catch (err) {
-    pushLog?.(
-      `webdav: MOVE ${segments.join("/")} → ${destSegments.join("/")} failed: ${err.message}`,
-    );
-    res.writeHead(500, { "content-type": "text/plain" });
-    return res.end(err.message);
+    res.writeHead(result.overwritten ? 204 : 201, DAV_HEADERS);
+    return res.end();
+  } catch (error) {
+    pushLog?.(`webdav: MOVE ${segments.join("/")} failed: ${error.message}`);
+    return operationError(res, error);
   }
-  const status = result?.status;
-  if (status === "moved") {
-    // 201 when the move created a new resource at the destination; 204 when it
-    // overwrote. We don't distinguish, and 201 is the safe WebDAV default.
-    res.writeHead(201, { "content-type": "text/plain" });
-    return res.end("moved");
+}
+
+async function handleCopy(req, res, segments, { convexCall, pushLog }) {
+  if (segments.length < 3) return forbidden(res, "Only project files can be copied.");
+  let destination;
+  try {
+    destination = destinationSegments(req);
+  } catch (error) {
+    return operationError(res, error, 400);
   }
-  if (status === "not_found") return notFound(res);
-  if (status === "conflict") {
-    res.writeHead(409, { "content-type": "text/plain" });
-    return res.end("A file or folder with that name already exists there.");
+  if (destination.length < 3) return forbidden(res, "Destination must be inside a project.");
+  const [teamSlug, projectName, ...itemPath] = segments;
+  const [destinationTeamSlug, destinationProjectName, ...destinationPath] = destination;
+  const overwrite = String(req.headers.overwrite || "T").toUpperCase() !== "F";
+  try {
+    const result = await convexCall("action", "desktopUploadActions:copyPathForDesktop", {
+      teamSlug,
+      projectName,
+      itemPath,
+      destinationTeamSlug,
+      destinationProjectName,
+      destinationPath,
+      overwrite,
+    });
+    res.writeHead(result.overwritten ? 204 : 201, DAV_HEADERS);
+    return res.end();
+  } catch (error) {
+    pushLog?.(`webdav: COPY ${segments.join("/")} failed: ${error.message}`);
+    return operationError(res, error);
   }
-  return forbidden(res, "You don't have permission to move this.");
 }
 
 module.exports = { start };

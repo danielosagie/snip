@@ -89,6 +89,18 @@ export default defineSchema({
     ),
     stripeConnectChargesEnabled: v.optional(v.boolean()),
     stripeConnectPayoutsEnabled: v.optional(v.boolean()),
+    // What Stripe is still waiting on before this account can charge or
+    // pay out. Mirrors account.requirements; kept so the billing UI can
+    // name the actual blocker ("an ID document") instead of a generic
+    // "finish setup". Absent = never refreshed, which is not the same as
+    // "nothing due" — treat it as unknown, not clear.
+    stripeConnectRequirements: v.optional(
+      v.object({
+        currentlyDue: v.array(v.string()),
+        pastDue: v.array(v.string()),
+        disabledReason: v.union(v.string(), v.null()),
+      })
+    ),
     // Shared secret used by the DaVinci Resolve / Premiere plugin to
     // authenticate against /timelines/snapshot. Rotatable. The plugin
     // sends it as `Authorization: Bearer <token>`. Owner-only mutation
@@ -101,6 +113,12 @@ export default defineSchema({
     // This is the cost floor: encoded copies only materialize on watch
     // (re-encode) or for paywalled external delivery. Absent = "cloud".
     driveFirstStorage: v.optional(v.boolean()),
+    onboarding: v.optional(
+      v.object({
+        makes: v.string(),
+        size: v.string(),
+      })
+    ),
   })
     .index("by_slug", ["slug"])
     .index("by_owner", ["ownerClerkId"])
@@ -244,8 +262,10 @@ export default defineSchema({
      */
     deletedAt: v.optional(v.number()),
     deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
   })
     .index("by_team", ["teamId"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_team_and_deleted", ["teamId", "deletedAt"]),
 
   // Subfolders inside a project — Google-Drive-style nesting. Optional
@@ -258,6 +278,10 @@ export default defineSchema({
     name: v.string(),
     createdByClerkId: v.string(),
     createdByName: v.string(),
+    // Mutable filesystem metadata for the desktop mount. Existing folders
+    // fall back to _creationTime until they are changed through either UI.
+    driveModifiedAt: v.optional(v.number()),
+    driveVersion: v.optional(v.number()),
   })
     .index("by_project", ["projectId"])
     .index("by_project_and_parent", ["projectId", "parentFolderId"]),
@@ -399,6 +423,11 @@ export default defineSchema({
     fileSize: v.optional(v.number()),
     contentType: v.optional(v.string()),
     uploadError: v.optional(v.string()),
+    // Monotonic identity for the mounted-drive representation. `_creationTime`
+    // is immutable and made same-path/same-size overwrites invisible to rclone's
+    // cache; these fields change whenever the logical file bytes/path changes.
+    driveModifiedAt: v.optional(v.number()),
+    driveVersion: v.optional(v.number()),
     // Free-form tags (bulk-editable). Optional; absent = no tags.
     tags: v.optional(v.array(v.string())),
     status: v.union(
@@ -467,6 +496,7 @@ export default defineSchema({
     // it can be restored or purged. Mirrors the same pattern on projects.
     deletedAt: v.optional(v.number()),
     deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
     // ── Retention / hot-cold lifecycle ───────────────────────────────
     // Wall-clock of the most recent playback (review player, share
     // page, or paid delivery). Drives the hot/cold split: a video not
@@ -482,12 +512,6 @@ export default defineSchema({
     // the next watch. Cleared when the ladder is rebuilt. Presence =
     // "cold / archived" in the UI.
     renditionEvictedAt: v.optional(v.number()),
-    // Written by drive-first sync on some deployments (drive mtime and a
-    // monotonically increasing save counter). Declared here so deployments
-    // holding that data pass schema validation; no current code path
-    // writes or reads them on this branch.
-    driveModifiedAt: v.optional(v.number()),
-    driveVersion: v.optional(v.number()),
     // Storage class for billing. "cloud" (default) = source lives in our
     // object store and counts against the team's storage cap. "drive" =
     // the workspace is drive-first; the source is served from the
@@ -496,6 +520,8 @@ export default defineSchema({
     storageClass: v.optional(v.union(v.literal("cloud"), v.literal("drive"))),
   })
     .index("by_project", ["projectId"])
+    .index("by_s3_key", ["s3Key"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_public_id", ["publicId"])
     .index("by_mux_upload_id", ["muxUploadId"])
     .index("by_mux_asset_id", ["muxAssetId"])
@@ -588,6 +614,7 @@ export default defineSchema({
   shareLinks: defineTable({
     videoId: v.optional(v.id("videos")),
     bundleId: v.optional(v.id("shareBundles")),
+    coverVideoId: v.optional(v.id("videos")),
     token: v.string(),
     createdByClerkId: v.string(),
     createdByName: v.string(),
@@ -598,14 +625,25 @@ export default defineSchema({
     failedAccessAttempts: v.optional(v.number()),
     lockedUntil: v.optional(v.number()),
     viewCount: v.number(),
-    // Paywall — if set, viewers see the watermarked preview asset until they
-    // pay, then their grant gets paidAt set and the full asset is unlocked.
+    // Paywall — all mode sets grant.paidAt; per-item mode records individual
+    // ids in the grant's unlockedVideoIds array.
     paywall: v.optional(
       v.object({
         priceCents: v.number(),
         currency: v.string(),
         description: v.optional(v.string()),
+        // Missing is the legacy all-or-nothing paywall.
+        mode: v.optional(v.union(v.literal("all"), v.literal("per_item"))),
       })
+    ),
+    // Server-authoritative prices for paywall.mode === "per_item".
+    itemPrices: v.optional(
+      v.array(
+        v.object({
+          videoId: v.id("videos"),
+          priceCents: v.number(),
+        }),
+      ),
     ),
     // Optional hint for who this link is for. Used in the watermark on the
     // preview asset and prefilled in Stripe Checkout. NOT a security boundary.
@@ -665,11 +703,13 @@ export default defineSchema({
     token: v.string(),
     expiresAt: v.number(),
     createdAt: v.number(),
-    // Paywall unlock state. paidAt is the source of truth for "this grant has
-    // paid and may stream the full-res asset / download." paymentId points to
-    // the payments row so refunds can revoke access by clearing paidAt.
+    // Full-share unlock state. paymentId points to the payment row so refunds
+    // can revoke legacy/all access by clearing paidAt.
     paidAt: v.optional(v.number()),
     paymentId: v.optional(v.id("payments")),
+    // Missing preserves the legacy meaning of paidAt: every item is unlocked.
+    // Per-item purchases store a de-duplicated subset here without setting paidAt.
+    unlockedVideoIds: v.optional(v.array(v.id("videos"))),
     // Forensic capture for leak attribution. Set on grant issuance from the
     // signed-in identity + request headers proxied by the share page. None of
     // these are required (anonymous viewer with privacy extensions still gets
@@ -697,16 +737,68 @@ export default defineSchema({
     .index("by_share_link", ["shareLinkId"])
     .index("by_viewer_email", ["viewerEmail"]),
 
+  invoices: defineTable({
+    teamId: v.id("teams"),
+    projectId: v.optional(v.id("projects")),
+    shareLinkId: v.optional(v.id("shareLinks")),
+    payToken: v.optional(v.string()),
+    createdByClerkId: v.string(),
+    createdByName: v.string(),
+    clientEmail: v.string(),
+    clientLabel: v.optional(v.string()),
+    title: v.string(),
+    currency: v.string(),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("sent"),
+      v.literal("partially_paid"),
+      v.literal("paid"),
+      v.literal("void"),
+    ),
+    milestones: v.array(
+      v.object({
+        id: v.string(),
+        label: v.string(),
+        amountCents: v.number(),
+        dueAt: v.optional(v.number()),
+        paidAt: v.optional(v.number()),
+        stripeCheckoutSessionId: v.optional(v.string()),
+        stripePaymentIntentId: v.optional(v.string()),
+      }),
+    ),
+    sentAt: v.optional(v.number()),
+    voidedAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+  })
+    .index("by_team", ["teamId"])
+    .index("by_share_link", ["shareLinkId"])
+    .index("by_pay_token", ["payToken"])
+    .index("by_client_email", ["teamId", "clientEmail"]),
+
   // Per-transaction payment records. One row per Stripe Checkout Session.
-  // Either shareLinkId (share-link paywall) OR videoId-only (Canva-style
-  // per-video paywall) is set. videoId is always set so we can look up
-  // "has anyone with this email paid for this video?" regardless of path.
+  // shareLinkId/videoId identify delivery purchases; invoiceId/milestoneId
+  // identify invoice payments. Optional kind fields preserve legacy rows.
   payments: defineTable({
     shareLinkId: v.optional(v.id("shareLinks")),
     grantId: v.optional(v.id("shareAccessGrants")),
     teamId: v.id("teams"),
-    videoId: v.id("videos"),
+    // Invoice milestones may not reference a video. Existing rows always have it.
+    videoId: v.optional(v.id("videos")),
+    invoiceId: v.optional(v.id("invoices")),
+    milestoneId: v.optional(v.string()),
+    itemVideoIds: v.optional(v.array(v.id("videos"))),
+    kind: v.optional(
+      v.union(
+        v.literal("share_all"),
+        v.literal("share_item"),
+        v.literal("video"),
+        v.literal("invoice_milestone"),
+      ),
+    ),
     clientEmail: v.optional(v.string()),
+    // New buyer-paid-fee rows store total charged in amountCents and listed
+    // creator price in subtotalCents. Missing means the legacy deducted model.
+    subtotalCents: v.optional(v.number()),
     amountCents: v.number(),
     currency: v.string(),
     stripeCheckoutSessionId: v.string(),
@@ -734,9 +826,35 @@ export default defineSchema({
     .index("by_share_link", ["shareLinkId"])
     .index("by_grant", ["grantId"])
     .index("by_team", ["teamId"])
+    // Recent-sales feed on the billing page. Without the status/paidAt
+    // suffix the query has to collect every payment the team has ever
+    // taken just to show ten rows.
+    .index("by_team_status_paid", ["teamId", "status", "paidAt"])
     .index("by_video", ["videoId"])
     .index("by_checkout_session", ["stripeCheckoutSessionId"])
     .index("by_payment_intent", ["stripePaymentIntentId"]),
+
+  /**
+   * Running earnings totals per team, maintained transactionally as
+   * payments succeed and refund.
+   *
+   * Totals cannot be derived on read without scanning the team's whole
+   * payment history, which is exactly the unbounded read this table
+   * exists to remove. `computedThroughCreationTime` marks how far a
+   * backfill has progressed; a team with no row has never been
+   * aggregated and its totals must be shown as unknown, not as zero.
+   */
+  teamEarnings: defineTable({
+    teamId: v.id("teams"),
+    saleCount: v.number(),
+    grossCents: v.number(),
+    feeCents: v.number(),
+    // Collected on the platform account because Connect onboarding was
+    // unfinished — the operator still owes this to the team.
+    owedByPlatformCents: v.number(),
+    currency: v.string(),
+    computedThroughCreationTime: v.optional(v.number()),
+  }).index("by_team", ["teamId"]),
 
   // Folder-as-version model for the desktop sync app. Editors name folders
   // however they normally would (final_v12, color_pass_b, etc.); the row
@@ -1033,11 +1151,10 @@ export default defineSchema({
 
   /**
    * Account-level subscription. One per Clerk user (the `ownerClerkId`).
-   * Pricing is flat-base + per-seat-overage: the user pays `baseCents`
-   * each month for `includedSeats` collaborators, and `perSeatCents`
-   * for each seat beyond that. A "seat" is a distinct
-   * teamMember.userClerkId across all teams the owner participates
-   * in (computed; not stored).
+   * Pricing is a flat monthly fee for managed storage capacity. Paid
+   * tiers include unlimited collaborators; free keeps a small invite
+   * cap as an anti-abuse measure. Legacy seat-price fields remain so
+   * existing rows and enterprise metering stay compatible.
    *
    * This replaces per-team `teams.plan` for SaaS billing. The
    * `teams.plan` field stays for now to ease migration, but the
@@ -1056,10 +1173,15 @@ export default defineSchema({
     baseCents: v.number(),
     perSeatCents: v.number(),
     includedSeats: v.number(),
+    // Snapshot of the storage entitlement when the subscription was
+    // created. Existing customers keep their original capacity when
+    // public plan limits change.
+    storageLimitBytes: v.optional(v.number()),
     currency: v.string(),
     currentPeriodEnd: v.optional(v.number()),
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
+    cancelAtPeriodEnd: v.optional(v.boolean()),
     canceledAt: v.optional(v.number()),
     // Enterprise pay-as-you-go: separate metered Stripe Price IDs for
     // storage / egress / seats / transcription. Only populated when
@@ -1088,6 +1210,16 @@ export default defineSchema({
         customDomain: v.optional(v.string()),
         // Public API tier — rate limits relax, signed access tokens.
         apiTier: v.optional(v.boolean()),
+      }),
+    ),
+    // Stripe SubscriptionItem ids for idempotent add/remove operations. Kept
+    // separate from feature configuration (for example the domain hostname)
+    // so webhook reconciliation never loses product state.
+    stripeAddOnItemIds: v.optional(
+      v.object({
+        whiteLabel: v.optional(v.string()),
+        customDomain: v.optional(v.string()),
+        apiTier: v.optional(v.string()),
       }),
     ),
     /**
@@ -1129,15 +1261,12 @@ export default defineSchema({
     .index("by_owner_period", ["workspaceOwnerClerkId", "periodStart"]),
 
   /**
-   * Multi-contract container, native to snip. Replaces the singleton
-   * `projects.contract` embedded field, which stays for one release as
-   * a read-fallback during migration (see contractsBackfill.ts). A
-   * project can have an unbounded number of these — typical agency
-   * relationships need a master agreement, per-engagement SOWs, an NDA
-   * for new collaborators, etc.
+   * Project documents. Plain documents are the base capability: editable
+   * HTML, versions, and project ownership. A row becomes signable only after
+   * explicit promotion to `docType: "contract"`; contract-only metadata may
+   * then be attached without making the writing experience contract-shaped.
    *
-   * Designed to support a Documenso-equivalent e-sign flow in-product,
-   * without calling out to an external API:
+   * The contract workflow supports native e-signing in-product:
    *   • `contentHtml` is the editable contract body (Tiptap output).
    *   • `signablePdfS3Key` holds the rendered PDF generated when the
    *     author hits "Send for signature" (R2-cached).
@@ -1157,9 +1286,8 @@ export default defineSchema({
       v.literal("release"),
       v.literal("custom"),
     ),
-    // Unified editor mode. "contract" (default when absent) shows the signing
-    // surface (recipients, fields, send, audit, certificate). "document" is a
-    // plain doc — same editor, signing hidden. Toggleable in the editor header.
+    // Capability boundary. Documents are editable content. Contracts add the
+    // signing state machine, recipients, fields, and legal audit history.
     docType: v.optional(v.union(v.literal("contract"), v.literal("document"))),
     // Editable body (Tiptap HTML) + the wizard-generated clauses (same
     // shape as projects.contract.clauses).
@@ -1235,8 +1363,11 @@ export default defineSchema({
     createdByClerkId: v.string(),
     createdByName: v.string(),
     deletedAt: v.optional(v.number()),
+    deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
   })
     .index("by_project", ["projectId"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_project_and_status", ["projectId", "status"])
     .index("by_status", ["status"]),
 
@@ -1342,6 +1473,7 @@ export default defineSchema({
       v.literal("voided"),
       v.literal("reminder_sent"),
       v.literal("completed"),
+      v.literal("converted_to_contract"),
     ),
     actorName: v.optional(v.string()),
     actorEmail: v.optional(v.string()),
@@ -1441,9 +1573,11 @@ export default defineSchema({
     deletedAt: v.number(),
     deletedByClerkId: v.string(),
     deletedByName: v.optional(v.string()),
+    trashPurgeStartedAt: v.optional(v.number()),
   })
     .index("by_project", ["projectId"])
     .index("by_team", ["teamId"])
+    .index("by_deleted_at", ["deletedAt"])
     .index("by_team_and_deleted_at", ["teamId", "deletedAt"]),
 
   /**

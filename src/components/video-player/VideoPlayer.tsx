@@ -814,7 +814,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
               <button
                 type="button"
                 className={cn(
-                  "block h-3 w-3 rounded-full border border-black/40 shadow",
+                  "block h-3 w-3 rounded-full border border-[#0A0A0B]/40",
                   isResolved ? "bg-green-400" : "bg-orange-400",
                   isActive && "ring-2 ring-white/60"
                 )}
@@ -827,17 +827,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 }}
                 aria-label={`Jump to comment at ${formatTimestamp(marker.comment.timestampSeconds)}`}
               />
-              {/* Hover preview — brutalist tooltip showing author + first
+              {/* Hover preview showing author and the first
                   line of the comment. Pointer-events-none so the marker
                   click still works. */}
               {tooltipBody && (
-                <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 whitespace-nowrap border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 py-1 text-[11px] font-medium text-[#1a1a1a] shadow-[4px_4px_0px_0px_#1a1a1a] group-hover:block">
-                  <span className="font-bold">{tooltipAuthor}</span>
-                  <span className="mx-1 text-[#888]">·</span>
-                  <span className="text-[#C2410C] font-mono">
+                <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-[11px] border border-[#26262A] bg-[#161618] px-2.5 py-2 text-[11px] font-medium text-white group-hover:block">
+                  <span className="font-medium text-white">{tooltipAuthor}</span>
+                  <span className="mx-1 text-[#A0A0A5]">·</span>
+                  <span className="font-mono text-[#A0A0A5]">
                     {formatTimestamp(marker.comment.timestampSeconds)}
                   </span>
-                  <div className="mt-0.5 max-w-[260px] truncate text-[#1a1a1a]/80">
+                  <div className="mt-0.5 max-w-[260px] truncate text-[#A0A0A5]">
                     {tooltipBody}
                   </div>
                 </div>
@@ -848,7 +848,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
 
         {/* Scrubber */}
         <div
-          className="absolute top-1/2 z-20 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/30 bg-white shadow"
+          className="absolute top-1/2 z-20 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/30 bg-white"
           style={{ left: `${playedPercent * 100}%` }}
         />
       </div>
@@ -954,7 +954,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
 
             {qualityMenuOpen && (
               <div
-                className="absolute right-0 bottom-11 z-30 min-w-[180px] rounded-lg border border-white/10 bg-black/90 p-1.5 text-sm text-white shadow-2xl backdrop-blur"
+                className="absolute bottom-11 right-0 z-30 min-w-[180px] rounded-[11px] border border-[#26262A] bg-[#161618] p-1.5 text-sm text-white"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Bitrate ladder — the adaptive HLS rungs. Shown
@@ -962,13 +962,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                     pin a resolution/bitrate or leave it on Auto. */}
                 {hasManualQualityOptions && (
                   <>
-                    <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                    <div className="px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
                       Bitrate
                     </div>
                     <button
                       type="button"
                       onClick={() => applyQualityLevel(AUTO_QUALITY_LEVEL)}
-                      className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10"
+                      className="flex w-full items-center justify-between gap-2 rounded-[8px] px-2.5 py-2 text-left text-white transition-colors hover:bg-white/10"
                     >
                       <span>Auto</span>
                       {selectedQualityLevel === AUTO_QUALITY_LEVEL && <Check className="h-4 w-4" />}
@@ -978,7 +978,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                         key={option.level}
                         type="button"
                         onClick={() => applyQualityLevel(option.level)}
-                        className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10"
+                        className="flex w-full items-center justify-between gap-2 rounded-[8px] px-2.5 py-2 text-left text-white transition-colors hover:bg-white/10"
                       >
                         <span>{option.label}</span>
                         {selectedQualityLevel === option.level && <Check className="h-4 w-4" />}
@@ -995,7 +995,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                     {hasManualQualityOptions && (
                       <div className="my-1 border-t border-white/10" />
                     )}
-                    <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                    <div className="px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-widest text-[#A0A0A5]">
                       Source
                     </div>
                     {qualityOptionsConfig?.map((option) => (
@@ -1004,7 +1004,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                         type="button"
                         onClick={() => { if (option.disabled) return; onSelectQuality?.(option.id); setQualityMenuOpen(false); showControls(); }}
                         disabled={option.disabled}
-                        className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center justify-between gap-2 rounded-[8px] px-2.5 py-2 text-left text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <span>{option.label}</span>
                         {selectedQualityId === option.id && <Check className="h-4 w-4" />}
@@ -1014,7 +1014,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 )}
 
                 {!hasManualQualityOptions && !hasExternalQualityOptions && (
-                  <div className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-white/85">
+                  <div className="flex w-full items-center justify-between gap-2 rounded-[8px] px-2.5 py-2 text-left text-white">
                     <span>{isHls ? "Auto (browser)" : "Original source"}</span>
                     <Check className="h-4 w-4" />
                   </div>
@@ -1056,18 +1056,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       ref={wrapperRef}
       className={cn(
         "relative",
-        controlsBelow ? "flex flex-col h-full bg-black" : "",
+        controlsBelow ? "flex flex-col h-full bg-[#0A0A0B]" : "",
         className,
       )}
     >
       <div
         ref={containerRef}
         className={cn(
-          "relative w-full overflow-hidden bg-black",
+          "relative w-full overflow-hidden bg-[#0A0A0B]",
           controlsBelow
             ? "flex-1 min-h-0"
             : cn(
-                "aspect-video rounded-xl border border-zinc-800/80 shadow-[0_10px_40px_rgba(0,0,0,0.45)]",
+                "aspect-video rounded-[14px] border border-[#26262A]",
                 isFullscreen && "rounded-none border-none shadow-none"
               ),
         )}
@@ -1179,9 +1179,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 className="h-full w-full object-cover blur-[4px]"
               />
             ) : (
-              <div className="h-full w-full bg-zinc-900" />
+              <div className="h-full w-full bg-[#161618]" />
             )}
-            <div className="absolute inset-0 bg-black/40" />
+            <div className="absolute inset-0 bg-[#0A0A0B]/40" />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
               <p className="text-sm font-medium text-white/85">Loading stream...</p>
@@ -1198,7 +1198,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 e.stopPropagation();
                 togglePlay();
               }}
-              className="pointer-events-auto inline-flex h-20 w-20 items-center justify-center rounded-full border border-white/15 bg-black/60 text-white shadow-lg transition hover:scale-[1.03] hover:border-white/30 hover:bg-black/75"
+              className="pointer-events-auto inline-flex h-20 w-20 items-center justify-center rounded-full border border-[#26262A] bg-[#161618]/90 text-white transition-colors hover:border-white/30 hover:bg-[#26262A]"
               aria-label="Play video"
             >
               <Play className="ml-1 h-9 w-9" />
@@ -1221,7 +1221,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
               controlsVisible ? "opacity-100" : "opacity-0"
             )}
           >
-            <div className="pointer-events-auto bg-gradient-to-t from-black/90 via-black/70 to-transparent px-4 pb-4 pt-10">
+            <div className="pointer-events-auto bg-gradient-to-t from-[#0A0A0B]/95 via-[#0A0A0B]/75 to-transparent px-4 pb-4 pt-10">
               {controlsContent}
             </div>
           </div>
@@ -1230,7 +1230,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         {/* Custom context menu */}
         {contextMenu && (
           <div
-            className="absolute z-30 w-44 rounded-lg border border-white/10 bg-black/90 p-1.5 text-sm text-white shadow-2xl backdrop-blur"
+            className="absolute z-30 w-44 rounded-[11px] border border-[#26262A] bg-[#161618] p-1.5 text-sm text-white"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             {canDownload && (
@@ -1238,7 +1238,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 type="button"
                 onClick={() => void handleDownload()}
                 disabled={isDownloading}
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10 disabled:opacity-60"
+                className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-2 text-left text-white transition-colors hover:bg-white/10 disabled:opacity-60"
               >
                 <Download className="h-4 w-4" />
                 {isDownloading ? "Preparing download…" : "Download video"}
@@ -1247,7 +1247,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
             <button
               type="button"
               onClick={() => void copyTimestamp()}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10"
+              className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-2 text-left text-white transition-colors hover:bg-white/10"
             >
               <Timer className="h-4 w-4" />
               Copy timestamp ({formatTimestamp(displayTime)})
@@ -1255,7 +1255,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
             <button
               type="button"
               onClick={toggleLoop}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10"
+              className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-2 text-left text-white transition-colors hover:bg-white/10"
             >
               {loopEnabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
               {loopEnabled ? "Disable loop" : "Loop video"}
@@ -1267,7 +1267,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       {/* External controls — pinned to bottom */}
       {isExternalControls && (
         <div
-          className="flex-shrink-0 bg-black px-4 pb-3 pt-2"
+          className="flex-shrink-0 border-t border-[#26262A] bg-[#161618] px-4 pb-3 pt-2"
           onMouseMove={showControls}
           onMouseEnter={showControls}
         >

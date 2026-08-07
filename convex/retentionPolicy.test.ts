@@ -120,23 +120,21 @@ test("retentionHotDays honors env, defaults to 30", () => {
   else process.env.RETENTION_HOT_DAYS = prev;
 });
 
-test("isEvictionEnabled: explicit flag wins, else gated on billing", () => {
+test("custom cold eviction stays disabled even with stale env configuration", () => {
   const prevFlag = process.env.RETENTION_EVICTION;
   const prevKey = process.env.STRIPE_SECRET_KEY;
 
   process.env.RETENTION_EVICTION = "on";
   delete process.env.STRIPE_SECRET_KEY;
-  assert.equal(isEvictionEnabled(), true);
+  assert.equal(isEvictionEnabled(), false);
 
   process.env.RETENTION_EVICTION = "off";
   process.env.STRIPE_SECRET_KEY = "sk_live_x";
   assert.equal(isEvictionEnabled(), false);
 
   delete process.env.RETENTION_EVICTION;
-  delete process.env.STRIPE_SECRET_KEY;
-  assert.equal(isEvictionEnabled(), false);
   process.env.STRIPE_SECRET_KEY = "sk_live_x";
-  assert.equal(isEvictionEnabled(), true);
+  assert.equal(isEvictionEnabled(), false);
 
   if (prevFlag === undefined) delete process.env.RETENTION_EVICTION;
   else process.env.RETENTION_EVICTION = prevFlag;

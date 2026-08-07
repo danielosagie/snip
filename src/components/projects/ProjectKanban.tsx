@@ -44,41 +44,41 @@ const COLUMNS: Array<{
   {
     stage: "no-contract",
     label: "No contract",
-    hint: "Scoping. Get a contract drafted before work starts.",
-    accent: "#888",
-    background: "#e8e8e0",
+    hint: "Start here",
+    accent: "#6E6E73",
+    background: "#FAFAFA",
     Icon: Folder,
   },
   {
     stage: "drafting",
     label: "Drafting",
-    hint: "Contract drafted, not yet sent.",
-    accent: "#1a1a1a",
-    background: "#e8e8e0",
+    hint: "Contract in progress",
+    accent: "#131315",
+    background: "#FAFAFA",
     Icon: FileSignature,
   },
   {
     stage: "awaiting-signature",
     label: "Awaiting signature",
-    hint: "Sent to client. Following up.",
-    accent: "#b45309",
-    background: "#f5e9d8",
+    hint: "Waiting on client",
+    accent: "#74521D",
+    background: "#FAFAFA",
     Icon: Send,
   },
   {
     stage: "in-production",
     label: "In production",
-    hint: "Contract signed. Building deliverables.",
-    accent: "#FF6600",
-    background: "#dde6dd",
+    hint: "Making deliverables",
+    accent: "#D14E00",
+    background: "#FAFAFA",
     Icon: Folder,
   },
   {
     stage: "delivered",
     label: "Delivered",
-    hint: "Work shipped, contract closed.",
-    accent: "#1a1a1a",
-    background: "#FFB380",
+    hint: "Work shipped",
+    accent: "#225B36",
+    background: "#FAFAFA",
     Icon: Check,
   },
 ];
@@ -116,46 +116,45 @@ export function ProjectKanban({ teams }: Props) {
         return (
           <div
             key={col.stage}
-            className="border-2 border-[#1a1a1a] flex flex-col min-h-[300px]"
+            className="flex min-h-[300px] flex-col overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-[#FAFAFA]"
             style={{ background: col.background }}
           >
             <header
-              className="px-3 py-2 border-b-2 border-[#1a1a1a] flex items-center justify-between"
-              style={{ background: col.accent, color: "#f0f0e8" }}
+              className="flex items-center justify-between border-b border-[#F1F1F3] bg-[#FAFAFA] px-3 py-2.5"
             >
               <div className="flex items-center gap-2 min-w-0">
-                <Icon className="h-4 w-4 flex-shrink-0" />
+                <Icon className="h-4 w-4 flex-shrink-0 text-[#A0A0A5]" />
                 <div className="min-w-0">
-                  <div className="font-black text-sm tracking-tight truncate">
+                  <div className="truncate text-sm font-semibold tracking-tight text-[#131315]">
                     {col.label}
                   </div>
-                  <div className="text-[10px] font-mono opacity-80 truncate">
+                  <div className="sr-only">
                     {col.hint}
                   </div>
                 </div>
               </div>
-              <div className="font-mono text-lg font-black">{items.length}</div>
+              <div className="rounded-full bg-[#F1F1F3] px-2 py-0.5 text-xs font-medium text-[#6E6E73]">{items.length}</div>
             </header>
 
             <div className="flex-1 p-2 space-y-2 overflow-y-auto">
               {items.length === 0 ? (
-                <div className="text-xs text-[#888] px-1 py-3">
-                  Empty.
+                <div className="px-1 py-3 text-xs text-[#A0A0A5]">
+                  Empty
                 </div>
               ) : (
                 items.map((entry) => (
                   <Link
                     key={entry.project._id}
                     to={projectPath(entry.teamSlug, entry.project._id)}
-                    className="block border-2 border-[#1a1a1a] bg-[#f0f0e8] p-2.5 hover:bg-white transition-colors"
+                    className="block rounded-[14px] border border-[#E8E8EC] bg-white p-2.5 transition-colors hover:bg-[#FAFAFA]"
                   >
-                    <div className="text-[10px] font-mono text-[#888] uppercase tracking-wider truncate">
+                    <div className="truncate text-[11px] text-[#A0A0A5]">
                       {entry.teamName}
                     </div>
-                    <div className="font-bold text-sm text-[#1a1a1a] truncate mt-0.5">
+                    <div className="mt-0.5 truncate text-sm font-semibold text-[#131315]">
                       {entry.project.name}
                     </div>
-                    <div className="flex items-center justify-between mt-2 text-xs text-[#888]">
+                    <div className="mt-2 flex items-center justify-between text-xs text-[#6E6E73]">
                       <span>
                         {entry.project.videoCount} video
                         {entry.project.videoCount === 1 ? "" : "s"}

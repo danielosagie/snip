@@ -45,16 +45,16 @@ function ConnectDesktopRoute() {
   }, [isLoaded, user, code, approve]);
 
   return (
-    <main className="min-h-screen bg-[#f0f0e8] text-[#1a1a1a] flex items-center justify-center p-6">
-      <div className="w-full max-w-md border-2 border-[#1a1a1a] bg-[#f0f0e8] shadow-[6px_6px_0px_0px_#1a1a1a]">
-        <div className="bg-[#1a1a1a] text-[#f0f0e8] px-5 py-3 text-xs font-black uppercase tracking-[0.12em]">
-          snip<span className="text-[#c2410c]">.</span> desktop
+    <main className="flex min-h-screen items-center justify-center bg-[#FAFAFA] p-6 text-[#131315]">
+      <div className="w-full max-w-md overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
+        <div className="border-b border-[#E8E8EC] bg-white px-5 py-4 text-sm font-semibold tracking-[-0.01em] text-[#131315]">
+          snip<span className="text-[#FF6600]">.</span> desktop
         </div>
         <div className="p-8">
           {!code ? (
             <Block
               title="Open this from the app"
-              body="This page connects the snip desktop app to your account. Start the connection from the desktop app — it'll bring you back here automatically."
+              body="This page connects the snip desktop app to your account. Start the connection from the desktop app, and it'll bring you back here automatically."
             />
           ) : !isLoaded ? (
             <Block title="Loading…" body="One moment." />
@@ -68,7 +68,7 @@ function ConnectDesktopRoute() {
                 href={`/sign-in?redirect_url=${encodeURIComponent(
                   `/connect-desktop?code=${encodeURIComponent(code)}`,
                 )}`}
-                className="mt-6 inline-flex items-center justify-center w-full px-4 py-2.5 border-2 border-[#1a1a1a] bg-[#c2410c] text-[#f0f0e8] font-bold uppercase text-sm tracking-wide shadow-[4px_4px_0px_0px_#1a1a1a] hover:bg-[#9a3412] transition-colors"
+                className="mt-6 inline-flex w-full items-center justify-center rounded-full bg-[#131315] px-4 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-[#26262A]"
               >
                 Sign in
               </a>
@@ -80,7 +80,7 @@ function ConnectDesktopRoute() {
             />
           ) : phase === "connected" ? (
             <div>
-              <div className="inline-flex items-center justify-center w-12 h-12 border-2 border-[#1a1a1a] bg-[#c2410c] text-[#f0f0e8] mb-5">
+              <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#F2FBF5] text-[#225B36]">
                 <svg
                   width="26"
                   height="26"
@@ -94,12 +94,12 @@ function ConnectDesktopRoute() {
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
               </div>
-              <h1 className="text-2xl font-black tracking-tight leading-tight">
+              <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">
                 Device connected
-                <span className="text-[#c2410c]">.</span>
+                <span className="text-[#FF6600]">.</span>
               </h1>
-              <p className="text-sm text-[#555] mt-2 leading-relaxed">
-                Return to the snip desktop app — it's finishing setup and
+              <p className="mt-2 text-sm leading-relaxed text-[#6E6E73]">
+                Return to the snip desktop app. It&apos;s finishing setup and
                 mounting your drive now. You can close this tab.
               </p>
             </div>
@@ -120,10 +120,10 @@ function ConnectDesktopRoute() {
 function Block({ title, body }: { title: string; body: string }) {
   return (
     <div>
-      <h1 className="text-2xl font-black tracking-tight leading-tight">
+      <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[#131315]">
         {title}
       </h1>
-      <p className="text-sm text-[#555] mt-2 leading-relaxed">{body}</p>
+      <p className="mt-2 text-sm leading-relaxed text-[#6E6E73]">{body}</p>
     </div>
   );
 }

@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   CreditCard,
   ExternalLink,
@@ -19,6 +18,17 @@ import {
   DownloadCloud,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  softButton,
+  softButtonPrimary,
+  softCard,
+  SoftField,
+  softHelperText,
+  softInput,
+  SoftPill,
+  softRow,
+  softTabClass,
+} from "@/components/soft";
 import { seoHead } from "@/lib/seo";
 import { useIsDesktop } from "@/lib/useIsDesktop";
 
@@ -59,19 +69,14 @@ function SettingsRoute() {
     <div className="h-full flex flex-col">
       <DashboardHeader paths={[{ label: "Account settings" }]} />
 
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="max-w-3xl">
-          <h1 className="text-3xl font-black tracking-tight text-[#1a1a1a]">
+      <div className="surface-soft flex-1 overflow-y-auto bg-[#FAFAFA] px-4 py-8 text-[#131315] sm:px-8 lg:px-14 lg:py-10">
+        <div className="w-full max-w-[1120px]">
+          <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">
             Settings
           </h1>
-          <p className="text-sm text-[#666] mt-1">
-            Manage your account, notification preferences, and connected
-            integrations. Team-scoped settings live in the team settings page.
-          </p>
-
-          {/* Brutalist tab strip — matches the team settings page. */}
-          <nav className="border-b-2 border-[#1a1a1a] mt-6">
-            <div className="flex gap-1">
+          {/* Soft pill tabs — matches the team settings page. */}
+          <nav className="mt-5">
+            <div className="flex flex-wrap gap-1.5">
               {SETTINGS_TABS.map((tab) => {
                 const isActive = activeTab === tab.value;
                 return (
@@ -79,11 +84,7 @@ function SettingsRoute() {
                     key={tab.value}
                     type="button"
                     onClick={() => setActiveTab(tab.value)}
-                    className={
-                      isActive
-                        ? "px-4 py-2 text-sm font-bold border-2 border-[#1a1a1a] border-b-0 bg-[#f0f0e8] text-[#1a1a1a] -mb-[2px] relative z-10"
-                        : "px-4 py-2 text-sm font-bold text-[#666] hover:text-[#1a1a1a] border-2 border-transparent"
-                    }
+                    className={softTabClass(isActive)}
                   >
                     {tab.label}
                   </button>
@@ -92,7 +93,7 @@ function SettingsRoute() {
             </div>
           </nav>
 
-          <div className="mt-4">
+          <div className="mt-3.5 space-y-3.5">
             {activeTab === "profile" ? (
               <ProfileTab
                 name={user?.fullName ?? user?.firstName ?? ""}
@@ -112,38 +113,18 @@ function SettingsRoute() {
 
 function Section({
   title,
-  description,
   children,
+  contentClassName,
 }: {
   title: string;
-  description?: string;
   children: React.ReactNode;
+  contentClassName?: string;
 }) {
   return (
-    <section className="border-2 border-[#1a1a1a] bg-[#f0f0e8] p-6 mb-4">
-      <h2 className="font-black text-lg tracking-tight">{title}</h2>
-      {description ? (
-        <p className="text-xs text-[#666] mt-0.5">{description}</p>
-      ) : null}
-      <div className="mt-4 space-y-3">{children}</div>
+    <section className={cn(softCard, "mb-3.5")}>
+      <h2 className="text-base font-semibold leading-[22px]">{title}</h2>
+      <div className={cn("mt-4 space-y-3", contentClassName)}>{children}</div>
     </section>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <div className="text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
-        {label}
-      </div>
-      {children}
-    </label>
   );
 }
 
@@ -152,22 +133,19 @@ function ProfileTab({ name, email }: { name: string; email: string }) {
     <>
       <Section
         title="Profile"
-        description="Identity comes from Clerk. To change your name or email, use the avatar menu in the bottom of the sidebar."
       >
-        <Field label="Name">
-          <Input value={name} readOnly />
-        </Field>
-        <Field label="Email">
-          <Input value={email} readOnly type="email" />
-        </Field>
+        <SoftField label="Name">
+          <Input value={name} readOnly className={softInput} />
+        </SoftField>
+        <SoftField label="Email">
+          <Input value={email} readOnly type="email" className={softInput} />
+        </SoftField>
+        <p className={softHelperText}>
+          Change your identity from the avatar menu.
+        </p>
       </Section>
-      <Section
-        title="Appearance"
-        description="Theme follows the toggle in the sidebar footer. Other appearance settings will land here later."
-      >
-        <div className="text-sm text-[#666]">
-          Nothing else to tune yet.
-        </div>
+      <Section title="Appearance">
+        <p className={softHelperText}>Use the theme toggle in the sidebar.</p>
       </Section>
     </>
   );
@@ -178,10 +156,7 @@ function NotificationsTab() {
   const update = useMutation(api.notifications.updateMyPrefs);
   const loading = prefs === undefined;
   return (
-    <Section
-      title="Notifications"
-      description="Email cadence for comments, contract status, and uploads."
-    >
+    <Section title="Notifications" contentClassName="space-y-0">
       <NotifyToggle
         label="Comment replies"
         help="Email me when someone replies to a thread I'm in."
@@ -203,9 +178,8 @@ function NotificationsTab() {
         disabled={loading}
         onChange={(v) => void update({ uploadFinished: v })}
       />
-      <p className="pt-2 text-xs text-[#888] font-mono">
-        Emails send via Resend when configured; until then preferences
-        still save and in-app activity is unaffected.
+      <p className={cn(softHelperText, "pt-2")}>
+        Preferences save even when email delivery is unavailable.
       </p>
     </Section>
   );
@@ -225,7 +199,7 @@ function NotifyToggle({
   onChange: (next: boolean) => void;
 }) {
   return (
-    <label className="flex items-start gap-3 cursor-pointer">
+    <label className={cn(softRow, "cursor-pointer flex-nowrap items-start")}>
       <input
         type="checkbox"
         checked={checked}
@@ -233,10 +207,10 @@ function NotifyToggle({
         onChange={(e) => onChange(e.target.checked)}
         className="mt-0.5 h-4 w-4 accent-[#FF6600] disabled:opacity-50"
       />
-      <div className="flex-1">
-        <div className="font-bold text-sm text-[#1a1a1a]">{label}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium leading-5 text-[#131315]">{label}</div>
         {help ? (
-          <div className="text-xs text-[#666] mt-0.5">{help}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-[#A0A0A5]">{help}</div>
         ) : null}
       </div>
     </label>
@@ -257,6 +231,7 @@ type DesktopUpdateSnapshot = {
   version: string | null;
   percent: number;
   error: string | null;
+  requiresManualInstall: boolean;
 };
 
 /**
@@ -283,6 +258,9 @@ function DesktopUpdatesSection() {
 
   const status = snapshot?.status ?? "idle";
   const busy = checking || status === "checking" || status === "downloading";
+  const manualUpdateReady =
+    Boolean(snapshot?.requiresManualInstall) &&
+    (status === "available" || status === "downloaded");
 
   const check = async () => {
     if (!window.api) return;
@@ -295,6 +273,7 @@ function DesktopUpdatesSection() {
           version: prev?.version ?? null,
           percent: prev?.percent ?? 0,
           error: res.reason ?? "Update check failed.",
+          requiresManualInstall: prev?.requiresManualInstall ?? false,
         }));
       }
     } finally {
@@ -307,34 +286,37 @@ function DesktopUpdatesSection() {
       case "checking":
         return "Checking for updates…";
       case "available":
-        return `Update available${snapshot?.version ? ` (v${snapshot.version})` : ""} — downloading in the background…`;
+        return snapshot?.requiresManualInstall
+          ? `Update available${snapshot.version ? ` (v${snapshot.version})` : ""}.`
+          : `Update available${snapshot?.version ? ` (v${snapshot.version})` : ""}. Downloading in the background…`;
       case "downloading":
         return `Downloading update… ${snapshot?.percent ?? 0}%`;
       case "downloaded":
-        return `Update ready${snapshot?.version ? ` (v${snapshot.version})` : ""}. Restart to install.`;
+        return snapshot?.requiresManualInstall
+          ? `Update ready${snapshot.version ? ` (v${snapshot.version})` : ""}.`
+          : `Update ready${snapshot?.version ? ` (v${snapshot.version})` : ""}. Restart to install.`;
       case "none":
         return "You're on the latest version.";
       case "error":
         return snapshot?.error ?? "Update check failed.";
       default:
-        return "Updates download automatically in the background and install on the next quit.";
+        return snapshot?.requiresManualInstall
+          ? "Updates are checked automatically. You choose when to install them."
+          : "Updates download automatically in the background and install on the next quit.";
     }
   })();
 
   return (
-    <Section
-      title="snip Desktop"
-      description="App version and automatic updates for this Mac."
-    >
-      <Field label="Installed version">
-        <div className="font-mono text-sm text-[#1a1a1a]">
-          {version ? `v${version}` : "—"}
+    <Section title="snip Desktop">
+      <SoftField label="Installed version">
+        <div className="text-sm text-[#131315]">
+          {version ? `v${version}` : "Not available"}
         </div>
-      </Field>
+      </SoftField>
       <p
         className={cn(
-          "text-xs font-mono",
-          status === "error" ? "text-[#b91c1c]" : "text-[#666]",
+          "text-[13px] leading-[18px]",
+          status === "error" ? "text-[#D8434F]" : "text-[#A0A0A5]",
         )}
       >
         {statusLine}
@@ -344,21 +326,21 @@ function DesktopUpdatesSection() {
           type="button"
           onClick={() => void check()}
           disabled={busy}
-          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#1a1a1a] bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors disabled:opacity-50"
+          className={cn(softButton, "inline-flex items-center gap-2")}
         >
           <RefreshCw
             className={cn("h-3.5 w-3.5", busy && "animate-spin")}
           />
           Check for updates
         </button>
-        {status === "downloaded" ? (
+        {manualUpdateReady || status === "downloaded" ? (
           <button
             type="button"
             onClick={() => void window.api?.update.install()}
-            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-wider border-2 border-[#FF6600] bg-[#FF6600] text-[#f0f0e8] hover:bg-[#FF7A1F] transition-colors"
+            className={cn(softButtonPrimary, "inline-flex items-center gap-2")}
           >
             <DownloadCloud className="h-3.5 w-3.5" />
-            Restart &amp; install
+            {manualUpdateReady ? "Download update" : "Restart & install"}
           </button>
         ) : null}
       </div>
@@ -372,10 +354,7 @@ function IntegrationsTab() {
   return (
     <>
       <DesktopUpdatesSection />
-      <Section
-        title="Connected services"
-        description="Service status across this deployment. Per-team integrations like Stripe Connect link out to the team they belong to."
-      >
+      <Section title="Connected services">
         <IntegrationRow
           icon={<CreditCard className="h-4 w-4" />}
           label="Stripe Connect"
@@ -385,14 +364,14 @@ function IntegrationsTab() {
               ? "configured"
               : "not-configured"
           }
-          configuredHint="Stripe API keys detected — set up payouts in Billing to enable receiving money."
+          configuredHint="Stripe API keys detected. Set up payouts in Billing."
           notConfiguredHint="Set STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET in your Convex env to enable."
           action={
             <Link
               to="/dashboard/billing"
-              className="inline-flex items-center gap-1 text-xs font-bold text-[#FF6600] hover:text-[#FF7A1F] underline underline-offset-2"
+              className="inline-flex items-center gap-1 text-[13px] font-medium text-[#D14E00] underline underline-offset-2"
             >
-              Set up payouts in Billing
+              Open Billing
               <ExternalLink className="h-3 w-3" />
             </Link>
           }
@@ -407,7 +386,7 @@ function IntegrationsTab() {
           }
           configuredHint={
             featureStatus?.muxSignedPlayback
-              ? "Signed playback enabled — paywalled deliveries can stream."
+              ? "Signed playback enabled. Paywalled deliveries can stream."
               : "Public playback only. Add a Mux signing key for paywalled streams."
           }
           notConfiguredHint="Set MUX_TOKEN_ID + MUX_TOKEN_SECRET in your Convex env."
@@ -429,16 +408,13 @@ function IntegrationsTab() {
         />
       </Section>
 
-      <Section
-        title="Personal integrations"
-        description="Account-scoped automations. Each one lights up when its env or OAuth credentials are present."
-      >
+      <Section title="Personal integrations">
         <IntegrationRow
           icon={<Hash className="h-4 w-4" />}
           label="Slack"
           description="DM mentions when someone @-tags you on a comment, plus a daily digest of project activity."
           status="coming-soon"
-          notConfiguredHint="Connector ships once we wire Slack OAuth — tracked separately."
+          notConfiguredHint="Connector ships after Slack OAuth is connected."
         />
         <IntegrationRow
           icon={<Calendar className="h-4 w-4" />}
@@ -474,21 +450,21 @@ function IntegrationRow({
   const hint =
     status === "configured" ? configuredHint : notConfiguredHint;
   return (
-    <div className="border-2 border-[#1a1a1a] p-4 flex flex-col sm:flex-row gap-3">
-      <div className="w-9 h-9 flex items-center justify-center border-2 border-[#1a1a1a] bg-[#e8e8e0] flex-shrink-0">
+    <div className="flex flex-col gap-3 rounded-[11px] border border-[#E8E8EC] bg-white p-4 sm:flex-row">
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[9px] border border-[#E8E8EC] bg-[#FAFAFA] text-[#6E6E73]">
         {icon}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="font-black text-sm tracking-tight">{label}</h3>
+          <h3 className="text-sm font-semibold">{label}</h3>
           <StatusBadge status={status} />
         </div>
-        <p className="text-xs text-[#666] mt-1">{description}</p>
+        <p className="mt-1 text-sm leading-5 text-[#6E6E73]">{description}</p>
         {hint ? (
           <p
             className={cn(
-              "text-[11px] font-mono mt-2 flex items-start gap-1.5",
-              status === "configured" ? "text-[#FF6600]" : "text-[#888]",
+              "mt-2 flex items-start gap-1.5 text-[13px] leading-[18px]",
+              status === "configured" ? "text-[#D14E00]" : "text-[#A0A0A5]",
             )}
           >
             {status === "configured" ? (
@@ -506,8 +482,8 @@ function IntegrationRow({
 }
 
 function StatusBadge({ status }: { status: IntegrationStatus }) {
-  if (status === "configured") return <Badge variant="success">Connected</Badge>;
+  if (status === "configured") return <SoftPill tone="accent">Connected</SoftPill>;
   if (status === "coming-soon")
-    return <Badge variant="secondary">Coming soon</Badge>;
-  return <Badge variant="warning">Not configured</Badge>;
+    return <SoftPill>Coming soon</SoftPill>;
+  return <SoftPill>Not configured</SoftPill>;
 }

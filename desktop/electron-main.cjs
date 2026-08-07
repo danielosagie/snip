@@ -31,12 +31,13 @@ const {
 // exactly like the browser) and exposes native capabilities (mount, file
 // open/reveal, auto-update) to it via the preload bridge. No separate desktop
 // UI to maintain. Override with SNIP_WEB_URL for staging / local web dev.
-const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://snipfilm.vercel.app").replace(/\/$/, "");
+const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://www.snip.film").replace(/\/$/, "");
 
 const SETTINGS_DIR = path.join(app.getPath("userData"));
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 const VERSION_STORE_DIR = path.join(SETTINGS_DIR, "project-versions");
 const versionStore = createLocalVersionStore({ baseDirectory: VERSION_STORE_DIR });
+let settingsCache = null;
 
 // ---- Settings persistence ----------------------------------------------------
 
@@ -109,6 +110,39 @@ const SECRET_PATHS = [
   ["storage", "sessionToken"],
 ];
 const ENC_PREFIX = "enc:v1:";
+/**
+ * Placeholder handed to the renderer in place of a real secret.
+ *
+ * The main process loads the REMOTE web app, so anything reachable from
+ * the renderer is reachable by an XSS or a compromised deploy. The
+ * renderer only ever passes secrets through in a read-modify-write, so
+ * it can work with a sentinel: settings:get redacts, and settings:set
+ * restores the stored value wherever the sentinel comes back.
+ */
+const REDACTED = "__snip_redacted__";
+
+/** Replace stored secrets with the sentinel before crossing the IPC boundary. */
+function redactSecretsForRenderer(settings) {
+  return transformSecrets(settings, (value) =>
+    typeof value === "string" && value.length > 0 ? REDACTED : value,
+  );
+}
+
+/**
+ * Put back any secret the renderer echoed as the sentinel. A real value
+ * (for example freshly minted storage credentials) is written through.
+ */
+function restoreRedactedSecrets(incoming, current) {
+  const out = { ...incoming, storage: { ...(incoming.storage || {}) } };
+  for (const parts of SECRET_PATHS) {
+    if (parts.length === 1) {
+      if (out[parts[0]] === REDACTED) out[parts[0]] = current?.[parts[0]];
+    } else if (out[parts[0]] && out[parts[0]][parts[1]] === REDACTED) {
+      out[parts[0]][parts[1]] = current?.[parts[0]]?.[parts[1]];
+    }
+  }
+  return out;
+}
 
 function encryptSecret(value) {
   if (typeof value !== "string" || value.length === 0) return value;
@@ -142,6 +176,13 @@ function transformSecrets(settings, fn) {
 }
 
 async function loadSettings() {
+  // Decrypting through Electron safeStorage touches the macOS Keychain. This
+  // function is called by several background loops and by every WebDAV read,
+  // so decrypting on every call can repeatedly trigger the "snip Safe
+  // Storage" approval dialog when Keychain access is not permanently granted.
+  // Keep one decrypted in-memory snapshot and only touch Keychain again after
+  // an explicit settings write or an app relaunch.
+  if (settingsCache) return settingsCache;
   try {
     const raw = await fs.readFile(SETTINGS_FILE, "utf8");
     const parsed = JSON.parse(raw);
@@ -151,12 +192,14 @@ async function loadSettings() {
     for (const key of Object.keys(DEFAULT_FEATURES)) {
       features[key] = { ...DEFAULT_FEATURES[key], ...(features[key] || {}) };
     }
-    return transformSecrets(
+    settingsCache = transformSecrets(
       { ...DEFAULT_SETTINGS, ...parsed, features },
       decryptSecret,
     );
+    return settingsCache;
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    settingsCache = { ...DEFAULT_SETTINGS };
+    return settingsCache;
   }
 }
 
@@ -171,6 +214,9 @@ async function saveSettings(settings) {
   } catch {
     // best-effort on platforms without POSIX perms
   }
+  // Store the caller's already-decrypted value. Do not read the encrypted file
+  // back through safeStorage just to refresh the cache.
+  settingsCache = settings;
 }
 
 // Live Convex auth pushed from the signed-in renderer (the web app running
@@ -358,9 +404,12 @@ ipcMain.handle("versions:restore-copy", async (_event, { id } = {}) => {
   return { ok: true };
 });
 
-ipcMain.handle("settings:get", async () => loadSettings());
+ipcMain.handle("settings:get", async () =>
+  redactSecretsForRenderer(await loadSettings()),
+);
 ipcMain.handle("settings:set", async (_event, next) => {
-  await saveSettings(next);
+  const current = await loadSettings();
+  await saveSettings(restoreRedactedSecrets(next, current));
   // Re-evaluate background loops against the new flags.
   await reconcileFeatures().catch((err) => {
     console.error("reconcileFeatures failed after settings:set:", err);
@@ -1121,9 +1170,17 @@ function startLanCacheServer() {
         reject(err);
       };
       server.once("error", onError);
+      // NOTE: no host argument means every interface (0.0.0.0), which is
+      // intentional — the point of the LAN cache is to serve peers. But
+      // there is no authentication on this listener, so anyone who can
+      // reach this machine on `port` can read cached file bytes. The
+      // feature is opt-in and defaults to disabled; it should not be
+      // enabled on an untrusted network until a shared token is added.
       server.listen(port, () => {
         server.off("error", onError);
-        pushLog?.(`lanCache: serving ${mountPath} on port ${port}`);
+        pushLog?.(
+          `lanCache: serving ${mountPath} on port ${port} to ALL interfaces with no authentication — only enable on a trusted network`,
+        );
         resolve();
       });
     }).catch(() => {
@@ -2066,7 +2123,8 @@ async function startMount({ mountPath } = {}) {
     "--dir-cache-time", "30s",
     "--poll-interval", "30s",
     "--no-modtime",
-    "--no-checksum",
+    // Keep remote ETags in the fingerprint. The WebDAV layer increments them
+    // on every overwrite/move, including same-size replacements.
     // Resilience
     "--low-level-retries", "10",
     "--retries", "3",
@@ -2243,26 +2301,63 @@ function startDriveQueuePoll(rcPort) {
   driveQueueTimer = setInterval(async () => {
     let inflight = [];
     try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      if (resp.ok) {
-        const body = await resp.json().catch(() => ({}));
+      const request = (endpoint) => fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+      const [queueResponse, statsResponse] = await Promise.all([
+        request(url),
+        request(`http://127.0.0.1:${rcPort}/core/stats`),
+      ]);
+      if (queueResponse.ok) {
+        const body = await queueResponse.json().catch(() => ({}));
         const queue = Array.isArray(body?.queue) ? body.queue : [];
+        const stats = statsResponse.ok
+          ? await statsResponse.json().catch(() => ({}))
+          : {};
+        const transferring = Array.isArray(stats?.transferring)
+          ? stats.transferring
+          : [];
         inflight = queue
           .filter((q) => q && typeof q.name === "string")
-          .map((q) => ({
-            name: String(q.name).split("/").pop(),
-            size: typeof q.size === "number" ? q.size : null,
-          }));
+          .map((q) => {
+            const queuePath = String(q.name);
+            const queueName = queuePath.split("/").pop();
+            const transfer = transferring.find((item) => {
+              if (!item || typeof item.name !== "string") return false;
+              return item.name === queuePath || item.name.split("/").pop() === queueName;
+            });
+            return {
+              id: typeof q.id === "number" ? q.id : null,
+              name: queueName,
+              path: queuePath,
+              size: typeof transfer?.size === "number"
+                ? transfer.size
+                : typeof q.size === "number" ? q.size : null,
+              bytes: typeof transfer?.bytes === "number" ? transfer.bytes : 0,
+              percentage: typeof transfer?.percentage === "number"
+                ? Math.max(0, Math.min(100, transfer.percentage))
+                : 0,
+              speed: typeof transfer?.speedAvg === "number"
+                ? transfer.speedAvg
+                : typeof transfer?.speed === "number" ? transfer.speed : 0,
+              eta: typeof transfer?.eta === "number" ? transfer.eta : null,
+              status: transfer ? "uploading" : "queued",
+            };
+          });
       }
     } catch {
       // rc not up yet / transient — don't clear the indicator on a blip.
       return;
     }
-    const key = inflight.map((i) => i.name).sort().join("|");
+    const key = JSON.stringify(inflight.map((item) => ({
+      name: item.name,
+      percentage: Math.round(item.percentage),
+      speed: Math.round(item.speed),
+      eta: item.eta == null ? null : Math.round(item.eta),
+      status: item.status,
+    })));
     if (key === lastDriveQueueKey) return; // unchanged → don't spam IPC
     lastDriveQueueKey = key;
     sendDriveActivity(inflight);
@@ -2988,6 +3083,7 @@ let updateState = {
   version: null,
   percent: 0,
   error: null,
+  requiresManualInstall: false,
 };
 // Set when the user explicitly triggers an install so the quit path knows to
 // hand off to Squirrel rather than hard-exit.
@@ -2999,12 +3095,41 @@ function emitUpdateStatus() {
   }
 }
 
+function installedAppRequiresManualUpdate() {
+  if (process.platform !== "darwin" || !app.isPackaged || typeof process.getuid !== "function") {
+    return false;
+  }
+
+  const executable = app.getPath("exe");
+  const appBundle = executable.replace(/\/Contents\/MacOS\/[^/]+$/, "");
+  if (!appBundle.endsWith(".app")) return false;
+
+  try {
+    // A .pkg installs the bundle as root. Squirrel.Mac then asks to add a
+    // privileged helper every time an automatic install retries. Only use its
+    // silent quit-time path for user-owned bundles (normally installed from
+    // the DMG); system-managed copies update through an explicit DMG download.
+    return fssync.statSync(appBundle).uid !== process.getuid();
+  } catch {
+    return false;
+  }
+}
+
+function latestDesktopDmgUrl() {
+  const filename = process.arch === "x64" ? "snip-desktop-x64.dmg" : "snip-desktop.dmg";
+  return `${WEB_APP_URL}/downloads/${filename}`;
+}
+
 function setupAutoUpdater() {
+  const requiresManualInstall = installedAppRequiresManualUpdate();
+  updateState = { ...updateState, requiresManualInstall };
   // Download in the background, but don't swap the bundle mid-session — an
   // editor with the mounted drive open shouldn't get yanked. Install lands on
   // the next quit (autoInstallOnAppQuit) or on explicit "Restart & install".
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Root-owned .pkg installs are deliberately manual: silently retrying them
+  // creates the recurring macOS "add a new helper tool" approval dialog.
+  autoUpdater.autoDownload = !requiresManualInstall;
+  autoUpdater.autoInstallOnAppQuit = !requiresManualInstall;
   autoUpdater.logger = {
     info: (m) => console.log("[updater]", m),
     warn: (m) => console.warn("[updater]", m),
@@ -3133,6 +3258,13 @@ ipcMain.handle("update:check", async () => {
 });
 
 ipcMain.handle("update:install", async () => {
+  if (
+    updateState.requiresManualInstall &&
+    (updateState.status === "available" || updateState.status === "downloaded")
+  ) {
+    await shell.openExternal(latestDesktopDmgUrl());
+    return { ok: true, manual: true };
+  }
   if (updateState.status !== "downloaded") return { ok: false, reason: "no-update" };
   isQuittingForUpdate = true;
   // Detach the FUSE mount before Squirrel swaps the app bundle — otherwise the
@@ -3315,9 +3447,18 @@ function createWindow() {
   // Keep the window on our web app. External links (Stripe, docs, OAuth popups
   // we don't host) open in the user's real browser instead of navigating the
   // app shell away — which would also strip the native bridge.
+  // Both the canonical domain and the legacy vercel.app host count as
+  // "ours": older installs still load the legacy URL, and the server now
+  // 307s it to www.snip.film. Treating either as foreign would cancel the
+  // hop and strand the window on a blank page.
+  const OUR_ORIGINS = new Set([
+    new URL(WEB_APP_URL).origin,
+    "https://www.snip.film",
+    "https://snipfilm.vercel.app",
+  ]);
   const isOurApp = (url) => {
     try {
-      return new URL(url).origin === new URL(WEB_APP_URL).origin;
+      return OUR_ORIGINS.has(new URL(url).origin);
     } catch {
       return false;
     }

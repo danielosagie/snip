@@ -59,7 +59,7 @@ export function AddSectionDialog({ open, onOpenChange, onConfirm }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="surface-soft max-w-md">
         <DialogHeader>
           <DialogTitle>New section</DialogTitle>
           <DialogDescription>
@@ -69,7 +69,7 @@ export function AddSectionDialog({ open, onOpenChange, onConfirm }: Props) {
 
         <form onSubmit={(e) => void submit(e)} className="space-y-3 pt-2">
           <label className="block">
-            <div className="text-[10px] uppercase tracking-[0.15em] text-[#888] font-bold mb-1">
+            <div className="mb-1 text-[13px] font-medium text-[#6E6E73]">
               Section title
             </div>
             <Input
@@ -81,7 +81,7 @@ export function AddSectionDialog({ open, onOpenChange, onConfirm }: Props) {
             />
           </label>
           {error ? (
-            <div className="text-xs font-bold text-[#dc2626]">{error}</div>
+            <div className="rounded-[11px] bg-[#FFF5F5] p-3 text-xs font-medium text-[#8A2B34]">{error}</div>
           ) : null}
           <DialogFooter>
             <Button

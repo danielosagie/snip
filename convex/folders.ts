@@ -1,7 +1,8 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { requireProjectAccess } from "./auth";
+import { mutation, query, type MutationCtx } from "./_generated/server";
+import { identityName, requireProjectAccess } from "./auth";
 import { Id, Doc } from "./_generated/dataModel";
+import { removeSearchable } from "./search";
 
 /**
  * Folders inside a project. Two surfaces:
@@ -24,6 +25,66 @@ function sanitizeName(input: string): string {
     throw new Error('Folder names can\'t contain \\ / : * ? " < > |');
   }
   return cleaned;
+}
+
+/** Remove a folder tree but keep its files recoverable in Recently deleted. */
+export async function trashFolderTree(
+  ctx: MutationCtx,
+  folder: Doc<"folders">,
+  deletedByName: string,
+): Promise<{ folderCount: number; fileCount: number }> {
+  const [projectFolders, projectVideos] = await Promise.all([
+    ctx.db
+      .query("folders")
+      .withIndex("by_project", (q) => q.eq("projectId", folder.projectId))
+      .collect(),
+    ctx.db
+      .query("videos")
+      .withIndex("by_project", (q) => q.eq("projectId", folder.projectId))
+      .collect(),
+  ]);
+
+  const folderIds = new Set<string>([folder._id]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const candidate of projectFolders) {
+      if (
+        candidate.parentFolderId &&
+        folderIds.has(candidate.parentFolderId) &&
+        !folderIds.has(candidate._id)
+      ) {
+        folderIds.add(candidate._id);
+        changed = true;
+      }
+    }
+  }
+
+  const now = Date.now();
+  const containedVideos = projectVideos.filter(
+    (video) => video.folderId && folderIds.has(video.folderId),
+  );
+  for (const video of containedVideos) {
+    await ctx.db.patch(video._id, {
+      folderId: undefined,
+      deletedAt: video.deletedAt ?? now,
+      deletedByName: video.deletedByName ?? deletedByName,
+      driveModifiedAt: now,
+      driveVersion: (video.driveVersion ?? 0) + 1,
+    });
+  }
+
+  const foldersToDelete = projectFolders.filter((candidate) =>
+    folderIds.has(candidate._id),
+  );
+  for (const candidate of foldersToDelete) {
+    await ctx.db.delete(candidate._id);
+  }
+
+  return {
+    folderCount: foldersToDelete.length,
+    fileCount: containedVideos.filter((video) => !video.deletedAt).length,
+  };
 }
 
 export const list = query({
@@ -57,13 +118,18 @@ export const list = query({
           .query("videos")
           .withIndex("by_folder", (q) => q.eq("folderId", folder._id))
           .collect();
+        const visibleLineages = new Set(
+          videos
+            .filter((video) => !video.deletedAt)
+            .map((video) => String(video.lineageId ?? video._id)),
+        );
         return {
           _id: folder._id,
           _creationTime: folder._creationTime,
           name: folder.name,
           parentFolderId: folder.parentFolderId ?? null,
           createdByName: folder.createdByName,
-          itemCount: subFolders.length + videos.length,
+          itemCount: subFolders.length + visibleLineages.size,
         };
       }),
     );
@@ -114,6 +180,7 @@ export const create = mutation({
       throw new Error(`A folder named "${name}" already exists here.`);
     }
 
+    const now = Date.now();
     return await ctx.db.insert("folders", {
       projectId: args.projectId,
       parentFolderId: args.parentFolderId,
@@ -123,6 +190,8 @@ export const create = mutation({
         (user as { name?: string; email?: string }).name ??
         (user as { email?: string }).email ??
         "Unknown",
+      driveModifiedAt: now,
+      driveVersion: 1,
     });
   },
 });
@@ -224,7 +293,11 @@ export const rename = mutation({
         throw new Error(`A folder named "${name}" already exists here.`);
       }
     }
-    await ctx.db.patch(folder._id, { name });
+    await ctx.db.patch(folder._id, {
+      name,
+      driveModifiedAt: Date.now(),
+      driveVersion: (folder.driveVersion ?? 0) + 1,
+    });
   },
 });
 
@@ -233,27 +306,107 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const folder = await ctx.db.get(args.folderId);
     if (!folder) return;
-    await requireProjectAccess(ctx, folder.projectId, "admin");
+    const { user } = await requireProjectAccess(ctx, folder.projectId, "admin");
+    const deletedByName =
+      (user as { name?: string; email?: string }).name ??
+      (user as { email?: string }).email ??
+      "Unknown";
+    return await trashFolderTree(ctx, folder, deletedByName);
+  },
+});
 
-    // Refuse to delete non-empty folders. Moving contents elsewhere is a
-    // separate explicit action — we'd rather throw than silently orphan or
-    // delete videos.
-    const sub = await ctx.db
-      .query("folders")
-      .withIndex("by_project_and_parent", (q) =>
-        q.eq("projectId", folder.projectId).eq("parentFolderId", folder._id),
-      )
-      .first();
-    const vid = await ctx.db
-      .query("videos")
-      .withIndex("by_folder", (q) => q.eq("folderId", folder._id))
-      .first();
-    if (sub || vid) {
-      throw new Error(
-        "Folder isn't empty. Move or delete its contents first.",
-      );
+/** Atomic bulk trash for the project selection toolbar. */
+export const removeSelection = mutation({
+  args: {
+    projectId: v.id("projects"),
+    videoIds: v.array(v.id("videos")),
+    folderIds: v.array(v.id("folders")),
+    contractIds: v.optional(v.array(v.id("contracts"))),
+    removeLegacyContract: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const { user, project } = await requireProjectAccess(
+      ctx,
+      args.projectId,
+      "admin",
+    );
+    const deletedByName =
+      (user as { name?: string; email?: string }).name ??
+      (user as { email?: string }).email ??
+      "Unknown";
+    const now = Date.now();
+    const contractIds = args.contractIds ?? [];
+
+    // Validate every document before the first write so a pending signing
+    // request cannot leave a mixed selection half-deleted.
+    const selectedContracts = await Promise.all(
+      contractIds.map((contractId) => ctx.db.get(contractId)),
+    );
+    for (const contract of selectedContracts) {
+      if (!contract || contract.projectId !== args.projectId) {
+        throw new Error("One of the selected documents is no longer available.");
+      }
+      if (contract.status === "pending") {
+        throw new Error(
+          `Void “${contract.title}” before deleting it because its signing links are still active.`,
+        );
+      }
     }
-    await ctx.db.delete(folder._id);
+    if (args.removeLegacyContract && project.contract) {
+      await ctx.db.insert("trashedContracts", {
+        projectId: args.projectId,
+        teamId: project.teamId,
+        projectName: project.name,
+        contract: project.contract,
+        deletedAt: now,
+        deletedByClerkId: user.subject,
+        deletedByName: identityName(user),
+      });
+      await ctx.db.patch(args.projectId, { contract: undefined });
+      await removeSearchable(ctx, "document", args.projectId).catch(() => {});
+    }
+
+    for (const videoId of args.videoIds) {
+      const video = await ctx.db.get(videoId);
+      if (!video || video.projectId !== args.projectId) {
+        throw new Error("One of the selected files is no longer available.");
+      }
+      if (!video.deletedAt) {
+        await ctx.db.patch(videoId, {
+          deletedAt: now,
+          deletedByName,
+          driveModifiedAt: now,
+          driveVersion: (video.driveVersion ?? 0) + 1,
+        });
+      }
+    }
+
+    let removedFolders = 0;
+    let containedFiles = 0;
+    const selectedFolders = await Promise.all(
+      args.folderIds.map((folderId) => ctx.db.get(folderId)),
+    );
+    for (const folder of selectedFolders) {
+      if (!folder) continue;
+      if (folder.projectId !== args.projectId) {
+        throw new Error("One of the selected folders is no longer available.");
+      }
+      const result = await trashFolderTree(ctx, folder, deletedByName);
+      removedFolders += result.folderCount;
+      containedFiles += result.fileCount;
+    }
+    for (const contract of selectedContracts) {
+      if (contract && !contract.deletedAt) {
+        await ctx.db.patch(contract._id, { deletedAt: now, deletedByName });
+      }
+    }
+
+    return {
+      fileCount: args.videoIds.length + containedFiles,
+      folderCount: removedFolders,
+      documentCount: selectedContracts.length,
+      legacyContractCount: args.removeLegacyContract && project.contract ? 1 : 0,
+    };
   },
 });
 
@@ -272,7 +425,11 @@ export const moveVideoToFolder = mutation({
         throw new Error("Target folder doesn't belong to this project.");
       }
     }
-    await ctx.db.patch(args.videoId, { folderId: args.folderId });
+    await ctx.db.patch(args.videoId, {
+      folderId: args.folderId,
+      driveModifiedAt: Date.now(),
+      driveVersion: (video.driveVersion ?? 0) + 1,
+    });
   },
 });
 
@@ -337,6 +494,10 @@ export const moveFolder = mutation({
       throw new Error(`A folder named "${folder.name}" already exists there.`);
     }
 
-    await ctx.db.patch(folder._id, { parentFolderId: args.parentFolderId });
+    await ctx.db.patch(folder._id, {
+      parentFolderId: args.parentFolderId,
+      driveModifiedAt: Date.now(),
+      driveVersion: (folder.driveVersion ?? 0) + 1,
+    });
   },
 });

@@ -7,15 +7,15 @@ import { Link } from "@tiptap/extension-link";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { FontFamily } from "@tiptap/extension-font-family";
+import { Placeholder } from "@tiptap/extension-placeholder";
 import { FontSize } from "./fontSizeExtension";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Google-Doc-style contract preview. Renders the contract HTML inside
- * a paper-styled surface (white background, 8.5" max width, generous
- * page margins, drop shadow) so the user feels like they're looking
- * at a printable document rather than a terminal printout.
+ * Focused document canvas. Renders editable HTML inside a paper-styled
+ * surface with an external formatting toolbar supplied by the route.
+ * Contract capabilities are deliberately absent from this component.
  *
  * Backed by Tiptap so the user can type directly into the preview.
  * When `auto` is true (default), the editor stays in sync with the
@@ -63,6 +63,14 @@ export function ContractDocPreview({
       TextStyle,
       FontFamily.configure({ types: ["textStyle"] }),
       FontSize,
+      Placeholder.configure({
+        placeholder: ({ node }) =>
+          node.type.name === "heading"
+            ? "Heading"
+            : "Start writing…",
+        emptyEditorClass: "is-editor-empty",
+        emptyNodeClass: "is-empty",
+      }),
     ],
     content: html,
     editable,
@@ -83,7 +91,7 @@ export function ContractDocPreview({
         // No outline / focus ring inside the paper page — the page
         // itself is the visual container.
         class:
-          "outline-none focus:outline-none min-h-[600px] cursor-text",
+          "outline-none focus:outline-none min-h-[65svh] sm:min-h-[600px] cursor-text",
       },
     },
   });
@@ -111,24 +119,24 @@ export function ContractDocPreview({
   }, [editor, onEditorReady]);
 
   return (
-    <div className="min-h-full px-6 sm:px-10 py-8 flex flex-col items-center bg-[#e8e8e0]">
+    <div className="flex min-h-full flex-col items-center bg-[#FAFAFA] px-0 py-3 sm:px-10 sm:py-8">
       {/* Paper page — sized to ~A4 / Letter ratio with generous
           margins. The shadow + 2px border gives it the brutalist
           page-on-desk look without abandoning the rest of the
           palette. */}
       <article
         className={cn(
-          "w-full max-w-[816px] bg-white text-[#1a1a1a] border-2 border-[#1a1a1a] shadow-[6px_6px_0px_0px_var(--shadow-color)]",
+          "w-full max-w-[816px] rounded-[14px] border border-[#E8E8EC] bg-white text-[#131315]",
           // Page padding (1 inch = 96px) — visible on top + bottom
           // so the user can see when content fills the page.
-          "px-[96px] py-[96px]",
+          "px-5 py-8 sm:px-[96px] sm:py-[96px]",
         )}
         // Force Inter / system sans inside the page even though the
         // rest of the app uses mono — contracts read better as a
         // long-form doc.
         style={{
           fontFamily:
-            'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+            '"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
           lineHeight: 1.6,
           fontSize: "14px",
         }}
@@ -137,7 +145,7 @@ export function ContractDocPreview({
           .snip-contract-doc h1, .snip-contract-doc h2, .snip-contract-doc h3 {
             font-weight: 700;
             letter-spacing: -0.01em;
-            color: #1a1a1a;
+            color: #131315;
             margin-top: 1.4em;
             margin-bottom: 0.4em;
           }
@@ -153,6 +161,13 @@ export function ContractDocPreview({
           .snip-contract-doc li { margin: 0.2em 0; }
           .snip-contract-doc strong { font-weight: 700; }
           .snip-contract-doc em { font-style: italic; }
+          .snip-contract-doc .is-empty:first-child::before {
+            color: #A0A0A5;
+            content: attr(data-placeholder);
+            float: left;
+            height: 0;
+            pointer-events: none;
+          }
         `}</style>
         <div className="snip-contract-doc">
           <EditorContent editor={editor} />

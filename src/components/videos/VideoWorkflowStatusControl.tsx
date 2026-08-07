@@ -1,4 +1,4 @@
-import { type MouseEvent } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type MouseEvent } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,10 +29,66 @@ function workflowStatusLabel(status: VideoWorkflowStatus) {
 }
 
 function workflowStatusDotColor(status: VideoWorkflowStatus) {
-  if (status === "done") return "bg-[#FF6600]";
-  if (status === "rework") return "bg-[#ca8a04]";
-  return "bg-[#888]";
+  if (status === "done") return "bg-[#225B36]";
+  if (status === "rework") return "bg-[#D39329]";
+  return "bg-[#FF6600]";
 }
+
+export type VideoWorkflowStatusButtonProps = {
+  status: VideoWorkflowStatus;
+  size?: "sm" | "lg";
+  soft?: boolean;
+  /** Marks the node for focus restoration after a deferred menu arms. */
+  "data-defer-focus"?: string;
+} & ButtonHTMLAttributes<HTMLButtonElement>;
+
+/**
+ * The trigger, on its own. Exported so a caller can render the control's
+ * exact look WITHOUT paying for a Radix menu root — the project grid uses it
+ * as a placeholder and swaps in the real control once the tile is hovered or
+ * focused (see `useDeferredMenus`). Sharing the markup is what keeps the two
+ * states pixel-identical.
+ */
+export const VideoWorkflowStatusButton = forwardRef<
+  HTMLButtonElement,
+  VideoWorkflowStatusButtonProps
+>(function VideoWorkflowStatusButton(
+  { status, size = "sm", soft = false, className, disabled, ...rest },
+  ref,
+) {
+  const isLg = size === "lg";
+  return (
+    <button
+      ref={ref}
+      type="button"
+      disabled={disabled}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium tracking-normal text-[#6E6E73] transition-colors hover:bg-[#E8E8EC] hover:text-[#131315]",
+        soft ? "bg-[#F1F1F3]" : "border border-[#D8D8DE] bg-white",
+        disabled
+          ? "cursor-not-allowed opacity-50"
+          : "cursor-pointer",
+        isLg ? "text-xs" : "text-[11px]",
+        className,
+      )}
+      aria-label="Update review status"
+      title="Update review status"
+      {...rest}
+    >
+      <span
+        className={cn(
+          "rounded-full shrink-0",
+          workflowStatusDotColor(status),
+          isLg ? "h-2.5 w-2.5" : "h-2 w-2",
+        )}
+      />
+      {workflowStatusLabel(status)}
+      <ChevronDown
+        className={cn("opacity-50", isLg ? "h-3.5 w-3.5" : "h-3 w-3")}
+      />
+    </button>
+  );
+});
 
 export type VideoWorkflowStatusControlProps = {
   status: VideoWorkflowStatus;
@@ -41,6 +97,11 @@ export type VideoWorkflowStatusControlProps = {
   stopPropagation?: boolean;
   disabled?: boolean;
   className?: string;
+  soft?: boolean;
+  /** Open the menu as soon as it mounts — used when the control replaces a
+   *  deferred placeholder the user just clicked. */
+  defaultOpen?: boolean;
+  triggerProps?: Omit<VideoWorkflowStatusButtonProps, "status">;
 };
 
 export function VideoWorkflowStatusControl({
@@ -50,6 +111,9 @@ export function VideoWorkflowStatusControl({
   stopPropagation = false,
   disabled = false,
   className,
+  soft = false,
+  defaultOpen,
+  triggerProps,
 }: VideoWorkflowStatusControlProps) {
   const handleClick = (event: MouseEvent) => {
     if (stopPropagation) {
@@ -57,38 +121,23 @@ export function VideoWorkflowStatusControl({
     }
   };
 
-  const isLg = size === "lg";
-
   return (
-    <DropdownMenu>
+    <DropdownMenu defaultOpen={defaultOpen}>
       <DropdownMenuTrigger asChild onClick={handleClick}>
-        <button
-          type="button"
+        <VideoWorkflowStatusButton
+          status={status}
+          size={size}
+          soft={soft}
           disabled={disabled}
-          className={cn(
-            "inline-flex items-center gap-1.5 font-bold uppercase tracking-wider transition-colors",
-            disabled
-              ? "cursor-not-allowed opacity-50"
-              : "cursor-pointer hover:text-[#1a1a1a]",
-            isLg ? "text-xs text-[#1a1a1a]" : "text-[10px] text-[#888]",
-            className,
-          )}
-          aria-label="Update review status"
-          title="Update review status"
-        >
-          <span className={cn(
-            "rounded-full shrink-0",
-            workflowStatusDotColor(status),
-            isLg ? "h-2.5 w-2.5" : "h-2 w-2",
-          )} />
-          {workflowStatusLabel(status)}
-          <ChevronDown className={cn(
-            "opacity-50",
-            isLg ? "h-3.5 w-3.5" : "h-3 w-3",
-          )} />
-        </button>
+          className={className}
+          {...triggerProps}
+        />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" onClick={handleClick}>
+      <DropdownMenuContent
+        align="start"
+        onClick={handleClick}
+        className="rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315]"
+      >
         <DropdownMenuRadioGroup
           value={status}
           onValueChange={(nextStatus) => {
@@ -97,7 +146,13 @@ export function VideoWorkflowStatusControl({
           }}
         >
           {VIDEO_WORKFLOW_STATUS_OPTIONS.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value} className="gap-2">
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              className={cn(
+                "gap-2 rounded-[8px] py-1.5 pl-8 pr-2.5 text-[13px] font-medium hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]",
+              )}
+            >
               <span className={cn(
                 "h-2 w-2 rounded-full shrink-0",
                 workflowStatusDotColor(option.value),

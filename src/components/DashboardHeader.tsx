@@ -7,10 +7,11 @@ import { useConvex } from "convex/react";
 import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmDashboardIndex } from "../../app/routes/dashboard/-index.data";
 import { useSidebarState } from "@/lib/sidebarContext";
+import { cn } from "@/lib/utils";
 
 function ThemeToggleButton() {
   return (
-    <ThemeStyleToggle className="w-8 h-8 flex items-center justify-center text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] transition-colors" />
+    <ThemeStyleToggle className="flex h-8 w-8 items-center justify-center rounded-full text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315]" />
   );
 }
 
@@ -39,13 +40,13 @@ export function DashboardHeader({
   );
 
   return (
-    <header className="flex-shrink-0 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] grid grid-cols-[1fr_auto] sm:grid-cols-[auto_1fr_auto] items-center px-4 sm:px-6">
+    <header className="grid min-h-14 flex-shrink-0 grid-cols-[1fr_auto] items-center border-b border-[#E8E8EC] bg-white px-4 sm:grid-cols-[auto_1fr_auto] sm:px-6">
       {/* Breadcrumb + sidebar toggle */}
-      <div className="flex items-center text-xl font-black tracking-tighter text-[#1a1a1a] min-w-0 h-11 sm:h-14">
+      <div className="flex h-14 min-w-0 items-center text-sm leading-5 text-[#6E6E73]">
         <button
           type="button"
           onClick={toggle}
-          className="hidden md:inline-flex items-center justify-center w-8 h-8 mr-2 text-[#888] hover:text-[#1a1a1a] hover:bg-[#e8e8e0] flex-shrink-0"
+          className="mr-2 hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] text-[#6E6E73] transition-colors hover:bg-[#F1F1F3] hover:text-[#131315] md:inline-flex"
           title={collapsed ? "Open sidebar" : "Close sidebar"}
           aria-label={collapsed ? "Open sidebar" : "Close sidebar"}
         >
@@ -60,7 +61,7 @@ export function DashboardHeader({
             <Link
               to="/dashboard"
               preload="intent"
-              className="hover:text-[#FF6600] transition-colors mr-2 flex-shrink-0"
+              className="mr-2 flex-shrink-0 transition-colors hover:text-[#131315]"
               {...prewarmHomeIntentHandlers}
             >
               Home
@@ -69,18 +70,21 @@ export function DashboardHeader({
               const isIntermediate = paths.length >= 2 && index < paths.length - 1;
               return (
               <div key={index} className={`${isIntermediate ? 'hidden sm:flex' : 'flex'} items-center min-w-0 flex-shrink`}>
-                <span className="text-[#888] mr-2 flex-shrink-0">/</span>
+                <span className="mr-2 flex-shrink-0 text-[#A0A0A5]">/</span>
                 {path.href ? (
                   <Link
                     to={path.href}
                     preload="intent"
-                    className="hover:text-[#FF6600] transition-colors truncate mr-2"
+                    className={cn(
+                      "mr-2 truncate transition-colors hover:text-[#131315]",
+                      index === paths.length - 1 && "font-medium text-[#131315]",
+                    )}
                     {...path.prewarmIntentHandlers}
                   >
                     {path.label}
                   </Link>
                 ) : (
-                  <div className="truncate flex items-center gap-3">
+                  <div className="flex items-center gap-3 truncate font-medium text-[#131315]">
                     {path.label}
                   </div>
                 )}
@@ -94,7 +98,7 @@ export function DashboardHeader({
       {/* User controls — pinned top-right. On desktop these live in the
           sidebar footer, but we keep them on mobile + when the sidebar
           is collapsed for quick reach. */}
-      <div className="row-start-1 col-start-2 sm:col-start-3 flex items-center gap-4 pl-4 border-l-2 border-[#1a1a1a]/10 h-8 md:hidden">
+      <div className="row-start-1 col-start-2 flex h-8 items-center gap-3 border-l border-[#E8E8EC] pl-4 sm:col-start-3 md:hidden">
         <ThemeToggleButton />
         <UserButton
           appearance={{
@@ -105,10 +109,10 @@ export function DashboardHeader({
               colorNeutral: "var(--border)",
             },
             elements: {
-              avatarBox: "w-8 h-8 rounded-none border-2 border-[var(--border)]",
-              userButtonPopoverCard: "bg-[var(--background)] border-2 border-[var(--border)] rounded-none shadow-[8px_8px_0px_0px_var(--shadow-color)]",
-              userButtonPopoverActionButton: "!text-[var(--foreground)] hover:!bg-[var(--surface-alt)] rounded-none",
-              userButtonPopoverActionButtonText: "!text-[var(--foreground)] hover:!text-[var(--foreground)] font-mono font-bold",
+              avatarBox: "w-8 h-8 rounded-full border border-[#E8E8EC]",
+              userButtonPopoverCard: "bg-white border border-[#E8E8EC] rounded-[14px] shadow-none",
+              userButtonPopoverActionButton: "!text-[#131315] hover:!bg-[#F1F1F3] rounded-[10px]",
+              userButtonPopoverActionButtonText: "!text-[#131315] hover:!text-[#131315] font-sans font-medium",
               userButtonPopoverActionButtonIcon: "!text-[var(--foreground)] hover:!text-[var(--foreground)]",
               userButtonPopoverFooter: "hidden",
             },

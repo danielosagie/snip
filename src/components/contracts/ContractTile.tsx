@@ -94,8 +94,8 @@ export function ContractTile({
   const subtext = contract?.clientName
     ? `Client: ${contract.clientName}`
     : status === "missing"
-      ? "Statement of Work"
-      : "Statement of Work";
+      ? "Statement of work"
+      : "Statement of work";
 
   return (
     <Link
@@ -112,37 +112,41 @@ export function ContractTile({
       }}
     >
       <div
-        className="relative aspect-video overflow-hidden border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] group-hover:translate-y-[2px] group-hover:translate-x-[2px] group-hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] transition-all flex items-center justify-center"
+        className="relative flex aspect-video items-center justify-center overflow-hidden rounded-[14px] border border-[#E8E8EC] transition-colors"
         style={{
           background:
             status === "signed"
-              ? "#FF6600"
+              ? "#F2FBF5"
               : status === "sent"
-                ? "#b45309"
+                ? "#FFF9EC"
                 : status === "draft"
-                  ? "#e8e8e0"
-                  : "#1a1a1a",
+                  ? "#FAFAFA"
+                  : "#F1F1F3",
         }}
       >
         <FileSignature
           className={
             "h-16 w-16 " +
-            (status === "draft"
-              ? "text-[#1a1a1a]/80"
-              : "text-[#f0f0e8]")
+            (status === "signed"
+              ? "text-[#225B36]"
+              : status === "sent"
+                ? "text-[#74521D]"
+                : status === "draft"
+                  ? "text-[#6E6E73]"
+                  : "text-[#A0A0A5]")
           }
         />
-        <div className="absolute top-2 left-2 px-2 py-0.5 bg-[#f0f0e8] text-[#1a1a1a] text-[10px] font-mono font-bold uppercase tracking-wider">
+        <div className="absolute left-2 top-2 rounded-full border border-[#D8D8DE] bg-white px-2 py-0.5 text-[11px] font-medium text-[#6E6E73]">
           .docx
         </div>
         <div className="absolute bottom-2 right-2 flex items-center gap-1">
           {status === "signed" ? (
-            <span className="px-1.5 py-0.5 bg-[#f0f0e8] text-[#FF6600] text-[10px] font-bold uppercase inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#F2FBF5] px-2 py-1 text-[11px] font-medium text-[#225B36]">
               <Check className="h-3 w-3" />
               Signed
             </span>
           ) : status === "sent" ? (
-            <span className="px-1.5 py-0.5 bg-[#f0f0e8] text-[#b45309] text-[10px] font-bold uppercase inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#FFF9EC] px-2 py-1 text-[11px] font-medium text-[#74521D]">
               <Send className="h-3 w-3" />
               Sent
             </span>
@@ -151,15 +155,15 @@ export function ContractTile({
             // red "missing" alarm. Deletion is final; this tile lives
             // as the project's contract slot whether or not anyone's
             // drafted into it yet.
-            <span className="px-1.5 py-0.5 bg-[#f0f0e8] text-[#1a1a1a] text-[10px] font-bold uppercase inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] font-medium text-[#6E6E73]">
               <Plus className="h-3 w-3" />
               Draft
             </span>
           ) : null}
         </div>
         {contract?.docxS3Key ? (
-          <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-[#FF6600] text-[#f0f0e8] text-[9px] font-mono font-bold uppercase">
-            in folder
+          <div className="absolute right-2 top-2 rounded-full bg-[#FFF0E6] px-2 py-1 text-[11px] font-medium text-[#D14E00]">
+            In folder
           </div>
         ) : null}
         {canDelete && contract ? (
@@ -172,7 +176,7 @@ export function ContractTile({
                 <button
                   type="button"
                   onClick={(e) => e.preventDefault()}
-                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center bg-black/60 hover:bg-black/80 text-white"
+                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-[#D8D8DE] bg-white text-[#131315] transition-colors hover:bg-[#F1F1F3]"
                   aria-label="Contract menu"
                 >
                   <MoreVertical className="h-4 w-4" />
@@ -181,7 +185,7 @@ export function ContractTile({
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
                   onClick={(e) => void handleDelete(e)}
-                  className="text-[#dc2626] focus:text-[#dc2626]"
+                  className="text-[#D8434F] focus:text-[#D8434F]"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete contract
@@ -192,16 +196,16 @@ export function ContractTile({
         ) : null}
       </div>
       <div className="mt-3">
-        <h3 className="font-black text-sm text-[#1a1a1a] truncate group-hover:underline">
-          Contract — {projectName}
+        <h3 className="truncate text-sm font-semibold text-[#131315] group-hover:underline">
+          Contract: {projectName}
         </h3>
-        <div className="flex items-center gap-2 mt-1 text-xs text-[#888]">
+        <div className="mt-1 flex items-center gap-2 text-xs text-[#6E6E73]">
           <FileText className="h-3 w-3 flex-shrink-0" />
           <span className="truncate">{headline}</span>
           <span className="ml-auto truncate">{subtext}</span>
         </div>
         {contract?.priceCents && contract.currency ? (
-          <div className="text-[11px] font-mono text-[#888] mt-1">
+          <div className="mt-1 text-[11px] text-[#6E6E73]">
             {(contract.priceCents / 100).toFixed(2)}{" "}
             {contract.currency.toUpperCase()}
           </div>

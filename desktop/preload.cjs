@@ -47,7 +47,7 @@ contextBridge.exposeInMainWorld("api", {
   drive: {
     // Native upload activity from rclone's VFS queue — fires the instant a
     // dropped file is queued for upload, before write-back/transfer finishes.
-    // Payload: { uploading: Array<{ name: string; size: number | null }> }.
+    // Payload includes per-file bytes, percentage, speed, ETA, and queue state.
     onActivity: (handler) => {
       const listener = (_event, payload) => handler(payload);
       ipcRenderer.on("drive:activity", listener);

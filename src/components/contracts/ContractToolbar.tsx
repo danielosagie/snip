@@ -30,7 +30,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 
-/** Snip-styled select replacement (native <select> can't be themed). */
+/** Soft select replacement (native <select> can't be themed consistently). */
 function ToolbarSelect({
   label,
   options,
@@ -55,7 +55,7 @@ function ToolbarSelect({
           disabled={disabled}
           aria-label={label}
           title={label}
-          className="inline-flex h-7 items-center justify-between gap-1 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-2 text-xs font-bold uppercase tracking-wider text-[#1a1a1a] hover:bg-[#FFEDD5] disabled:opacity-40"
+          className="inline-flex h-7 items-center justify-between gap-1 rounded-[8px] border border-transparent bg-white px-2 text-[13px] font-medium text-[#131315] transition-colors hover:bg-[#F1F1F3] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315] disabled:opacity-40"
           style={{ minWidth }}
         >
           <span className="truncate">{current?.label ?? ""}</span>
@@ -67,10 +67,10 @@ function ToolbarSelect({
           <DropdownMenuItem
             key={o.value || "default"}
             onClick={() => onPick(o.value)}
-            className="flex items-center justify-between text-xs font-bold uppercase tracking-wider"
+            className="flex items-center justify-between text-[13px] font-medium"
           >
             {o.label}
-            {o.value === value ? <Check className="h-3.5 w-3.5 text-[#C2410C]" /> : null}
+            {o.value === value ? <Check className="h-3.5 w-3.5 text-[#D14E00]" /> : null}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -83,7 +83,7 @@ function ToolbarSelect({
  * Ghost-mode surface was missing (font, size, bold/italic/underline, headings,
  * lists, alignment, links). Binds to the lifted Tiptap editor instance and
  * re-renders on selection change so active states + the current font/size stay
- * accurate. Snip brutalist styling.
+ * accurate.
  */
 
 const FONT_FAMILIES: Array<{ label: string; value: string }> = [
@@ -116,10 +116,10 @@ function ToolButton({
       aria-label={title}
       aria-pressed={active}
       className={[
-        "inline-flex h-7 w-7 items-center justify-center border-2 border-[#1a1a1a] transition-colors disabled:opacity-40",
+        "inline-flex h-7 w-7 items-center justify-center rounded-[8px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#131315] disabled:opacity-40",
         active
-          ? "bg-[#1a1a1a] text-[#f0f0e8]"
-          : "bg-[#f0f0e8] text-[#1a1a1a] hover:bg-[#FFEDD5]",
+          ? "bg-[#FFF0E6] text-[#D14E00]"
+          : "bg-white text-[#131315] hover:bg-[#F1F1F3]",
       ].join(" ")}
     >
       {children}
@@ -132,7 +132,7 @@ function Group({ children }: { children: React.ReactNode }) {
 }
 
 function Divider() {
-  return <div className="mx-1 h-5 w-px bg-[#1a1a1a]/30" />;
+  return <div className="mx-1 h-5 w-px shrink-0 bg-[#E8E8EC]" />;
 }
 
 export function ContractToolbar({
@@ -176,7 +176,7 @@ export function ContractToolbar({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b-2 border-[#1a1a1a] bg-[#f0f0e8] px-3 py-2">
+    <div className="flex min-h-10 flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-[#E8E8EC] bg-white px-3 py-1.5 sm:px-4">
       <Group>
         <ToolButton
           title="Undo (⌘Z)"
@@ -358,7 +358,7 @@ export function ContractToolbar({
             type="button"
             onClick={onOpenFields}
             title="Place signature fields"
-            className="inline-flex items-center gap-1.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] px-3 h-7 text-[11px] font-bold uppercase tracking-wider text-[#f0f0e8] hover:bg-[#C2410C] transition-colors"
+            className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[#131315] bg-[#131315] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#2A2A2E]"
           >
             <PenTool className="h-3.5 w-3.5" />
             Fields

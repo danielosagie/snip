@@ -32,32 +32,41 @@ export function StorageUsageBar({
   const overCap = usage.percent >= 100;
 
   const fillColor = overCap
-    ? "bg-[#b91c1c]"
+    ? "bg-[#D8434F]"
     : nearCap
-      ? "bg-[#b45309]"
-      : "bg-[#C2410C]";
+      ? "bg-[#D39329]"
+      : "bg-[#FF6600]";
+
+  const compactFillColor = overCap
+    ? "bg-[#D8434F]"
+    : nearCap
+      ? "bg-[#D39329]"
+      : "bg-[#FF6600]";
 
   if (variant === "compact") {
     return (
-      <div className="px-2 pb-2 pt-1">
-        <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[#666]">
+      <div className="px-2.5 pb-2 pt-1">
+        <div className="flex items-center justify-between gap-2 text-[13px] leading-[18px] text-[#6E6E73]">
           <span>Storage</span>
-          <span className="text-[#1a1a1a]">
+          <span className="truncate text-[#131315]">
             {formatBytes(usage.usedBytes)} / {formatBytes(usage.limitBytes)}
           </span>
         </div>
-        <div className="mt-1 h-1.5 border border-[#1a1a1a] bg-[#f0f0e8] relative">
+        <div className="relative mt-1.5 h-1.5 overflow-hidden rounded-full bg-[#F1F1F3]">
           <div
-            className={cn("absolute inset-y-0 left-0", fillColor)}
+            className={cn(
+              "absolute inset-y-0 left-0 rounded-full",
+              compactFillColor,
+            )}
             style={{ width: `${Math.min(100, usage.percent)}%` }}
           />
         </div>
         {(isFree && nearCap) || overCap ? (
           <Link
             to="/dashboard/billing"
-            className="mt-1 block text-[10px] font-mono font-bold uppercase tracking-wider text-[#C2410C] hover:underline"
+            className="mt-1 block text-xs font-medium text-[#D14E00] hover:underline"
           >
-            {overCap ? "Storage full · upgrade" : "Nearly full · upgrade"}
+            {overCap ? "Storage full, upgrade" : "Nearly full, upgrade"}
           </Link>
         ) : null}
       </div>
@@ -66,32 +75,32 @@ export function StorageUsageBar({
 
   // Full variant — billing page card.
   return (
-    <section className="mt-10 border-2 border-[#1a1a1a] p-5">
+    <section className="mt-10 rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-5">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h2 className="font-black text-sm uppercase tracking-tight">
+        <h2 className="text-base font-semibold tracking-tight text-[#131315]">
           Storage usage
         </h2>
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
+        <span className="rounded-full bg-[#F1F1F3] px-2.5 py-1 text-xs font-medium text-[#6E6E73]">
           {usage.label} plan
         </span>
       </div>
-      <div className="h-3 border-2 border-[#1a1a1a] bg-[#f0f0e8] relative">
+      <div className="relative h-2 overflow-hidden rounded-full bg-[#F1F1F3]">
         <div
-          className={cn("absolute inset-y-0 left-0", fillColor)}
+          className={cn("absolute inset-y-0 left-0 rounded-full", fillColor)}
           style={{ width: `${Math.min(100, usage.percent)}%` }}
         />
       </div>
-      <div className="mt-2 text-xs font-mono text-[#666] flex items-center justify-between">
+      <div className="mt-2 flex items-center justify-between text-xs text-[#6E6E73]">
         <span>
           {formatBytes(usage.usedBytes)} of {formatBytes(usage.limitBytes)} used
         </span>
-        <span className={cn(overCap || nearCap ? "text-[#b45309]" : "")}>
+        <span className={cn(overCap || nearCap ? "text-[#74521D]" : "")}>
           {usage.percent}%
         </span>
       </div>
 
       {/* Active / archived split — the retention model in one line. */}
-      <dl className="mt-4 grid grid-cols-3 gap-px border-2 border-[#1a1a1a] bg-[#1a1a1a] text-center font-mono">
+      <dl className="mt-4 grid grid-cols-3 overflow-hidden rounded-[11px] border border-[#E8E8EC] bg-[#F1F1F3] text-center">
         <Stat label="Active" value={formatBytes(usage.hotBytes)} hint="instant playback" />
         <Stat
           label="Archived"
@@ -101,19 +110,19 @@ export function StorageUsageBar({
         <Stat
           label="On drive"
           value={formatBytes(usage.driveBytes)}
-          hint="not billed"
+          hint="managed source"
         />
       </dl>
-      <p className="text-[11px] text-[#888] mt-2 leading-snug max-w-prose">
+      <p className="mt-2 max-w-prose text-[11px] leading-snug text-[#6E6E73]">
         Clips you haven&apos;t watched in 30 days are archived to cut storage
-        cost — the source stays put and the player rebuilds full quality on the
-        next watch. <span className="text-[#666]">Archived still counts toward your cap; on-drive doesn&apos;t.</span>
+        cost. The source stays put and the player rebuilds full quality on the
+        next watch. <span>All Snip-managed source files count toward your storage capacity.</span>
       </p>
 
       {isFree ? (
-        <p className="text-xs text-[#666] mt-3 max-w-prose">
-          Free workspaces get 50 GB. Upgrade to Basic or Pro for more
-          space and bigger uploads.
+        <p className="mt-3 max-w-prose text-xs text-[#6E6E73]">
+          Free workspaces get 25 GB. Upgrade to Basic or Pro for more
+          space and unlimited collaborators.
         </p>
       ) : null}
     </section>
@@ -130,12 +139,12 @@ function Stat({
   hint: string;
 }) {
   return (
-    <div className="bg-[#f0f0e8] px-2 py-3">
-      <dt className="text-[10px] uppercase tracking-wider text-[#888]">
+    <div className="bg-[#FAFAFA] px-2 py-3 [&:not(:last-child)]:border-r [&:not(:last-child)]:border-[#F1F1F3]">
+      <dt className="text-xs text-[#6E6E73]">
         {label}
       </dt>
-      <dd className="mt-1 text-sm font-bold text-[#1a1a1a]">{value}</dd>
-      <dd className="text-[10px] text-[#888]">{hint}</dd>
+      <dd className="mt-1 text-sm font-semibold text-[#131315]">{value}</dd>
+      <dd className="text-[10px] text-[#A0A0A5]">{hint}</dd>
     </div>
   );
 }

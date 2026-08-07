@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,8 +22,7 @@ import { Button } from "@/components/ui/button";
  */
 export function AddOnsSection() {
   const addOns = useQuery(api.workspaceBilling.getMyAddOns, {});
-  const toggleAddOn = useMutation(api.workspaceBilling.toggleAddOn);
-  const setCustomDomain = useMutation(api.workspaceBilling.setCustomDomain);
+  const updateAddOn = useAction(api.workspaceBillingActions.updateAddOn);
 
   const [hostname, setHostname] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -43,7 +42,7 @@ export function AddOnsSection() {
     setBusy(addOn);
     setError(null);
     try {
-      await toggleAddOn({ addOn, enabled: next });
+      await updateAddOn({ addOn, enabled: next });
     } catch (e) {
       const data =
         typeof e === "object" && e !== null && "data" in e
@@ -65,7 +64,11 @@ export function AddOnsSection() {
     setBusy("customDomain");
     setError(null);
     try {
-      await setCustomDomain({ hostname: hostname.trim() || null });
+      await updateAddOn({
+        addOn: "customDomain",
+        enabled: true,
+        customDomain: hostname.trim(),
+      });
       setHostname("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't set custom domain.");
@@ -75,17 +78,17 @@ export function AddOnsSection() {
   };
 
   return (
-    <section className="mt-10 border-2 border-[#1a1a1a] p-5">
+    <section className="mt-10 rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-5">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h2 className="font-black text-sm uppercase tracking-tight">
+        <h2 className="text-base font-semibold tracking-tight text-[#131315]">
           Add-ons
         </h2>
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#888]">
-          Optional extras
+        <span className="rounded-full bg-[#F1F1F3] px-2.5 py-1 text-xs font-medium text-[#6E6E73]">
+          Monthly
         </span>
       </div>
 
-      <div className="divide-y-2 divide-[#1a1a1a]/10">
+      <div className="divide-y divide-[#F1F1F3]">
         <AddOnRow
           title="White-label"
           description="Remove snip branding from share links and delivery emails."
@@ -96,7 +99,7 @@ export function AddOnsSection() {
         />
         <AddOnRow
           title="Public API tier"
-          description="Relaxed rate limits + signed access tokens for your own integrations."
+          description="Relaxed rate limits and signed access tokens for your integrations."
           priceCents={prices.apiTier}
           enabled={addOns.apiTier}
           busy={busy === "apiTier"}
@@ -105,14 +108,14 @@ export function AddOnsSection() {
 
         <div className="py-4 flex flex-col gap-2">
           <div className="flex items-baseline gap-2">
-            <span className="font-black text-sm text-[#1a1a1a]">
+            <span className="text-sm font-semibold text-[#131315]">
               Custom domain
             </span>
-            <span className="text-[10px] font-mono font-bold text-[#666]">
+            <span className="text-xs text-[#6E6E73]">
               ${(prices.customDomain / 100).toFixed(0)}/mo
             </span>
           </div>
-          <p className="text-xs text-[#666] max-w-prose">
+          <p className="max-w-prose text-xs text-[#6E6E73]">
             CNAME for paywalled deliveries. Point a hostname at
             <span className="font-mono"> share.snip.app </span>
             then enter it here. DNS verification happens out of band.
@@ -142,7 +145,10 @@ export function AddOnsSection() {
                   setBusy("customDomain");
                   setError(null);
                   try {
-                    await setCustomDomain({ hostname: null });
+                    await updateAddOn({
+                      addOn: "customDomain",
+                      enabled: false,
+                    });
                   } catch (err) {
                     setError(
                       err instanceof Error
@@ -159,15 +165,15 @@ export function AddOnsSection() {
             ) : null}
           </form>
           {addOns.customDomain ? (
-            <p className="text-[10px] font-mono text-[#666] mt-1">
-              Active: <span className="text-[#1a1a1a]">{addOns.customDomain}</span>
+            <p className="mt-1 text-xs text-[#6E6E73]">
+              Active: <span className="text-[#131315]">{addOns.customDomain}</span>
             </p>
           ) : null}
         </div>
       </div>
 
       {error ? (
-        <p className="mt-3 text-xs font-bold text-[#dc2626]">{error}</p>
+        <p className="mt-3 rounded-[11px] bg-[#FFF5F5] px-3 py-2 text-xs text-[#8A2B34]">{error}</p>
       ) : null}
     </section>
   );
@@ -192,12 +198,12 @@ function AddOnRow({
     <div className="py-4 flex items-start justify-between gap-4">
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
-          <span className="font-black text-sm text-[#1a1a1a]">{title}</span>
-          <span className="text-[10px] font-mono font-bold text-[#666]">
+          <span className="text-sm font-semibold text-[#131315]">{title}</span>
+          <span className="text-xs text-[#6E6E73]">
             ${(priceCents / 100).toFixed(0)}/mo
           </span>
         </div>
-        <p className="text-xs text-[#666] mt-0.5 max-w-prose">{description}</p>
+        <p className="mt-0.5 max-w-prose text-xs text-[#6E6E73]">{description}</p>
       </div>
       <Button
         type="button"
@@ -206,11 +212,11 @@ function AddOnRow({
         onClick={() => onToggle(!enabled)}
         className={
           enabled
-            ? "border-[#C2410C] text-[#C2410C] font-bold"
+            ? "border-[#D8D8DE] bg-[#FFF0E6] font-medium text-[#D14E00]"
             : ""
         }
       >
-        {busy ? "…" : enabled ? "Enabled ✓" : "Enable"}
+        {busy ? "…" : enabled ? "Enabled" : "Enable"}
       </Button>
     </div>
   );

@@ -13,10 +13,10 @@ interface ImageSequenceFrameGridProps {
  *   - Top: large preview of the currently-selected frame.
  *   - Bottom: scrubbable horizontal strip of every frame, click to jump.
  *
- * This is THE preview for sequences — no server-side video stitching
+ * This is the preview for sequences, with no server-side video stitching
  * (ffmpeg doesn't run cleanly in a Convex action). Pure client-side,
- * dependency-free. Brutalist styling: black backdrop, cream borders,
- * accent-orange scrubber thumb, square corners.
+ * dependency-free. The canvas and immediate controls use the dark player
+ * surface treatment.
  */
 export function ImageSequenceFrameGrid({
   frames,
@@ -53,19 +53,19 @@ export function ImageSequenceFrameGrid({
         <img
           src={current.url}
           alt={`Frame ${index + 1} of ${frames.length}`}
-          className="max-h-full max-w-full object-contain border-2 border-[#1a1a1a] bg-black"
+          className="max-h-full max-w-full rounded-[14px] border border-[#26262A] bg-[#0A0A0B] object-contain"
         />
       </div>
 
-      {/* Scrubber + frame strip — brutalist, square thumbs. */}
-      <div className="flex-shrink-0 border-t-2 border-[#1a1a1a] bg-[#1a1a1a]">
-        <div className="flex items-center justify-between px-4 py-2 text-[11px] font-mono uppercase tracking-wider text-[#f0f0e8]">
+      {/* Scrubber and frame strip. */}
+      <div className="flex-shrink-0 border-t border-[#26262A] bg-[#161618]">
+        <div className="flex items-center justify-between px-4 py-2 font-mono text-[11px] text-white">
           <span>
-            Frame <span className="text-[#FDBA74]">{index + 1}</span>
-            <span className="text-white/40"> / {frames.length}</span>
+            Frame <span className="text-[#FF6600]">{index + 1}</span>
+            <span className="text-[#A0A0A5]"> / {frames.length}</span>
           </span>
-          <span className="text-white/40">
-            Click any frame to jump · drag the slider to scrub
+          <span className="text-[#A0A0A5]">
+            Drag to scrub
           </span>
         </div>
         <div className="px-4 pb-2">
@@ -75,12 +75,12 @@ export function ImageSequenceFrameGrid({
             max={frames.length - 1}
             value={index}
             onChange={(e) => setIndex(Number(e.target.value))}
-            className="w-full accent-[#C2410C]"
+            className="w-full accent-[#FF6600]"
           />
         </div>
         <div
           ref={stripRef}
-          className="flex overflow-x-auto border-t border-white/10 bg-black"
+          className="flex overflow-x-auto border-t border-[#26262A] bg-[#0A0A0B]"
         >
           {frames.map((frame, i) => (
             <button
@@ -88,8 +88,8 @@ export function ImageSequenceFrameGrid({
               type="button"
               onClick={() => setIndex(i)}
               className={cn(
-                "flex-shrink-0 h-16 w-24 border-r border-white/10 bg-black flex items-center justify-center transition-opacity",
-                i === index ? "opacity-100 ring-2 ring-[#C2410C] ring-inset" : "opacity-60 hover:opacity-100",
+                "flex h-16 w-24 flex-shrink-0 items-center justify-center border-r border-[#26262A] bg-[#0A0A0B] transition-opacity",
+                i === index ? "opacity-100 ring-2 ring-[#FF6600] ring-inset" : "opacity-60 hover:opacity-100",
               )}
               aria-label={`Show frame ${i + 1}`}
             >

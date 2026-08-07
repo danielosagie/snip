@@ -7,12 +7,18 @@ import { Plus, Upload, FolderPlus, FileSignature, FileText } from "lucide-react"
 import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import { contractPath, documentPath } from "@/lib/routes";
+import { friendlyError } from "@/lib/friendlyError";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+const SOFT_MENU_CONTENT =
+  "rounded-[12px] border border-[#E8E8EC] bg-white p-1 text-[#131315] shadow-[0_8px_24px_rgba(19,19,21,0.10)]";
+const SOFT_MENU_ITEM =
+  "rounded-[8px] px-2.5 py-1.5 text-[13px] font-medium text-[#131315] hover:bg-[#F1F1F3] focus:bg-[#F1F1F3] focus:text-[#131315]";
 
 /**
  * Compact "Add" dropdown in the DashboardHeader on a project page. Actions:
@@ -39,9 +45,9 @@ export function ProjectAddButton({
 }: Props) {
   const navigate = useNavigate();
   const createFolder = useMutation(api.folders.create);
-  const createContract = useMutation(api.contractsTable.create);
+  const createDocumentItem = useMutation(api.contractsTable.create);
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const [creatingContract, setCreatingContract] = useState(false);
+  const [creatingDocumentItem, setCreatingDocumentItem] = useState(false);
 
   const handleAddFolder = async () => {
     if (creatingFolder) return;
@@ -55,22 +61,22 @@ export function ProjectAddButton({
         parentFolderId: currentFolderId ?? undefined,
       });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Couldn't create folder.");
+      alert(friendlyError(e, "Couldn't create folder."));
     } finally {
       setCreatingFolder(false);
     }
   };
 
-  // Contracts and plain documents are the same editor (toggle inside); we just
-  // seed docType so contracts open with the signing surface and documents don't.
+  // Documents start as focused writing surfaces. Contracts opt into the
+  // recipient and signing workflow from creation.
   const handleAdd = async (docType: "contract" | "document") => {
-    if (creatingContract) return;
+    if (creatingDocumentItem) return;
     const label = docType === "document" ? "document" : "contract";
     const raw = prompt(`${label[0].toUpperCase()}${label.slice(1)} title`, `Untitled ${label}`);
     if (!raw) return;
-    setCreatingContract(true);
+    setCreatingDocumentItem(true);
     try {
-      const contractId = await createContract({
+      const documentId = await createDocumentItem({
         projectId,
         title: raw.trim() || `Untitled ${label}`,
         kind: docType === "document" ? "custom" : "sow",
@@ -82,13 +88,13 @@ export function ProjectAddButton({
       navigate({
         to:
           docType === "document"
-            ? documentPath(teamSlug, projectId, contractId)
-            : contractPath(teamSlug, projectId, contractId),
+            ? documentPath(teamSlug, projectId, documentId)
+            : contractPath(teamSlug, projectId, documentId),
       });
     } catch (e) {
-      alert(e instanceof Error ? e.message : `Couldn't create ${label}.`);
+      alert(friendlyError(e, `Couldn't create ${label}.`));
     } finally {
-      setCreatingContract(false);
+      setCreatingDocumentItem(false);
     }
   };
 
@@ -97,18 +103,22 @@ export function ProjectAddButton({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1a1a1a] bg-[#1a1a1a] text-[#f0f0e8] text-xs font-bold uppercase tracking-wider hover:bg-[#FF6600] transition-colors"
+          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#131315] px-3.5 text-[13px] font-medium text-white transition-opacity hover:opacity-85"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="h-4 w-4" />
           Add
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[220px]">
-        <DropdownMenuItem onClick={onAddFiles}>
+      <DropdownMenuContent
+        align="end"
+        className={`${SOFT_MENU_CONTENT} min-w-[220px]`}
+      >
+        <DropdownMenuItem className={SOFT_MENU_ITEM} onClick={onAddFiles}>
           <Upload className="mr-2 h-4 w-4" />
           Add files
         </DropdownMenuItem>
         <DropdownMenuItem
+          className={SOFT_MENU_ITEM}
           onClick={() => void handleAddFolder()}
           disabled={creatingFolder}
         >
@@ -116,18 +126,20 @@ export function ProjectAddButton({
           Add folder
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => void handleAdd("contract")}
-          disabled={creatingContract}
-        >
-          <FileSignature className="mr-2 h-4 w-4" />
-          Add contract
-        </DropdownMenuItem>
-        <DropdownMenuItem
+          className={SOFT_MENU_ITEM}
           onClick={() => void handleAdd("document")}
-          disabled={creatingContract}
+          disabled={creatingDocumentItem}
         >
           <FileText className="mr-2 h-4 w-4" />
           Add document
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className={SOFT_MENU_ITEM}
+          onClick={() => void handleAdd("contract")}
+          disabled={creatingDocumentItem}
+        >
+          <FileSignature className="mr-2 h-4 w-4" />
+          Add contract
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
