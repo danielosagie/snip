@@ -15,11 +15,12 @@ export default function PricingPage() {
       <section className="border-b border-[#E8E8EC] bg-white px-6 pb-16 pt-24 md:pb-24 md:pt-32">
         <div className="mx-auto max-w-5xl">
           <h1 className="text-[38px] font-semibold leading-[1.15] tracking-[-0.055em] text-[#131315] sm:text-[51px] sm:leading-[60px]">
-            Simple pricing.
+            Never per seat.
           </h1>
           <p className="mt-6 max-w-2xl text-[19px] leading-[29px] text-[#6E6E73]">
-            Start free. Upgrade when you need more space.{" "}
-            Never per user.
+            Every plan includes unlimited editors, unlimited clients and
+            unlimited guests. You pay for the footage you keep, not the people
+            who touch it.
           </p>
         </div>
       </section>
@@ -37,27 +38,17 @@ export default function PricingPage() {
                 <span className="text-[48px] font-semibold leading-none tracking-[-1.2px] text-[#131315]">$0</span>
                 <span className="text-[18px] leading-7 text-[#A0A0A5]">/mo</span>
               </div>
-              <p className="mt-3 text-[15px] leading-[22px] text-[#6E6E73]">
-                Kick the tires. Real review, real exports, capped storage.
+              <div aria-hidden="true" className="mt-2 min-h-5" />
+              <p className="min-h-11 text-[15px] leading-[22px] text-[#6E6E73]">
+                Everything working, capped at 100 GB.
               </p>
 
               <ul className="mt-7 flex-grow space-y-3 text-[15px] leading-[22px] text-[#131315]">
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Owner + 1 collaborator
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited projects
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited clients
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  25 GB storage
-                </li>
+                <li>100 GB storage</li>
+                <li>Unlimited collaborators and guests</li>
+                <li>Review, comments and share links</li>
+                <li>Multiplayer editing on one project</li>
+                <li>300 export minutes a month</li>
               </ul>
 
               <Link
@@ -68,89 +59,93 @@ export default function PricingPage() {
               </Link>
             </div>
 
-            {/* Basic */}
-            <div className="flex h-full flex-col rounded-[14px] border border-[#E8E8EC] bg-white p-8">
+            {/* Studio */}
+            <div className="flex h-full flex-col rounded-[14px] border border-[#FF6600] bg-white p-8">
               <div className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
-                Basic
+                Studio
               </div>
               <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-[48px] font-semibold leading-none tracking-[-1.2px] text-[#131315]">$25</span>
+                <span className="text-[48px] font-semibold leading-none tracking-[-1.2px] text-[#131315]">$49</span>
                 <span className="text-[18px] leading-7 text-[#A0A0A5]">/mo</span>
               </div>
-              <p className="mt-3 text-[15px] leading-[22px] text-[#6E6E73]">
-                Unlimited everything, except storage.
+              <p className="mt-2 min-h-5 text-[14px] leading-5 text-[#6E6E73]">
+                $41 a month billed yearly
+              </p>
+              <p className="min-h-11 text-[15px] leading-[22px] text-[#6E6E73]">
+                For the team that ships every week.
               </p>
 
               <ul className="mt-7 flex-grow space-y-3 text-[15px] leading-[22px] text-[#131315]">
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited seats
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited projects
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited clients
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  500 GB storage
-                </li>
+                <li>1 TB storage</li>
+                <li>Unlimited editors, clients and guests</li>
+                <li>Multiplayer editing in the browser</li>
+                <li>Desktop drive with auto-versioning</li>
+                <li>Resolve panel with live playheads</li>
+                <li>3,000 export minutes a month</li>
+                <li>Contracts, invoices and paid delivery</li>
               </ul>
 
               <Link
                 to="/sign-up"
                 className="mt-8 flex w-full items-center justify-center rounded-full bg-[#131315] px-5 py-3 text-[14px] font-medium leading-5 text-white transition-opacity hover:opacity-90"
               >
-                Get Basic
+                Start free
               </Link>
             </div>
 
-            {/* Pro */}
-            <div className="flex h-full flex-col rounded-[14px] bg-[#0A0A0B] p-8 text-white">
-              <div className="flex items-center justify-between">
-                <div className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
-                  Pro
-                </div>
-                <div className="rounded-full bg-[#FF6600] px-2.5 py-1 font-['Geist_Mono',system-ui,monospace] text-[10px] font-medium uppercase leading-[15px] tracking-[0.5px] text-white">
-                  PRO
-                </div>
+            {/* Scale */}
+            <div className="flex h-full flex-col rounded-[14px] border border-[#E8E8EC] bg-white p-8">
+              <div className="font-['Geist_Mono',system-ui,monospace] text-[11px] font-medium uppercase leading-[14px] tracking-widest text-[#A0A0A5]">
+                Scale
               </div>
               <div className="mt-3 flex items-baseline gap-1">
-                <span className="text-[48px] font-semibold leading-none tracking-[-1.2px] text-white">$50</span>
-                <span className="text-[18px] leading-7 text-white/45">/mo</span>
+                <span className="text-[48px] font-semibold leading-none tracking-[-1.2px] text-[#131315]">$149</span>
+                <span className="text-[18px] leading-7 text-[#A0A0A5]">/mo</span>
               </div>
-              <p className="mt-3 text-[15px] leading-[22px] text-white/70">
-                Literally the same thing, but more space.
+              <p className="mt-2 min-h-5 text-[14px] leading-5 text-[#6E6E73]">
+                $124 a month billed yearly
+              </p>
+              <p className="min-h-11 text-[15px] leading-[22px] text-[#6E6E73]">
+                For the shop with a real archive.
               </p>
 
-              <ul className="mt-7 flex-grow space-y-3 text-[15px] leading-[22px] text-white/85">
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited seats
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited projects
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span>{" "}
-                  Unlimited clients
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="text-[#FF6600]">&#10003;</span> 2 TB storage
-                </li>
+              <ul className="mt-7 flex-grow space-y-3 text-[15px] leading-[22px] text-[#131315]">
+                <li>5 TB storage</li>
+                <li>Everything in Studio</li>
+                <li>12,000 export minutes a month</li>
+                <li>Priority rendering</li>
+                <li>White label and custom domain</li>
               </ul>
 
               <Link
                 to="/sign-up"
-                className="mt-8 flex w-full items-center justify-center rounded-full bg-white px-5 py-3 text-[14px] font-medium leading-5 text-[#131315] transition-opacity hover:opacity-90"
+                className="mt-8 flex w-full items-center justify-center rounded-full bg-[#131315] px-5 py-3 text-[14px] font-medium leading-5 text-white transition-opacity hover:opacity-90"
               >
-                Get Pro
+                Start free
               </Link>
             </div>
+          </div>
+
+          <div className="mt-5 rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-5 md:px-8">
+            <div className="flex flex-col gap-5 md:flex-row md:items-center md:gap-10">
+              <h2 className="text-[18px] font-semibold tracking-[-0.02em] text-[#131315]">
+                When you need more
+              </h2>
+              <div className="flex flex-wrap gap-x-10 gap-y-3 text-[14px] leading-5 text-[#6E6E73]">
+                <p>
+                  <span className="mr-3 font-medium text-[#131315]">Storage</span>
+                  $25 per TB a month
+                </p>
+                <p>
+                  <span className="mr-3 font-medium text-[#131315]">Exports</span>
+                  $0.02 a minute
+                </p>
+              </div>
+            </div>
+            <p className="mt-4 max-w-4xl text-[14px] leading-5 text-[#6E6E73]">
+              Most teams never reach their export limit. It is there so one
+              runaway job cannot cost us the plan, not to meter your work.
+            </p>
           </div>
 
           {/* Enterprise PAYG is hidden by default. Visible via ?show=enterprise
@@ -218,6 +213,22 @@ export default function PricingPage() {
         </div>
       </section>
 
+      {/* Export-minute explainer */}
+      <section className="border-b border-[#E8E8EC] bg-white px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+            Why an export minute is cheap
+          </h2>
+          <p className="mt-6 max-w-3xl text-[17px] leading-7 text-[#6E6E73]">
+            Every piece of a render is stored by what went into it. Re-export a
+            cut where you moved one clip and everything else is copied straight
+            through instead of being encoded again. The second version of a
+            video costs a fraction of the first, so the teams who iterate most
+            are the ones we can afford to charge least.
+          </p>
+        </div>
+      </section>
+
       {/* FAQ */}
       <section className="border-b border-[#E8E8EC] bg-white px-6 py-24 md:py-32">
         <div className="mx-auto max-w-4xl">
@@ -229,7 +240,7 @@ export default function PricingPage() {
             {[
               {
                 q: "Do you charge per collaborator?",
-                a: "No. Basic and Pro include unlimited collaborators. Free includes the owner and one collaborator.",
+                a: "No. Every plan includes unlimited collaborators and guests.",
               },
               {
                 q: "Can clients review without an account?",
@@ -237,7 +248,7 @@ export default function PricingPage() {
               },
               {
                 q: "What happens if I hit the storage limit?",
-                a: "Upgrade to Basic ($25/mo, 500 GB) or Pro ($50/mo, 2 TB), or delete old projects to free up room.",
+                a: "Upgrade to Studio ($49/mo, 1 TB) or Scale ($149/mo, 5 TB), or delete old projects to free up room.",
               },
               {
                 q: "Is there a free trial?",
