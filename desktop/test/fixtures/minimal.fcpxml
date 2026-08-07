@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fcpxml version="1.11">
+  <resources>
+    <format id="r1" name="FFVideoFormat1080p2398" frameDuration="1001/24000s" width="1920" height="1080"/>
+    <asset id="r2" name="Interview A" src="file:///Volumes/Media/interview-a.mov" start="0s" duration="120120/24000s" hasVideo="1" hasAudio="1"/>
+    <asset id="r3" name="Room Tone" src="file:///Volumes/Media/room-tone.wav" start="0s" duration="5s" hasVideo="0" hasAudio="1"/>
+  </resources>
+  <library>
+    <event name="Cuts">
+      <project name="Minimal FCP Project">
+        <sequence format="r1" duration="120120/24000s">
+          <spine>
+            <asset-clip id="c1" name="Opening Interview" ref="r2" offset="0s" start="1001/24000s" duration="48048/24000s"/>
+            <asset-clip id="c2" name="Room Tone" ref="r3" lane="-1" offset="48048/24000s" start="0s" duration="2s" audioRole="dialogue"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

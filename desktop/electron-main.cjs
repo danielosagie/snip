@@ -8,6 +8,7 @@ const fssync = require("node:fs");
 const { spawn, execSync, execFile } = require("node:child_process");
 const crypto = require("node:crypto");
 const zlib = require("node:zlib");
+const { parseProjectBufferSoft } = require("./lib/project-parsers.cjs");
 const {
   DEFAULT_PROJECT_EXTENSIONS,
   ProjectFileWatcher,
@@ -573,6 +574,7 @@ async function reconcileProjectWatcher(settings) {
     user: getClientId,
     transport,
     listOpenFiles: listOpenFilesUnderMount,
+    parseProjectBufferSoft,
     onLog: pushLog,
   }).start();
   projectWatcherState.watcher = watcher;
