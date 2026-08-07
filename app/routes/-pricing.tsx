@@ -48,7 +48,7 @@ export default function PricingPage() {
                 <li>Unlimited collaborators and guests</li>
                 <li>Review, comments and share links</li>
                 <li>Multiplayer editing on one project</li>
-                <li>60 export minutes a month</li>
+                <li>300 export minutes a month</li>
               </ul>
 
               <Link
@@ -81,7 +81,7 @@ export default function PricingPage() {
                 <li>Multiplayer editing in the browser</li>
                 <li>Desktop drive with auto-versioning</li>
                 <li>Resolve panel with live playheads</li>
-                <li>500 export minutes a month</li>
+                <li>3,000 export minutes a month</li>
                 <li>Contracts, invoices and paid delivery</li>
               </ul>
 
@@ -112,7 +112,7 @@ export default function PricingPage() {
               <ul className="mt-7 flex-grow space-y-3 text-[15px] leading-[22px] text-[#131315]">
                 <li>5 TB storage</li>
                 <li>Everything in Studio</li>
-                <li>2,000 export minutes a month</li>
+                <li>12,000 export minutes a month</li>
                 <li>Priority rendering</li>
                 <li>White label and custom domain</li>
               </ul>
