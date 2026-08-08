@@ -12,6 +12,7 @@ import {
   Hash,
   KeyRound,
   Lock,
+  Percent,
   ScrollText,
   Zap,
 } from "lucide-react";
@@ -22,6 +23,12 @@ import {
  * and tokens follow that export exactly; only responsiveness, real
  * routes, and the marquee animation are added. Do not restyle without
  * a new Paper export.
+ *
+ * Additive since that export (Aug 8, 2026): two feature cards for
+ * milestone invoices and per-item pricing, and a "buyer covers the fee"
+ * trust card. These reuse the export's own components and tokens rather
+ * than introducing new styling, so the artboard stays the source of
+ * truth for look. Fold them into the next Paper export.
  */
 
 const HERO_ASSET = "/landing/hero-frame.jpg";
@@ -138,6 +145,26 @@ export default function Homepage() {
                 <span className="ml-auto rounded-full bg-[#FF6600] px-3 py-1 text-[11px] font-medium leading-4 text-white">
                   $450 to unlock
                 </span>
+              </div>
+            </FeatureCard>
+
+            <FeatureCard
+              title="Half now, half on delivery"
+              body="Split an invoice into milestones. The deposit clears before you start, the balance when you hand the work over."
+            >
+              <div className="mt-6 flex flex-col gap-2">
+                <MilestoneRow label="Deposit" amount="$1,500.00" state="paid" />
+                <MilestoneRow label="Delivery" amount="$1,500.00" state="due" />
+              </div>
+            </FeatureCard>
+
+            <FeatureCard
+              title="Price each file"
+              body="Sell one cut without handing over the rest. Every item in a share can carry its own price."
+            >
+              <div className="mt-6 flex flex-col gap-2">
+                <PricedFileRow name="ceremony_master.mov" price="$300" />
+                <PricedFileRow name="socials_vertical.mp4" price="$120" />
               </div>
             </FeatureCard>
           </div>
@@ -277,6 +304,7 @@ export default function Homepage() {
               links={[
                 { label: "Client review", to: "/" },
                 { label: "Contracts", to: "/" },
+                { label: "Invoices", to: "/" },
                 { label: "Paid delivery", to: "/" },
                 { label: "Cloud drive", to: "/" },
               ]}
@@ -595,6 +623,51 @@ function FolderRow({ path }: { path: string }) {
   );
 }
 
+function MilestoneRow({
+  label,
+  amount,
+  state,
+}: {
+  label: string;
+  amount: string;
+  state: "paid" | "due";
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-[#FAFAFA] px-4 py-2.5">
+      <span className="text-[13px] leading-5 text-[#131315]">{label}</span>
+      <span className="ml-auto font-['Geist_Mono',system-ui,monospace] text-[11px] leading-4 tabular-nums text-[#6E6E73]">
+        {amount}
+      </span>
+      {state === "paid" ? (
+        <span className="flex items-center gap-1 rounded-full bg-[#F3FBF4] px-2 py-0.5">
+          <Check className="h-2.5 w-2.5 text-[#37984B]" strokeWidth={2.5} />
+          <span className="font-['Geist_Mono',system-ui,monospace] text-[9px] uppercase leading-[13px] tracking-[0.45px] text-[#37984B]">
+            Paid
+          </span>
+        </span>
+      ) : (
+        <span className="rounded-full border-[0.625px] border-solid border-[#E8E8EC] bg-white px-2 py-0.5 font-['Geist_Mono',system-ui,monospace] text-[9px] uppercase leading-[13px] tracking-[0.45px] text-[#A0A0A5]">
+          Due
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PricedFileRow({ name, price }: { name: string; price: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-[#FAFAFA] px-4 py-2.5">
+      <Lock className="h-[13px] w-[13px] shrink-0 text-[#6E6E73]" />
+      <span className="truncate font-['Geist_Mono',system-ui,monospace] text-[11px] leading-4 text-[#6E6E73]">
+        {name}
+      </span>
+      <span className="ml-auto shrink-0 rounded-full border-[0.625px] border-solid border-[#E8E8EC] bg-white px-2.5 py-1 text-[11px] font-medium leading-4 text-[#131315]">
+        {price}
+      </span>
+    </div>
+  );
+}
+
 function Chip({ children }: { children: ReactNode }) {
   return (
     <span className="flex items-center gap-1.5 rounded-full border-[0.625px] border-solid border-[#E8E8EC] bg-white px-3 py-1.5 text-[12px] font-medium leading-[18px] text-[#131315]">
@@ -646,6 +719,13 @@ const TRUST_CARDS: Array<{
     title: "Payments by Stripe",
     body: "Checkout and payouts run on Stripe end to end.",
     rotate: "-1.2deg",
+  },
+  {
+    icon: <Percent className="h-[15px] w-[15px] text-[#131315]" />,
+    tint: "#FFF7F2",
+    title: "Buyer covers the fee",
+    body: "Our 5% + 30c is added at checkout. You receive the price you set.",
+    rotate: "1.2deg",
   },
   {
     icon: <Zap className="h-[15px] w-[15px] text-[#131315]" />,
