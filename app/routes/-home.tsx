@@ -5,15 +5,31 @@ import { SnipMark } from "@/components/SnipMark";
 import {
   Apple,
   Check,
+  CloudDownload,
   CreditCard,
+  Download,
   EyeOff,
+  FileSignature,
+  FileText,
+  Film,
   Folder,
+  FolderOpen,
   Github,
+  HardDrive,
   Hash,
+  History,
   KeyRound,
+  Link2,
   Lock,
+  MessageSquare,
+  MessagesSquare,
   Percent,
+  Receipt,
   ScrollText,
+  Tag,
+  UserRoundX,
+  Users,
+  Wallet,
   Zap,
 } from "lucide-react";
 
@@ -87,86 +103,17 @@ export default function Homepage() {
             A review suite that works like you do.{"\n"}Built by editors, for
             editors.
           </h2>
-          <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-2">
-            <FeatureCard
-              title="Mounts like a hard drive"
-              body="Your whole library shows up in Finder. Open a 40 GB file without downloading it first."
-            >
-              <div className="mt-6 flex flex-col gap-2">
-                <FolderRow path="clients/2026/rooftop_wedding/" />
-                <FolderRow path="raw_a7siii_cards/" />
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              title="Notes land on the frame"
-              body="Your client gets a link, not an account. Every comment sticks to the frame it belongs to."
-            >
-              <div className="mt-6 flex flex-wrap gap-2">
-                <Chip>
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-[#FF6600]" />
-                  Matt
-                </Chip>
-                <Chip>“That's great!”</Chip>
-                <Chip>ProRes</Chip>
-                <Chip>Cinematic</Chip>
-                <span className="flex items-center gap-1.5 rounded-full border-[0.625px] border-solid border-[#37984B] bg-black px-3 py-1.5 text-[12px] font-medium leading-[18px] text-white">
-                  ✓ Approved
-                </span>
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              title="Signing lives with the cut"
-              body="Send the cut and the contract together. They sign with an emailed code, and the terms lock the moment you send."
-            >
-              <div className="mt-6 flex items-center justify-between rounded-xl border-[0.625px] border-dashed border-[#D9D9DE] p-4">
-                <span className=" text-[16px] text-[#131315]">
-                  Maya R.
-                </span>
-                <span className="flex items-center gap-1 rounded-full bg-[#FDF7EE] px-2.5 py-1">
-                  <Check className="h-2.5 w-2.5 text-[#B57300]" strokeWidth={2.5} />
-                  <span className="font-['Geist_Mono',system-ui,monospace] text-[10px] uppercase leading-[15px] tracking-[0.5px] text-[#B57300]">
-                    OTP verified
-                  </span>
-                </span>
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              title="Paid before the download"
-              body="Clients watch a watermarked preview. The real file unlocks itself when the invoice clears."
-            >
-              <div className="mt-6 flex items-center gap-3 rounded-xl bg-[#FAFAFA] px-4 py-3">
-                <Lock className="h-[13px] w-[13px] shrink-0 text-[#6E6E73]" />
-                <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] leading-4 text-[#6E6E73]">
-                  highlights_4k.mp4
-                </span>
-                <span className="ml-auto rounded-full bg-[#FF6600] px-3 py-1 text-[11px] font-medium leading-4 text-white">
-                  $450 to unlock
-                </span>
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              title="Half now, half on delivery"
-              body="Split an invoice into milestones. The deposit clears before you start, the balance when you hand the work over."
-            >
-              <div className="mt-6 flex flex-col gap-2">
-                <MilestoneRow label="Deposit" amount="$1,500.00" state="paid" />
-                <MilestoneRow label="Delivery" amount="$1,500.00" state="due" />
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              title="Price each file"
-              body="Sell one cut without handing over the rest. Every item in a share can carry its own price."
-            >
-              <div className="mt-6 flex flex-col gap-2">
-                <PricedFileRow name="ceremony_master.mov" price="$300" />
-                <PricedFileRow name="socials_vertical.mp4" price="$120" />
-              </div>
-            </FeatureCard>
+          <div className="mt-12 flex flex-col gap-4">
+            <div className="flex flex-col gap-4 lg:flex-row">
+              {FEATURE_GROUPS.slice(0, 3).map((group) => (
+                <FeatureGroup key={group.title} group={group} />
+              ))}
+            </div>
+            <div className="flex flex-col gap-4 lg:flex-row">
+              {FEATURE_GROUPS.slice(3).map((group) => (
+                <FeatureGroup key={group.title} group={group} />
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -587,92 +534,99 @@ function MockFileRow({ name, size }: { name: string; size: string }) {
   );
 }
 
-/* ── Feature grid pieces ─────────────────────────────────────── */
+/* ── Feature bento ───────────────────────────────────────────── */
 
-function FeatureCard({
-  title,
-  body,
-  children,
-}: {
+type FeatureGroupDef = {
   title: string;
-  body: string;
-  children?: ReactNode;
-}) {
+  tint: string;
+  items: Array<{ icon: ReactNode; label: string }>;
+};
+
+// Tints sit in one soft family so five cards read as one surface, with the
+// warm card carrying the brand orange. Geometry matches the Paper bento:
+// 40px padding, 24px radius, 24px stack gap, 8px between chips.
+const FEATURE_GROUPS: FeatureGroupDef[] = [
+  {
+    title: "Review",
+    tint: "#E4ECF7",
+    items: [
+      { icon: <MessageSquare />, label: "Frame comments" },
+      { icon: <Check />, label: "Approvals" },
+      { icon: <History />, label: "Versions" },
+      { icon: <Users />, label: "Client links" },
+      { icon: <MessagesSquare />, label: "Threads" },
+      { icon: <UserRoundX />, label: "No accounts" },
+    ],
+  },
+  {
+    title: "Delivery",
+    tint: "#FBE7DA",
+    items: [
+      { icon: <EyeOff />, label: "Watermarked previews" },
+      { icon: <Lock />, label: "Pay to unlock" },
+      { icon: <Tag />, label: "Per-item pricing" },
+      { icon: <Download />, label: "Downloads" },
+    ],
+  },
+  {
+    title: "Drive",
+    tint: "#E7E4EE",
+    items: [
+      { icon: <HardDrive />, label: "Finder mount" },
+      { icon: <Zap />, label: "Streaming" },
+      { icon: <Film />, label: "Proxies" },
+      { icon: <Folder />, label: "Folders" },
+      { icon: <CloudDownload />, label: "Offline cache" },
+      { icon: <FolderOpen />, label: "Instant open" },
+    ],
+  },
+  {
+    title: "Contracts",
+    tint: "#F1E7E0",
+    items: [
+      { icon: <FileSignature />, label: "OTP signing" },
+      { icon: <Hash />, label: "Frozen terms" },
+      { icon: <ScrollText />, label: "Audit trail" },
+      { icon: <FileText />, label: "Documents" },
+      { icon: <KeyRound />, label: "Templates" },
+    ],
+  },
+  {
+    title: "Invoices",
+    tint: "#E4EBE6",
+    items: [
+      { icon: <Receipt />, label: "Milestones" },
+      { icon: <Wallet />, label: "Deposit and balance" },
+      { icon: <Link2 />, label: "Pay links" },
+      { icon: <CreditCard />, label: "Stripe payouts" },
+      { icon: <Percent />, label: "Buyer pays the fee" },
+    ],
+  },
+];
+
+function FeatureGroup({ group }: { group: FeatureGroupDef }) {
   return (
-    <div className="flex h-full flex-col rounded-2xl border-[0.625px] border-solid border-[#E8E8EC] bg-white p-7">
-      <h3 className="text-[20px] font-semibold leading-7 tracking-[-0.5px] text-[#131315]">
-        {title}
+    <div
+      className="flex min-w-0 grow basis-0 flex-col gap-6 rounded-3xl p-7 sm:p-10"
+      style={{ backgroundColor: group.tint }}
+    >
+      <h3 className="text-[32px] font-bold leading-[1.25] tracking-[-0.03em] text-[#131315]">
+        {group.title}
       </h3>
-      <p className="mt-2 text-[15px] leading-[24px] text-[#6E6E73]">{body}</p>
-      {children}
-    </div>
-  );
-}
-
-function FolderRow({ path }: { path: string }) {
-  return (
-    <div className="flex items-center gap-2.5 rounded-xl bg-[#FAFAFA] px-4 py-2.5">
-      <Folder className="h-3 w-3 shrink-0 text-[#FF6600]" />
-      <span className="font-['Geist_Mono',system-ui,monospace] text-[11px] leading-4 text-[#6E6E73]">
-        {path}
-      </span>
-      <span className="ml-auto font-['Geist_Mono',system-ui,monospace] text-[9px] uppercase leading-[13px] tracking-[0.45px] text-[#A0A0A5]">
-        streamed
-      </span>
-    </div>
-  );
-}
-
-function MilestoneRow({
-  label,
-  amount,
-  state,
-}: {
-  label: string;
-  amount: string;
-  state: "paid" | "due";
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl bg-[#FAFAFA] px-4 py-2.5">
-      <span className="text-[13px] leading-5 text-[#131315]">{label}</span>
-      <span className="ml-auto font-['Geist_Mono',system-ui,monospace] text-[11px] leading-4 tabular-nums text-[#6E6E73]">
-        {amount}
-      </span>
-      {state === "paid" ? (
-        <span className="flex items-center gap-1 rounded-full bg-[#F3FBF4] px-2 py-0.5">
-          <Check className="h-2.5 w-2.5 text-[#37984B]" strokeWidth={2.5} />
-          <span className="font-['Geist_Mono',system-ui,monospace] text-[9px] uppercase leading-[13px] tracking-[0.45px] text-[#37984B]">
-            Paid
+      <div className="flex flex-wrap items-center gap-2">
+        {group.items.map((item) => (
+          <span
+            key={item.label}
+            className="flex items-center gap-3 rounded-2xl bg-white/70 px-4 py-3 text-[16px] leading-[1.5] text-[#131315]"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center text-[#6E6E73] [&>svg]:h-5 [&>svg]:w-5 [&>svg]:stroke-[1.5]">
+              {item.icon}
+            </span>
+            {item.label}
           </span>
-        </span>
-      ) : (
-        <span className="rounded-full border-[0.625px] border-solid border-[#E8E8EC] bg-white px-2 py-0.5 font-['Geist_Mono',system-ui,monospace] text-[9px] uppercase leading-[13px] tracking-[0.45px] text-[#A0A0A5]">
-          Due
-        </span>
-      )}
+        ))}
+      </div>
     </div>
-  );
-}
-
-function PricedFileRow({ name, price }: { name: string; price: string }) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl bg-[#FAFAFA] px-4 py-2.5">
-      <Lock className="h-[13px] w-[13px] shrink-0 text-[#6E6E73]" />
-      <span className="truncate font-['Geist_Mono',system-ui,monospace] text-[11px] leading-4 text-[#6E6E73]">
-        {name}
-      </span>
-      <span className="ml-auto shrink-0 rounded-full border-[0.625px] border-solid border-[#E8E8EC] bg-white px-2.5 py-1 text-[11px] font-medium leading-4 text-[#131315]">
-        {price}
-      </span>
-    </div>
-  );
-}
-
-function Chip({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex items-center gap-1.5 rounded-full border-[0.625px] border-solid border-[#E8E8EC] bg-white px-3 py-1.5 text-[12px] font-medium leading-[18px] text-[#131315]">
-      {children}
-    </span>
   );
 }
 
