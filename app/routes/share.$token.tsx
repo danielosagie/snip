@@ -1,22 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@convex/_generated/api";
-import { seoHead } from "@/lib/seo";
+import { shareUnfurlHead, type ShareUnfurl } from "@/lib/unfurlSeo";
 import SharePage from "./-share";
-
-type ShareUnfurl = {
-  kind: "video" | "image" | "document" | "bundle";
-  title: string;
-  description: string | null;
-  image: string | null;
-  watermarked: boolean;
-  video: {
-    url: string;
-    width: number;
-    height: number;
-    type: "video/mp4";
-  } | null;
-};
 
 // Resolve the shared item's title + a watermarked preview frame server-side
 // for link-unfurl previews (iMessage / Slack / Discord). Uses the privacy-gated
@@ -42,28 +28,7 @@ export const Route = createFileRoute("/share/$token")({
   loader: async ({ params }) => ({
     unfurl: await loadShareUnfurl(params.token),
   }),
-  head: ({ params, loaderData }) => {
-    const unfurl = loaderData?.unfurl ?? null;
-    return seoHead({
-      title:
-        unfurl?.title ??
-        (unfurl?.kind === "bundle" ? "Shared files" : "Shared video"),
-      description:
-        unfurl?.description ??
-        (unfurl?.title
-          ? `View "${unfurl.title}" on snip.`
-          : "Review this shared work on snip."),
-      path: `/share/${params.token}`,
-      // Watermarked preview frame when available; seoHead falls back to the
-      // default OG card when this is undefined.
-      ogImage: unfurl?.image ?? undefined,
-      ogImageAlt: unfurl?.title
-        ? `Preview of "${unfurl.title}"`
-        : undefined,
-      ogVideo: unfurl?.video ?? undefined,
-      type: unfurl?.video ? "video.other" : "website",
-      noIndex: true,
-    });
-  },
+  head: ({ params, loaderData }) =>
+    shareUnfurlHead(params.token, loaderData?.unfurl ?? null),
   component: SharePage,
 });

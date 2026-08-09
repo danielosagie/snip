@@ -82,8 +82,8 @@ export default function Homepage() {
 
       {/* ── Feature grid ──────────────────────────────────────── */}
       <div id="features" className="bg-[#FAFAFA] px-6 py-24">
-        <div className="mx-auto max-w-5xl">
-          <h2 className="mt-5 max-w-3xl whitespace-pre-wrap text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
+        <div className="mx-auto w-auto">
+          <h2 className="mt-5 w-full text-center whitespace-pre-wrap text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#131315] sm:text-[44px]">
             A review suite that works like you do.{"\n"}Built by editors, for
             editors.
           </h2>
@@ -197,7 +197,7 @@ export default function Homepage() {
       {/* ── Pricing ───────────────────────────────────────────── */}
       <div id="pricing" className="px-6 py-24">
         <div className="mx-auto flex max-w-5xl flex-col gap-12">
-          <h2 className="mt-5 whitespace-pre-wrap text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#A0A0A5] sm:text-[44px]">
+          <h2 className="mt-5 w-full text-center whitespace-pre-wrap text-[32px] font-medium leading-[1.25] tracking-[-1.1px] text-[#A0A0A5] sm:text-[44px]">
             Flat pricing. No seat math.{"\n"}Your whole team, one number.
           </h2>
           <div className="mx-auto mt-2 grid w-full max-w-3xl grid-cols-1 gap-5 md:grid-cols-2">
@@ -557,7 +557,7 @@ function HeroMockup() {
 
       {/* Floating: payment card */}
       <div
-        className="absolute -top-[68px] right-0.5 flex w-[186px] origin-top-left flex-col gap-1 rounded-[15px] border border-solid border-[#D9D9D9] bg-white px-3 py-2.5 [box-shadow:rgba(20,20,20,0.13)_0px_12px_30px]"
+        className="absolute -top-[70px] right-0.5 flex w-[186px] origin-top-left flex-col gap-1 rounded-[15px] border border-solid border-[#D9D9D9] bg-white px-3 py-2.5 [box-shadow:rgba(20,20,20,0.13)_0px_12px_30px]"
         style={{ rotate: "3deg" }}
       >
         <span className="text-[10px] font-bold uppercase leading-[13px] text-[#999999]">

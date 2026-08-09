@@ -1,20 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@convex/_generated/api";
-import { seoHead } from "@/lib/seo";
+import { watchUnfurlHead, type WatchUnfurl } from "@/lib/unfurlSeo";
 import WatchPage from "./-watch";
-
-type WatchUnfurl = {
-  title: string;
-  description: string | null;
-  image: string | null;
-  video: {
-    url: string;
-    width: number;
-    height: number;
-    type: "video/mp4";
-  } | null;
-};
 
 // Resolve public watch metadata server-side for crawlers and the initial
 // document title. Best-effort with the existing short timeout, so a slow Mux
@@ -37,24 +25,7 @@ export const Route = createFileRoute("/watch/$publicId")({
   loader: async ({ params }) => ({
     unfurl: await loadWatchUnfurl(params.publicId),
   }),
-  head: ({ params, loaderData }) => {
-    const unfurl = loaderData?.unfurl ?? null;
-    return seoHead({
-      title: unfurl?.title ?? "Watch video",
-      description:
-        unfurl?.description ??
-        (unfurl?.title
-          ? `Watch "${unfurl.title}" on snip.`
-          : "Watch and review this video on snip."),
-      path: `/watch/${params.publicId}`,
-      ogImage: unfurl?.image ?? undefined,
-      ogImageAlt: unfurl?.title
-        ? `Preview frame of "${unfurl.title}"`
-        : undefined,
-      ogVideo: unfurl?.video ?? undefined,
-      type: unfurl?.video ? "video.other" : "website",
-      noIndex: true,
-    });
-  },
+  head: ({ params, loaderData }) =>
+    watchUnfurlHead(params.publicId, loaderData?.unfurl ?? null),
   component: WatchPage,
 });
