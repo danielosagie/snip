@@ -1,28 +1,49 @@
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "../convex/_generated/api";
-import type { ShareUnfurl, WatchUnfurl } from "../src/lib/unfurlSeo";
+import { makeFunctionReference } from "convex/server";
 import {
   renderUnfurlHtml,
   type UnfurlRoute,
-} from "../src/lib/unfurlHtml";
+} from "./unfurlHtml.js";
+import type { ShareUnfurl, WatchUnfurl } from "./unfurlSeo.js";
 
 const UNFURL_TIMEOUT_MS = 2500;
 const PROD_CONVEX_URL = "https://knowing-dogfish-12.convex.cloud";
+
+const getShareUnfurl = makeFunctionReference<
+  "action",
+  { token: string },
+  ShareUnfurl | null
+>("videoActions:getShareUnfurl");
+
+const getWatchUnfurl = makeFunctionReference<
+  "action",
+  { publicId: string },
+  WatchUnfurl | null
+>("videoActions:getWatchUnfurl");
 
 type LoadResult =
   | { status: "ok"; value: ShareUnfurl | WatchUnfurl | null }
   | { status: "failed" };
 
-type UnfurlHandlerDependencies = {
+type UnfurlMiddlewareDependencies = {
   loadShell: (request: Request) => Promise<Response>;
   loadUnfurl: (route: UnfurlRoute) => Promise<LoadResult>;
+  next: () => Response | undefined;
+  renderHtml: typeof renderUnfurlHtml;
 };
 
 function readRoute(requestUrl: URL): UnfurlRoute | null {
-  const kind = requestUrl.searchParams.get("kind");
-  const id = requestUrl.searchParams.get("id")?.trim();
-  if (!id || (kind !== "share" && kind !== "watch")) return null;
-  return { kind, id };
+  const shareMatch = requestUrl.pathname.match(/^\/share\/([^/]+)$/);
+  if (shareMatch) {
+    return { kind: "share", id: decodeURIComponent(shareMatch[1]) };
+  }
+
+  const watchMatch = requestUrl.pathname.match(/^\/watch\/([^/]+)$/);
+  if (watchMatch) {
+    return { kind: "watch", id: decodeURIComponent(watchMatch[1]) };
+  }
+
+  return null;
 }
 
 async function loadUnfurl(route: UnfurlRoute): Promise<LoadResult> {
@@ -37,12 +58,13 @@ async function loadUnfurl(route: UnfurlRoute): Promise<LoadResult> {
         ...init,
         signal: abortController.signal,
       }),
+      logger: false,
     });
     let timeout: ReturnType<typeof setTimeout> | undefined;
 
     const action = route.kind === "share"
-      ? client.action(api.videoActions.getShareUnfurl, { token: route.id })
-      : client.action(api.videoActions.getWatchUnfurl, { publicId: route.id });
+      ? client.action(getShareUnfurl, { token: route.id })
+      : client.action(getWatchUnfurl, { publicId: route.id });
     const settledAction = action
       .then((value) => ({ status: "ok", value }) as LoadResult)
       .catch(() => ({ status: "failed" }) as LoadResult);
@@ -93,35 +115,59 @@ function responseHeaders(shell: Response, cacheable: boolean) {
   return headers;
 }
 
-export function createUnfurlHandler(
-  dependencies: UnfurlHandlerDependencies = { loadShell, loadUnfurl },
+export function createUnfurlMiddleware(
+  dependencies: UnfurlMiddlewareDependencies = {
+    loadShell,
+    loadUnfurl,
+    next: () => undefined,
+    renderHtml: renderUnfurlHtml,
+  },
 ) {
   return async function handleUnfurl(request: Request) {
-    const route = readRoute(new URL(request.url));
-    if (!route) return new Response("Not found", { status: 404 });
+    try {
+      const route = readRoute(new URL(request.url));
+      if (!route) return dependencies.next();
 
-    const [shellResult, result] = await Promise.all([
-      dependencies.loadShell(request).catch(() => null),
-      dependencies.loadUnfurl(route).catch(() => ({ status: "failed" as const })),
-    ]);
-    if (!shellResult) {
-      return new Response("Unable to load application shell", { status: 502 });
+      const [shell, result] = await Promise.all([
+        dependencies.loadShell(request).catch(() => null),
+        dependencies.loadUnfurl(route).catch(() => ({
+          status: "failed" as const,
+        })),
+      ]);
+      if (!shell?.ok) return dependencies.next();
+
+      const html = await shell.text().catch(() => null);
+      if (html === null) return dependencies.next();
+
+      let body = html;
+      let cacheable = false;
+      if (result.status === "ok") {
+        try {
+          body = route.kind === "share"
+            ? dependencies.renderHtml(
+                html,
+                route,
+                result.value as ShareUnfurl | null,
+              )
+            : dependencies.renderHtml(
+                html,
+                route,
+                result.value as WatchUnfurl | null,
+              );
+          cacheable = true;
+        } catch {
+          // Rendering metadata is optional. Preserve the shell on any failure.
+        }
+      }
+
+      return new Response(body, {
+        status: shell.status,
+        headers: responseHeaders(shell, cacheable),
+      });
+    } catch {
+      // Returning no response continues through Vercel's routing chain, where
+      // the catch-all rewrite serves the normal SPA shell.
+      return dependencies.next();
     }
-    const shell = shellResult;
-    if (!shell.ok) return shell;
-
-    const html = await shell.text();
-    const body = result.status === "ok"
-      ? route.kind === "share"
-        ? renderUnfurlHtml(html, route, result.value as ShareUnfurl | null)
-        : renderUnfurlHtml(html, route, result.value as WatchUnfurl | null)
-      : html;
-
-    return new Response(body, {
-      status: shell.status,
-      headers: responseHeaders(shell, result.status === "ok"),
-    });
   };
 }
-
-export const GET = createUnfurlHandler();

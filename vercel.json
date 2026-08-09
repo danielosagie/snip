@@ -24,14 +24,6 @@
     }
   ],
   "rewrites": [
-    {
-      "source": "/share/:token",
-      "destination": "/api/unfurl?kind=share&id=:token"
-    },
-    {
-      "source": "/watch/:publicId",
-      "destination": "/api/unfurl?kind=watch&id=:publicId"
-    },
     { "source": "/:path*", "destination": "/_shell.html" }
   ]
 }

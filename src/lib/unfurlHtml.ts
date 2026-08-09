@@ -1,5 +1,5 @@
-import type { ShareUnfurl, WatchUnfurl } from "@/lib/unfurlSeo";
-import { shareUnfurlHead, watchUnfurlHead } from "@/lib/unfurlSeo";
+import type { ShareUnfurl, WatchUnfurl } from "./unfurlSeo.js";
+import { shareUnfurlHead, watchUnfurlHead } from "./unfurlSeo.js";
 
 export type UnfurlRoute =
   | { kind: "share"; id: string }

@@ -1,4 +1,4 @@
-import { seoHead, type OgVideo } from "@/lib/seo";
+import { seoHead, type OgVideo } from "./seo.js";
 
 export type ShareUnfurl = {
   kind: "video" | "image" | "document" | "bundle";
