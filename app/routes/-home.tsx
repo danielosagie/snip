@@ -264,26 +264,26 @@ export default function Homepage() {
             <FooterCol
               label="Compare"
               links={[
-                { label: "[ ] vs Frame.io", to: "/compare/frameio" },
-                { label: "[ ] vs Wipster", to: "/compare/wipster" },
-                { label: "[ ] vs LucidLink", to: "/compare/lucidlink" },
+                { label: "snip vs Frame.io", to: "/compare/frameio" },
+                { label: "snip vs Wipster", to: "/compare/wipster" },
+                { label: "snip vs LucidLink", to: "/compare/lucidlink" },
               ]}
             />
             <FooterCol
               label="Use cases"
               links={[
-                { label: "[ ] Video editors", to: "/for/video-editors" },
-                { label: "[ ] Agencies", to: "/for/agencies" },
+                { label: "Video editors", to: "/for/video-editors" },
+                { label: "Agencies", to: "/for/agencies" },
               ]}
             />
             <FooterCol
               label="General"
               links={[
-                { label: "[ ] Pricing", to: "/pricing" },
-                { label: "[ ] Sign in", to: "/sign-in" },
-                { label: "[ ] Start free", to: "/sign-up" },
+                { label: "Pricing", to: "/pricing" },
+                { label: "Sign in", to: "/sign-in" },
+                { label: "Start free", to: "/sign-up" },
                 {
-                  label: "[ ] GitHub",
+                  label: "GitHub",
                   href: "https://github.com/danielosagie/snip",
                 },
               ]}
@@ -568,12 +568,6 @@ function DownloadButton() {
       >
         <PlatformIcon os={download.os} className="h-4 w-4" />
         {download.label}
-      </a>
-      <a
-        href="#downloads"
-        className="pl-[21px] text-[13px] leading-5 text-[#A0A0A5] transition-colors hover:text-[#6E6E73]"
-      >
-        All platforms
       </a>
     </div>
   );
