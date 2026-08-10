@@ -1,11 +1,14 @@
 {
   "name": "snip-desktop",
   "productName": "snip",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "private": true,
   "description": "Desktop sync + cloud-mount companion for snip.",
   "main": "electron-main.cjs",
-  "author": "snip",
+  "author": {
+    "name": "Daniel Osagie",
+    "email": "danielosagie0@gmail.com"
+  },
   "scripts": {
     "dev:renderer": "vite dev --port 5300",
     "dev:electron": "wait-on http://localhost:5300 && electron .",
@@ -191,7 +194,9 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "maintainer": "Daniel Osagie <danielosagie0@gmail.com>"
     }
-  }
+  },
+  "homepage": "https://snip.film"
 }

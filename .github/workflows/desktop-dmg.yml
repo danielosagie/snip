@@ -317,13 +317,15 @@ jobs:
         working-directory: desktop
         run: bun run build:renderer
 
-      - name: Build + publish NSIS installers
+      # Build only. The mac job already promoted the release out of draft, and
+      # electron-builder refuses to publish into a non-draft release
+      # ("existing type not compatible with publishing type"). Uploading with
+      # gh sidesteps its release-state logic entirely.
+      - name: Build NSIS installers
         working-directory: desktop
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bunx electron-builder --win nsis --x64 --arm64 --publish always
+        run: bunx electron-builder --win nsis --x64 --arm64 --publish never
 
-      - name: Add stable-named installer
+      - name: Upload installers
         working-directory: desktop
         shell: bash
         env:
@@ -332,14 +334,21 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           tag="v${version}"
-          x64="release/snip-${version}-x64-setup.exe"
-          if [[ ! -f "$x64" ]]; then
-            echo "::error::Expected Windows installer not found."
+          shopt -s nullglob
+          built=(release/*.exe)
+          if [[ ${#built[@]} -eq 0 ]]; then
+            echo "::error::No Windows installer was produced."
             ls -la release/ || true
             exit 1
           fi
-          cp "$x64" release/snip-desktop-setup.exe
-          gh release upload "$tag" release/snip-desktop-setup.exe --clobber --repo "$GITHUB_REPOSITORY"
+          x64="release/snip-${version}-x64-setup.exe"
+          if [[ -f "$x64" ]]; then
+            cp "$x64" release/snip-desktop-setup.exe
+            built+=(release/snip-desktop-setup.exe)
+          else
+            echo "::warning::No x64 installer to publish under the stable name."
+          fi
+          gh release upload "$tag" "${built[@]}" --clobber --repo "$GITHUB_REPOSITORY"
 
   release-linux:
     name: Release (Linux)
@@ -365,13 +374,12 @@ jobs:
         working-directory: desktop
         run: bun run build:renderer
 
-      - name: Build + publish AppImage + deb
+      # Build only, then upload with gh. See the Windows job for why.
+      - name: Build AppImage + deb
         working-directory: desktop
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bunx electron-builder --linux AppImage deb --x64 --publish always
+        run: bunx electron-builder --linux AppImage deb --x64 --publish never
 
-      - name: Add stable-named AppImage
+      - name: Upload installers
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -379,12 +387,19 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           tag="v${version}"
-          app="release/snip-${version}-x86_64.AppImage"
-          [[ -f "$app" ]] || app="release/snip-${version}-x64.AppImage"
-          if [[ ! -f "$app" ]]; then
-            echo "::error::Expected AppImage not found."
+          shopt -s nullglob
+          built=(release/*.AppImage release/*.deb)
+          if [[ ${#built[@]} -eq 0 ]]; then
+            echo "::error::No Linux packages were produced."
             ls -la release/ || true
             exit 1
           fi
-          cp "$app" release/snip-desktop.AppImage
-          gh release upload "$tag" release/snip-desktop.AppImage --clobber --repo "$GITHUB_REPOSITORY"
+          app="release/snip-${version}-x86_64.AppImage"
+          [[ -f "$app" ]] || app="release/snip-${version}-x64.AppImage"
+          if [[ -f "$app" ]]; then
+            cp "$app" release/snip-desktop.AppImage
+            built+=(release/snip-desktop.AppImage)
+          else
+            echo "::warning::No AppImage to publish under the stable name."
+          fi
+          gh release upload "$tag" "${built[@]}" --clobber --repo "$GITHUB_REPOSITORY"
