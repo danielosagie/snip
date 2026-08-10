@@ -1,7 +1,7 @@
 {
   "name": "snip-desktop",
   "productName": "snip",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "description": "Desktop sync + cloud-mount companion for snip.",
   "main": "electron-main.cjs",
@@ -62,13 +62,19 @@
       "dist/**/*",
       "resources/**/*",
       "!resources/macfuse.pkg",
-      "package.json"
+      "package.json",
+      "!resources/icon.png"
     ],
     "extraResources": [
       {
         "from": "resources",
         "to": ".",
-        "filter": ["**/*", "!icon.icns", "!pkg-background.png"]
+        "filter": [
+          "**/*",
+          "!icon.icns",
+          "!pkg-background.png",
+          "!icon.png"
+        ]
       }
     ],
     "mac": {
@@ -77,15 +83,24 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         },
         {
           "target": "pkg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "icon": "resources/icon.icns",
@@ -137,6 +152,46 @@
     "directories": {
       "output": "release",
       "buildResources": "resources"
+    },
+    "win": {
+      "icon": "resources/icon.png",
+      "artifactName": "snip-${version}-${arch}.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "snip-${version}-${arch}-setup.${ext}",
+      "shortcutName": "snip"
+    },
+    "linux": {
+      "icon": "resources/icon.png",
+      "category": "AudioVideo",
+      "synopsis": "Video review, paid delivery, and a cloud drive for creative teams",
+      "artifactName": "snip-${version}-${arch}.${ext}",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     }
   }
 }

@@ -24,6 +24,12 @@ import { ThemeStyleToggle } from "@/components/theme/ThemeToggle";
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
+  detectPlatform,
+  downloadFor,
+  NEUTRAL_DOWNLOAD,
+  type DesktopDownload,
+} from "@/lib/platform";
+import {
   CommandSearch,
   CommandSearchTrigger,
 } from "@/components/CommandSearch";
@@ -826,12 +832,21 @@ function DesktopAppOrDrive() {
     }
   }, []);
 
+  // Offer the installer for the OS the user is actually on. This button used to
+  // always point at the macOS .pkg.
+  const [desktopDownload, setDesktopDownload] =
+    useState<DesktopDownload>(NEUTRAL_DOWNLOAD);
+  useEffect(() => {
+    const platform = detectPlatform();
+    if (platform) setDesktopDownload(downloadFor(platform));
+  }, []);
+
   if (!isDesktop) {
     return (
       <a
-        href="/downloads/snip-desktop.pkg"
+        href={desktopDownload.href}
         className={DESKTOP_BTN}
-        title="Download snip Desktop for macOS"
+        title={`Download snip Desktop for ${desktopDownload.os}`}
       >
         <HardDrive className="h-3.5 w-3.5" />
         Desktop installer

@@ -288,3 +288,103 @@ jobs:
           # electron-builder publishes the release as a draft; promote it and
           # mark it latest so downloads + the updater feed both resolve here.
           gh release edit "$tag" --draft=false --latest --repo "$GITHUB_REPOSITORY"
+
+  # Windows and Linux publish into the SAME GitHub release the mac job creates,
+  # so they wait on it rather than racing to create the release themselves.
+  # Neither is code signed today: Windows SmartScreen will warn about an
+  # unknown publisher until an OV/EV certificate is added as a secret.
+  release-windows:
+    name: Release (Windows)
+    needs: release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: bun install --frozen-lockfile
+
+      - name: Build renderer
+        working-directory: desktop
+        run: bun run build:renderer
+
+      - name: Build + publish NSIS installers
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bunx electron-builder --win nsis --x64 --arm64 --publish always
+
+      - name: Add stable-named installer
+        working-directory: desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          x64="release/snip-${version}-x64-setup.exe"
+          if [[ ! -f "$x64" ]]; then
+            echo "::error::Expected Windows installer not found."
+            ls -la release/ || true
+            exit 1
+          fi
+          cp "$x64" release/snip-desktop-setup.exe
+          gh release upload "$tag" release/snip-desktop-setup.exe --clobber --repo "$GITHUB_REPOSITORY"
+
+  release-linux:
+    name: Release (Linux)
+    needs: release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: bun install --frozen-lockfile
+
+      - name: Build renderer
+        working-directory: desktop
+        run: bun run build:renderer
+
+      - name: Build + publish AppImage + deb
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bunx electron-builder --linux AppImage deb --x64 --publish always
+
+      - name: Add stable-named AppImage
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          app="release/snip-${version}-x86_64.AppImage"
+          [[ -f "$app" ]] || app="release/snip-${version}-x64.AppImage"
+          if [[ ! -f "$app" ]]; then
+            echo "::error::Expected AppImage not found."
+            ls -la release/ || true
+            exit 1
+          fi
+          cp "$app" release/snip-desktop.AppImage
+          gh release upload "$tag" release/snip-desktop.AppImage --clobber --repo "$GITHUB_REPOSITORY"

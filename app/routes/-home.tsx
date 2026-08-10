@@ -1,5 +1,12 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import {
+  allDownloads,
+  detectPlatform,
+  downloadFor,
+  NEUTRAL_DOWNLOAD,
+  type DesktopDownload,
+} from "@/lib/platform";
 import { SignedIn, SignedOut, UserButton, useUser } from "@clerk/tanstack-react-start";
 import { SnipMark } from "@/components/SnipMark";
 import {
@@ -23,10 +30,12 @@ import {
   Lock,
   MessageSquare,
   MessagesSquare,
+  Monitor,
   Percent,
   Receipt,
   ScrollText,
   Tag,
+  Terminal,
   UserRoundX,
   Users,
   Wallet,
@@ -82,13 +91,7 @@ export default function Homepage() {
                   Open snip
                 </Link>
               </SignedIn>
-              <a
-                href="/downloads/snip-desktop.dmg"
-                className="flex items-center gap-1.5 rounded-full border border-[#D7D7D2] bg-white px-[21px] py-[13px] text-[15px] font-semibold leading-5 text-black transition-colors hover:bg-[#FAFAFA]"
-              >
-                <Apple className="h-4 w-4" />
-                Download Mac App
-              </a>
+              <DownloadButton />
             </div>
           </div>
 
@@ -117,6 +120,8 @@ export default function Homepage() {
           </div>
         </div>
       </div>
+
+      <AllPlatforms />
 
       {/* ── Trust marquee ─────────────────────────────────────── */}
       <div className="overflow-clip bg-[#FAFAFA] py-24">
@@ -327,13 +332,7 @@ function TopNav() {
           <Link to="/compare/frameio" className="text-[14px] leading-5 text-[#6E6E73] transition-colors hover:text-[#131315]">
             Compare
           </Link>
-          <a
-            href="/downloads/snip-desktop.dmg"
-            className="flex items-center gap-1.5 text-[14px] leading-5 text-[#6E6E73] transition-colors hover:text-[#131315]"
-          >
-            <Apple className="h-3.5 w-3.5" />
-            Download
-          </a>
+          <NavDownloadLink />
         </nav>
         <NavAuth />
       </div>
@@ -529,6 +528,99 @@ function MockFileRow({ name, size }: { name: string; size: string }) {
       <div className="flex min-w-0 grow flex-col gap-px">
         <span className="text-[10px] font-semibold leading-[13px] text-[#141414]">{name}</span>
         <span className="text-[9px] leading-3 text-[#777772]">{size}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ── Platform-aware download ─────────────────────────────────── */
+
+/**
+ * The page is prerendered, so one static HTML file is served to everyone.
+ * Detection therefore has to happen after mount: render the neutral label
+ * first (identical on server and client, so no hydration mismatch), then
+ * specialise. Before this existed every visitor was handed a macOS .dmg,
+ * including the Windows and Linux ones.
+ */
+function useDesktopDownload() {
+  const [download, setDownload] = useState<DesktopDownload>(NEUTRAL_DOWNLOAD);
+  useEffect(() => {
+    const platform = detectPlatform();
+    if (platform) setDownload(downloadFor(platform));
+  }, []);
+  return download;
+}
+
+function PlatformIcon({ os, className }: { os: string; className: string }) {
+  if (os === "Windows") return <Monitor className={className} />;
+  if (os === "Linux") return <Terminal className={className} />;
+  if (os === "Mac") return <Apple className={className} />;
+  return <Download className={className} />;
+}
+
+function DownloadButton() {
+  const download = useDesktopDownload();
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <a
+        href={download.href}
+        className="flex items-center gap-1.5 rounded-full border border-[#D7D7D2] bg-white px-[21px] py-[13px] text-[15px] font-semibold leading-5 text-black transition-colors hover:bg-[#FAFAFA]"
+      >
+        <PlatformIcon os={download.os} className="h-4 w-4" />
+        {download.label}
+      </a>
+      <a
+        href="#downloads"
+        className="pl-[21px] text-[13px] leading-5 text-[#A0A0A5] transition-colors hover:text-[#6E6E73]"
+      >
+        All platforms
+      </a>
+    </div>
+  );
+}
+
+function NavDownloadLink() {
+  const download = useDesktopDownload();
+  return (
+    <a
+      href={download.href}
+      className="flex items-center gap-1.5 text-[14px] leading-5 text-[#6E6E73] transition-colors hover:text-[#131315]"
+    >
+      <PlatformIcon os={download.os} className="h-3.5 w-3.5" />
+      Download
+    </a>
+  );
+}
+
+function AllPlatforms() {
+  return (
+    <div id="downloads" className="bg-white px-6 py-20">
+      <div className="mx-auto max-w-5xl">
+        <h2 className="text-[24px] font-medium leading-[1.25] tracking-[-0.02em] text-[#131315]">
+          Every platform
+        </h2>
+        <p className="mt-2 text-[15px] leading-[22px] text-[#6E6E73]">
+          The drive needs macFUSE on Mac and WinFsp on Windows. snip sets up the
+          rest on first launch.
+        </p>
+        <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {allDownloads().map((item) => (
+            <a
+              key={item.key}
+              href={item.href}
+              className="flex items-center gap-3 rounded-2xl border border-[#E8E8EC] bg-white px-5 py-4 transition-colors hover:bg-[#FAFAFA]"
+            >
+              <PlatformIcon os={item.os} className="h-4 w-4 text-[#6E6E73]" />
+              <span className="text-[15px] font-medium leading-5 text-[#131315]">
+                {item.key === "mac-arm"
+                  ? "Mac (Apple silicon)"
+                  : item.key === "mac-intel"
+                    ? "Mac (Intel)"
+                    : item.os}
+              </span>
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   );

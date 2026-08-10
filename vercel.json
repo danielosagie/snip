@@ -3,7 +3,12 @@
   "redirects": [
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "snipfilm.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "snipfilm.vercel.app"
+        }
+      ],
       "destination": "https://www.snip.film/:path*",
       "permanent": false
     },
@@ -21,9 +26,22 @@
       "source": "/downloads/snip-desktop-x64.dmg",
       "destination": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop-x64.dmg",
       "permanent": false
+    },
+    {
+      "source": "/downloads/snip-desktop-setup.exe",
+      "destination": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop-setup.exe",
+      "permanent": false
+    },
+    {
+      "source": "/downloads/snip-desktop.AppImage",
+      "destination": "https://github.com/danielosagie/snip/releases/latest/download/snip-desktop.AppImage",
+      "permanent": false
     }
   ],
   "rewrites": [
-    { "source": "/:path*", "destination": "/_shell.html" }
+    {
+      "source": "/:path*",
+      "destination": "/_shell.html"
+    }
   ]
 }
