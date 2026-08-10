@@ -317,6 +317,31 @@ jobs:
         working-directory: desktop
         run: bun run build:renderer
 
+      # Sign when a certificate is available, build unsigned otherwise, and say
+      # which happened. Without signing, SmartScreen shows "unknown publisher".
+      #
+      # NOTE on cert types: OV certificates issued since mid-2023 must live on
+      # FIPS hardware, so a plain .pfx in a secret only works for an older cert.
+      # For a new one the CI-friendly routes are SignPath (free for OSS, and
+      # this repo is public + MIT) or Azure Trusted Signing. Both replace this
+      # step rather than feeding it.
+      - name: Configure Windows signing
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "$WINDOWS_CERTIFICATE" ]]; then
+            echo "::warning::No WINDOWS_CERTIFICATE secret. Building unsigned; SmartScreen will warn users about an unknown publisher."
+            exit 0
+          fi
+          delim="EOF_$(openssl rand -hex 8)"
+          {
+            printf '%s<<%s\n%s\n%s\n' CSC_LINK "$delim" "$WINDOWS_CERTIFICATE" "$delim"
+            printf '%s<<%s\n%s\n%s\n' CSC_KEY_PASSWORD "$delim" "$WINDOWS_CERTIFICATE_PASSWORD" "$delim"
+          } >> "$GITHUB_ENV"
+          echo "Windows signing certificate configured."
+
       # Build only. The mac job already promoted the release out of draft, and
       # electron-builder refuses to publish into a non-draft release
       # ("existing type not compatible with publishing type"). Uploading with

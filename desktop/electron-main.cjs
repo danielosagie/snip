@@ -452,6 +452,8 @@ ipcMain.handle("convex:setAuth", async (_event, payload) => {
 // line. Errors are logged but don't throw — these loops are best-effort and
 // must never crash the app on transient Convex outages.
 
+const CONVEX_CALL_TIMEOUT_MS = 20_000;
+
 async function convexCall(kind, fnPath, args) {
   const settings = await loadSettings();
   const { url: baseUrl, token } = resolveConvexCreds(settings);
@@ -461,14 +463,33 @@ async function convexCall(kind, fnPath, args) {
     );
   }
   const url = `${baseUrl.replace(/\/$/, "")}/api/${kind}`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ path: fnPath, args, format: "json" }),
-  });
+  // Bounded. This helper sits in the mount path and in every WebDAV request,
+  // so a bare fetch with no timeout means one unreachable Convex can hang the
+  // drive setup until the 150s watchdog kills it, with nothing in the log
+  // saying which call stalled. Fail fast and name the call instead.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONVEX_CALL_TIMEOUT_MS);
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ path: fnPath, args, format: "json" }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `Convex ${kind} ${fnPath} timed out after ${CONVEX_CALL_TIMEOUT_MS / 1000}s. The drive could not reach ${baseUrl}.`,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) {
     throw new Error(`Convex ${kind} ${fnPath} → HTTP ${resp.status}: ${await resp.text()}`);
   }
@@ -1746,7 +1767,8 @@ async function downloadWithRetry(url, { attempts = 3, timeoutMs = 90_000, label 
   }
   throw new Error(
     `Couldn't download ${label} after ${attempts} attempts — ${lastErr?.message || lastErr}. ` +
-      `Check your connection, or install rclone manually (brew install rclone).`,
+      // Not brew: its macOS rclone cannot mount, so resolveRclonePath skips it.
+      `Check your connection, or install an official build from rclone.org/downloads.`,
   );
 }
 
@@ -1931,7 +1953,11 @@ async function startMount({ mountPath } = {}) {
     if (mountState.status !== "mounting") return;
     mountState.status = "error";
     mountState.lastError =
-      "Drive setup timed out. The last step is shown in the log above — usually a slow/blocked rclone download or unreachable storage. Retry, or install rclone manually: brew install rclone.";
+      // Do NOT suggest `brew install rclone` here. Homebrew's macOS rclone is
+      // built without mount support and is deliberately skipped by
+      // resolveRclonePath, so that advice sends people to install the one
+      // build that cannot work.
+      "Drive setup timed out. The last step in the log above is where it stalled. Usually that means storage or the snip backend was unreachable. Retry, and if it stalls at the same step, send that line.";
     pushLog(mountState.lastError);
     try { mountChild?.kill(); } catch { /* ignore */ }
     mountChild = null;
