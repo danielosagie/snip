@@ -74,7 +74,7 @@ export const TIERS = {
   pro: {
     plan: "pro",
     label: "Pro",
-    baseCents: 5000, // $50/mo
+    baseCents: 5000, // $50/mo — must equal the live Stripe price
     perSeatCents: 0,
     includedSeats: 0,
     unlimitedSeats: true,

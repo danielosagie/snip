@@ -90,11 +90,22 @@ function validatedReturnUrl(value: string): string {
 
   const configuredAppUrl = process.env.APP_URL;
   if (configuredAppUrl) {
-    const allowedOrigin = new URL(configuredAppUrl).origin;
+    const allowed = new URL(configuredAppUrl);
     const isLocalhost =
       url.hostname === "localhost" || url.hostname === "127.0.0.1";
-    if (url.origin !== allowedOrigin && !isLocalhost) {
-      throw new Error("Billing return URL does not match APP_URL.");
+    // Treat apex and www as the same site. APP_URL was set to the apex while
+    // the app is served from www, so every billing return URL failed this
+    // check and BOTH checkout and the portal were dead. A redirect pair is
+    // not a security boundary, and one character of config drift should not
+    // be able to take payments offline.
+    const bare = (host: string) => host.replace(/^www\./, "");
+    const sameSite =
+      url.protocol === allowed.protocol && bare(url.host) === bare(allowed.host);
+    if (!sameSite && !isLocalhost) {
+      throw new Error(
+        `Billing return URL ${url.origin} is not ${allowed.origin} (APP_URL). ` +
+          `Set APP_URL to the origin the app is served from.`,
+      );
     }
   }
   return url.toString();
@@ -180,8 +191,16 @@ export const createCheckout = action({
       price.unit_amount !== expectedAmount ||
       price.recurring?.interval !== expectedInterval
     ) {
+      // Name both sides. "does not match" told nobody which number to change,
+      // and this guard sits between the user and paying us.
+      const dollars = (cents: number | null) =>
+        cents == null ? "unset" : `$${(cents / 100).toFixed(2)}`;
       throw new Error(
-        `${priceEnvName} does not match the configured ${tier.label} ${cadence} plan.`,
+        `${priceEnvName} (${priceId}) is ${dollars(price.unit_amount)} ` +
+          `${price.currency}/${price.recurring?.interval ?? "one-time"}` +
+          `${price.active ? "" : ", inactive"}, but the ${tier.label} ${cadence} ` +
+          `plan expects ${dollars(expectedAmount)} ${tier.currency}/${expectedInterval}. ` +
+          `Fix the Stripe price or the tier in convex/workspaceBilling.ts.`,
       );
     }
 

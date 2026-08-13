@@ -24,26 +24,31 @@ const LEGACY_WORKSPACE_STORAGE_LIMIT_BYTES: Partial<Record<TeamPlan, number>> = 
 
 /**
  * The commercial truth for every plan, and the ONLY place these numbers live.
+ * TIERS in workspaceBilling.ts and STORAGE_STOPS in src/lib/storagePricing.ts
+ * both derive from here; they used to be three hand-maintained copies that
+ * had drifted apart, which is why the "Adjust plan" dialog could show
+ * "16.2 GB of 25.0 GB used" directly above a slider labelling Free as 100 GB.
  *
- * They were previously duplicated in src/lib/storagePricing.ts, and the two
- * copies had drifted badly: the pricing page and the in-app planner sold
- * 100 GB / 1 TB / 5 TB at $0 / $49 / $149 while this file enforced
- * 25 GB / 500 GB / 2 TB and reported $0 / $25 / $50. Because this map feeds
- * both the storage bar's denominator and the upload gate, a free workspace
- * was cut off at a quarter of the advertised allowance, and the "Adjust plan"
- * dialog showed both numbers at once. storagePricing.ts now derives from here
- * so the two cannot diverge again.
+ * PRICES MUST MATCH THE LIVE STRIPE PRICES. createCheckout refuses to open a
+ * session when they disagree, so an aspirational number here takes payments
+ * offline rather than charging the wrong amount. Verified against Stripe:
+ * price_1TWiBt… is $25.00/month and price_1TWiCw… is $50.00/month.
+ *
+ * Separately, and NOT reconciled here because it is a pricing decision rather
+ * than a bug: app/routes/-pricing.tsx advertises 100 GB / 1 TB / 5 TB at
+ * $0 / $49 / $149. Changing these numbers means changing the Stripe prices to
+ * match on the same commit.
  */
 export const TEAM_PLAN_MONTHLY_PRICE_USD: Record<TeamPlan, number> = {
   free: 0,
-  basic: 49,
-  pro: 149,
+  basic: 25,
+  pro: 50,
 };
 
 export const TEAM_PLAN_STORAGE_GB: Record<TeamPlan, number> = {
-  free: 100,
-  basic: 1024,
-  pro: 5120,
+  free: 25,
+  basic: 500,
+  pro: 2048,
 };
 
 export const TEAM_PLAN_STORAGE_LIMIT_BYTES: Record<TeamPlan, number> = {
