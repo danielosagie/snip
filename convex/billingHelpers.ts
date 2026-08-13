@@ -22,16 +22,34 @@ const LEGACY_WORKSPACE_STORAGE_LIMIT_BYTES: Partial<Record<TeamPlan, number>> = 
   pro: 5 * 1024 * GIBIBYTE,
 };
 
+/**
+ * The commercial truth for every plan, and the ONLY place these numbers live.
+ *
+ * They were previously duplicated in src/lib/storagePricing.ts, and the two
+ * copies had drifted badly: the pricing page and the in-app planner sold
+ * 100 GB / 1 TB / 5 TB at $0 / $49 / $149 while this file enforced
+ * 25 GB / 500 GB / 2 TB and reported $0 / $25 / $50. Because this map feeds
+ * both the storage bar's denominator and the upload gate, a free workspace
+ * was cut off at a quarter of the advertised allowance, and the "Adjust plan"
+ * dialog showed both numbers at once. storagePricing.ts now derives from here
+ * so the two cannot diverge again.
+ */
 export const TEAM_PLAN_MONTHLY_PRICE_USD: Record<TeamPlan, number> = {
   free: 0,
-  basic: 25,
-  pro: 50,
+  basic: 49,
+  pro: 149,
+};
+
+export const TEAM_PLAN_STORAGE_GB: Record<TeamPlan, number> = {
+  free: 100,
+  basic: 1024,
+  pro: 5120,
 };
 
 export const TEAM_PLAN_STORAGE_LIMIT_BYTES: Record<TeamPlan, number> = {
-  free: 25 * GIBIBYTE,
-  basic: 500 * GIBIBYTE,
-  pro: 2 * 1024 * GIBIBYTE,
+  free: TEAM_PLAN_STORAGE_GB.free * GIBIBYTE,
+  basic: TEAM_PLAN_STORAGE_GB.basic * GIBIBYTE,
+  pro: TEAM_PLAN_STORAGE_GB.pro * GIBIBYTE,
 };
 
 function hasText(value: string | undefined | null): value is string {

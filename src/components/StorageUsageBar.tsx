@@ -75,7 +75,10 @@ export function StorageUsageBar({
 
   // Full variant — billing page card.
   return (
-    <section className="mt-10 rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-5">
+    // No outer margin: this renders both as a billing-page card and inside
+    // the Adjust plan dialog, and a baked-in mt-10 put ~40px of dead space
+    // under the dialog header. Callers space it.
+    <section className="rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-5">
       <div className="flex items-center justify-between gap-2 mb-3">
         <h2 className="text-base font-semibold tracking-tight text-[#131315]">
           Storage usage

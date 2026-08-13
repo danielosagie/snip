@@ -122,10 +122,8 @@ export function BackupsPanel() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold leading-[22px]">Backups</h2>
-          <p className={cn(softHelperText, "mt-1 max-w-[62ch]")}>
-            Copy a folder or a whole drive into a project. Runs when the files
-            change, when the drive is plugged in, and every hour. Only what
-            changed is uploaded.
+          <p className={cn(softHelperText, "mt-1")}>
+            Folders and drives, copied into a project.
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-2 text-[13px] font-medium text-[#131315]">
@@ -147,9 +145,7 @@ export function BackupsPanel() {
           <div className="text-sm font-medium text-[#131315]">
             {state.pendingDrive.name} is connected
           </div>
-          <p className={cn(softHelperText, "mt-0.5")}>
-            Back it up to the project below whenever it is plugged in.
-          </p>
+
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
@@ -216,7 +212,7 @@ export function BackupsPanel() {
 
       {teams !== undefined && destinations.length === 0 ? (
         <p className={cn(softHelperText, "mt-2")}>
-          Create a project first. Backups copy into one.
+          Create a project first.
         </p>
       ) : null}
 
@@ -252,7 +248,7 @@ export function BackupsPanel() {
       <div className="mt-4 space-y-2">
         {sources.length === 0 ? (
           <p className={softHelperText}>
-            Nothing is backed up yet. Add a folder, or plug in a drive.
+            Nothing backed up yet.
           </p>
         ) : (
           sources.map((source) => (
@@ -298,11 +294,19 @@ function SourceRow({
 }) {
   const running = run?.state === "scanning" || run?.state === "uploading";
   const Icon = source.kind === "volume" ? HardDrive : Folder;
+  const percent =
+    run && run.bytesTotal > 0
+      ? Math.min(100, Math.round((run.bytesDone / run.bytesTotal) * 100))
+      : 0;
 
   return (
     <div className="rounded-[12px] border border-[#F1F1F3] px-4 py-3.5">
       <div className="flex flex-wrap items-center gap-3">
-        <Icon className="h-4 w-4 shrink-0 text-[#6E6E73]" />
+        {running ? (
+          <ProgressRing percent={percent} indeterminate={run?.state === "scanning"} />
+        ) : (
+          <Icon className="h-4 w-4 shrink-0 text-[#6E6E73]" />
+        )}
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium leading-5 text-[#131315]">
             {source.label}
@@ -359,26 +363,16 @@ function RunStatus({ run }: { run: DesktopBackupRun | null }) {
   if (!run || run.state === "idle") return null;
 
   if (run.state === "scanning") {
-    return <p className={cn(softHelperText, "mt-2")}>Looking for changes.</p>;
+    return <p className={cn(softHelperText, "mt-1.5")}>Looking for changes</p>;
   }
 
   if (run.state === "uploading") {
-    const percent =
-      run.bytesTotal > 0 ? Math.min(100, Math.round((run.bytesDone / run.bytesTotal) * 100)) : 0;
     return (
-      <div className="mt-2.5">
-        <div className="h-1 w-full overflow-hidden rounded-full bg-[#F1F1F3]">
-          <div
-            className="h-full rounded-full bg-[#FF6600] transition-[width] duration-300"
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-        <p className={cn(softHelperText, "mt-1.5 truncate")}>
-          {run.filesDone} of {run.filesTotal} files, {formatBytes(run.bytesDone)} of{" "}
-          {formatBytes(run.bytesTotal)}
-          {run.currentFile ? ` · ${run.currentFile}` : ""}
-        </p>
-      </div>
+      <p className={cn(softHelperText, "mt-1.5 truncate")}>
+        {run.filesDone} of {run.filesTotal} files · {formatBytes(run.bytesDone)} of{" "}
+        {formatBytes(run.bytesTotal)}
+        {run.currentFile ? ` · ${run.currentFile}` : ""}
+      </p>
     );
   }
 
@@ -397,7 +391,7 @@ function RunStatus({ run }: { run: DesktopBackupRun | null }) {
   return (
     <p className={cn(softHelperText, "mt-2")}>
       Up to date. {run.filesDone > 0 ? `${run.filesDone} uploaded, ` : ""}
-      {run.filesSkipped} already there.
+      {run.filesSkipped} already there
     </p>
   );
 }
@@ -408,4 +402,44 @@ function formatBytes(bytes: number): string {
   const exponent = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
   const value = bytes / 1024 ** exponent;
   return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${units[exponent]}`;
+}
+
+/**
+ * Progress on the folder icon rather than a bar under the row. A bar changed
+ * the row's height the moment a source started, which made a list of sources
+ * twitch every time one kicked off; the ring occupies the icon slot that was
+ * already reserved.
+ */
+function ProgressRing({
+  percent,
+  indeterminate,
+}: {
+  percent: number;
+  indeterminate?: boolean;
+}) {
+  const circumference = 2 * Math.PI * 10;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={cn("h-5 w-5 shrink-0", indeterminate && "animate-spin motion-reduce:animate-none")}
+      role="img"
+      aria-label={indeterminate ? "Scanning" : `${percent}% uploaded`}
+    >
+      <circle cx="12" cy="12" r="10" fill="none" stroke="#F1F1F3" strokeWidth="2.4" />
+      <circle
+        cx="12"
+        cy="12"
+        r="10"
+        fill="none"
+        stroke="#FF6600"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={
+          indeterminate ? circumference * 0.75 : circumference * (1 - percent / 100)
+        }
+        transform="rotate(-90 12 12)"
+      />
+    </svg>
+  );
 }

@@ -5,10 +5,17 @@
  * price the instant the user drags the slider, with no Stripe round-trip.
  * Stripe is only involved when they commit and we open checkout.
  *
- * The stops below are presentation math for the pricing page and storage
- * planner. They intentionally lead the billing enforcement in
- * convex/workspaceBilling.ts during the never-per-seat migration.
+ * Sizes and prices are imported from convex/billingHelpers, which is what the
+ * server actually enforces. They used to be typed out again here and the two
+ * drifted: this file sold 1 TB for $49 while the server granted 500 GB and
+ * reported $25, so the planner quoted a plan the product did not deliver.
+ * Deriving means a change to the commercial numbers is one edit, not two.
  */
+
+import {
+  TEAM_PLAN_MONTHLY_PRICE_USD,
+  TEAM_PLAN_STORAGE_GB,
+} from "../../convex/billingHelpers";
 
 export const GIBIBYTE = 1024 * 1024 * 1024;
 
@@ -25,9 +32,27 @@ export type StorageStop = {
 
 /** Ordered smallest to largest. Index doubles as the slider position. */
 export const STORAGE_STOPS: readonly StorageStop[] = [
-  { plan: "free", label: "Free", gb: 100, monthlyCents: 0, seatCap: null },
-  { plan: "basic", label: "Studio", gb: 1024, monthlyCents: 4900, seatCap: null },
-  { plan: "pro", label: "Scale", gb: 5120, monthlyCents: 14900, seatCap: null },
+  {
+    plan: "free",
+    label: "Free",
+    gb: TEAM_PLAN_STORAGE_GB.free,
+    monthlyCents: TEAM_PLAN_MONTHLY_PRICE_USD.free * 100,
+    seatCap: null,
+  },
+  {
+    plan: "basic",
+    label: "Studio",
+    gb: TEAM_PLAN_STORAGE_GB.basic,
+    monthlyCents: TEAM_PLAN_MONTHLY_PRICE_USD.basic * 100,
+    seatCap: null,
+  },
+  {
+    plan: "pro",
+    label: "Scale",
+    gb: TEAM_PLAN_STORAGE_GB.pro,
+    monthlyCents: TEAM_PLAN_MONTHLY_PRICE_USD.pro * 100,
+    seatCap: null,
+  },
 ];
 
 export function stopForPlan(plan: string): StorageStop | undefined {
