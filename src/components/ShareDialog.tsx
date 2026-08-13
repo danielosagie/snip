@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -29,6 +30,7 @@ import {
   FileText,
   Globe2,
   Image as ImageIcon,
+  ImagePlus,
   Lock,
   MessageSquare,
   Play,
@@ -675,6 +677,78 @@ function PreviewMediaCell({
   );
 }
 
+/**
+ * Uploading a cover for a share that may not exist yet. The object is written
+ * against the PROJECT, so the composer can offer a cover before the link is
+ * created; the caller attaches the returned key on create. Shared by all three
+ * share composers so they behave identically.
+ */
+export function useShareCoverUpload(projectId: Id<"projects"> | undefined) {
+  const getUploadUrl = useAction(api.videoActions.getShareCoverUploadUrl);
+  const [key, setKey] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File) => {
+    if (!projectId) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const { url, key: uploadedKey } = await getUploadUrl({
+        projectId,
+        filename: file.name,
+        contentType: file.type,
+        fileSize: file.size,
+      });
+      const res = await fetch(url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
+      });
+      if (!res.ok) throw new Error(`Storage rejected the cover (${res.status}).`);
+      setKey(uploadedKey);
+      setPreviewUrl(URL.createObjectURL(file));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not upload that cover.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const clear = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setKey(null);
+    setPreviewUrl(null);
+  };
+
+  /** Drop next to <ShareLooksSection/>; it owns the hidden file input. */
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={(e) => {
+        const file = e.target.files?.[0];
+        if (file) void upload(file);
+        e.target.value = "";
+      }}
+    />
+  );
+
+  return {
+    key,
+    previewUrl,
+    uploading,
+    error,
+    clear,
+    fileInput,
+    open: () => inputRef.current?.click(),
+  };
+}
+
 export function ShareLooksSection({
   title,
   picker,
@@ -685,6 +759,10 @@ export function ShareLooksSection({
   isBundle,
   paywalled,
   unfurlHidden,
+  uploadedCoverUrl,
+  uploadingCover,
+  onUploadCover,
+  onRemoveUploadedCover,
   children,
 }: {
   title: string;
@@ -696,6 +774,16 @@ export function ShareLooksSection({
   isBundle: boolean;
   paywalled: boolean;
   unfurlHidden: boolean;
+  /**
+   * Local object URL of a cover the sender uploaded, before the link exists.
+   * Omit these four and the section renders without an upload affordance —
+   * the folder and selection composers do that until they can supply a
+   * projectId for the upload action.
+   */
+  uploadedCoverUrl?: string | null;
+  uploadingCover?: boolean;
+  onUploadCover?: () => void;
+  onRemoveUploadedCover?: () => void;
   children?: ReactNode;
 }) {
   const activeCoverId =
@@ -787,6 +875,35 @@ export function ShareLooksSection({
           >
             Auto
           </button>
+          {/* An uploaded cover sits first and wins over Auto and every item
+              frame. It is the only option that is not derived from the files
+              in the share, so it reads as its own thing. */}
+          {uploadedCoverUrl ? (
+            <button
+              type="button"
+              role="option"
+              aria-selected
+              aria-label="Uploaded cover"
+              onClick={onRemoveUploadedCover}
+              title="Click to remove"
+              className="relative h-[74px] w-[104px] shrink-0 overflow-hidden rounded-[10px] border border-[#D14E00] bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315]"
+            >
+              <img src={uploadedCoverUrl} alt="" className="h-full w-full object-cover" />
+              <span className="absolute inset-x-0 bottom-0 truncate border-t border-[#E8E8EC] bg-white px-2 py-1 text-left text-[10px] font-medium text-[#D14E00]">
+                Yours · remove
+              </span>
+            </button>
+          ) : onUploadCover ? (
+            <button
+              type="button"
+              onClick={onUploadCover}
+              disabled={uploadingCover}
+              className="flex h-[74px] w-[88px] shrink-0 flex-col items-center justify-center gap-1 rounded-[10px] border border-dashed border-[#D8D8DE] bg-white text-[12px] font-medium text-[#6E6E73] transition-colors hover:border-[#A0A0A5] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#131315]"
+            >
+              <ImagePlus className="h-4 w-4" />
+              {uploadingCover ? "Uploading" : "Upload"}
+            </button>
+          ) : null}
           {(picker?.items ?? []).map((item) => {
             const selected = selectedCoverVideoId === item._id;
             return (
@@ -993,6 +1110,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const [allowDownload, setAllowDownload] = useState(true);
   const [selectedCoverVideoId, setSelectedCoverVideoId] =
     useState<Id<"videos"> | null>(null);
+  const coverUpload = useShareCoverUpload(video?.projectId);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [newLinkOptions, setNewLinkOptions] = useState({
     expiresInDays: undefined as number | undefined,
@@ -1052,6 +1170,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
         videoId: scope === "video" ? videoId : undefined,
         bundleId,
         coverVideoId: selectedCoverVideoId ?? undefined,
+        coverImageS3Key: coverUpload.key ?? undefined,
         expiresInDays: newLinkOptions.expiresInDays,
         allowDownload,
         password: newLinkOptions.password || undefined,
@@ -1207,26 +1326,6 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
                 items={coverPicker.data?.items}
               />
 
-              <ShareLooksSection
-                title={shareTitle}
-                picker={coverPicker.data}
-                loading={coverPicker.loading}
-                error={coverPicker.error}
-                selectedCoverVideoId={selectedCoverVideoId}
-                onSelectedCoverVideoIdChange={setSelectedCoverVideoId}
-                isBundle={scope === "folder"}
-                paywalled={paywallEnabled}
-                unfurlHidden={unfurlHidden}
-              />
-
-              {createError ? (
-                <div
-                  role="status"
-                  className="mx-5 mb-5 rounded-[10px] border border-[#F0D2D4] bg-[#FFF5F5] px-3 py-2 text-[13px] text-[#D8434F] sm:mx-6"
-                >
-                  {createError}
-                </div>
-              ) : null}
             </>
           )}
 
@@ -1352,6 +1451,39 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
               </div>
             </section>
           ) : null}
+
+          {/* "How it looks" renders AFTER the links list. It styles the card a
+              recipient sees, which is a later decision than who gets in and
+              what they can do — and the link itself is what people came for. */}
+          {createdUrl ? null : (
+            <>
+              <ShareLooksSection
+                title={shareTitle}
+                picker={coverPicker.data}
+                loading={coverPicker.loading}
+                error={coverPicker.error}
+                selectedCoverVideoId={selectedCoverVideoId}
+                onSelectedCoverVideoIdChange={setSelectedCoverVideoId}
+                isBundle={scope === "folder"}
+                paywalled={paywallEnabled}
+                unfurlHidden={unfurlHidden}
+                uploadedCoverUrl={coverUpload.previewUrl}
+                uploadingCover={coverUpload.uploading}
+                onUploadCover={coverUpload.open}
+                onRemoveUploadedCover={coverUpload.clear}
+              />
+              {coverUpload.fileInput}
+
+              {createError ? (
+                <div
+                  role="status"
+                  className="mx-5 mb-5 rounded-[10px] border border-[#F0D2D4] bg-[#FFF5F5] px-3 py-2 text-[13px] text-[#D8434F] sm:mx-6"
+                >
+                  {createError}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
         <SharePrimaryFooter

@@ -1106,8 +1106,9 @@ export default function ProjectPage({
       {/* Floating selection toolbar — surfaces only when the user has
           multi-selected items. Drives the ad-hoc bundle share flow. */}
       {selectionMode || selectedCount > 0 ? (
-        <div className="fixed bottom-6 left-1/2 z-40 flex max-w-[95vw] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-full border border-[#E8E8EC] bg-white px-3 py-2 shadow-[0_8px_24px_rgba(19,19,21,0.10)]">
-          <span className="mr-1 shrink-0 text-[13px] font-medium text-[#6E6E73]">
+        <div className="fixed bottom-6 left-1/2 z-40 flex max-w-[95vw] -translate-x-1/2 items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-1 rounded-[22px] border border-[#E8E8EC] bg-white px-4 py-2 shadow-[0_8px_24px_rgba(19,19,21,0.10)]">
+          <span className="mr-2 shrink-0 pl-1 text-[13px] font-medium text-[#6E6E73]">
             {selectedCount} selected
           </span>
           <button
@@ -1195,13 +1196,17 @@ export default function ProjectPage({
               <>Delete <span className="text-[11px] text-[#A0A0A5]">⌘⌫</span></>
             )}
           </button>
-          <button
-            type="button"
-            onClick={clearSelection}
-            className={cn(SELECTION_BAR_BUTTON, "text-[#6E6E73]")}
-          >
-            Done <span className="text-[11px] text-[#A0A0A5]">Esc</span>
-          </button>
+        </div>
+        {/* Done sits OUTSIDE the action pill. Inside, it was the tenth item in
+            a row that already overflowed, so the one control that ends the mode
+            was the first thing to scroll out of reach. */}
+        <button
+          type="button"
+          onClick={clearSelection}
+          className="shrink-0 rounded-full border border-[#E8E8EC] bg-white px-4 py-2.5 text-[13px] font-medium text-[#6E6E73] shadow-[0_8px_24px_rgba(19,19,21,0.10)] transition-colors hover:bg-[#F1F1F3]"
+        >
+          Done <span className="text-[11px] text-[#A0A0A5]">Esc</span>
+        </button>
         </div>
       ) : null}
 

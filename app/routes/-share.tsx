@@ -22,7 +22,7 @@ import {
   useAntiPiracyDefenses,
 } from "@/components/share/ShareWatermarkOverlay";
 import { ShareFolderBrowser } from "@/components/share/ShareFolderBrowser";
-import { ShareHeader } from "@/components/share/ShareHeader";
+import { ShareHeader, ShareStaticHeader } from "@/components/share/ShareHeader";
 import { ShareDownloadSheet } from "@/components/share/ShareDownloadSheet";
 import {
   ShareItemMetadata,
@@ -311,9 +311,14 @@ export default function SharePage() {
 
   // Fetch the signed cover URL for the per-share header when the bundle has a
   // cover. Re-runs on coverReload (bumped by the owner editor after a change).
-  const bundleHasCover = Boolean(summary?.bundle?.hasCover);
+  // Either shape can carry a cover now: bundles keep theirs on the bundle row,
+  // single-video shares keep theirs on the link. The signed-URL action resolves
+  // whichever applies, so the client only needs to know that one exists.
+  const shareHasCover = Boolean(
+    summary?.bundle?.hasCover || summary?.single?.hasCover,
+  );
   useEffect(() => {
-    if (!grantToken || !isBundle || !bundleHasCover) {
+    if (!grantToken || !shareHasCover) {
       setCoverUrl(null);
       return;
     }
@@ -328,7 +333,7 @@ export default function SharePage() {
     return () => {
       cancelled = true;
     };
-  }, [grantToken, isBundle, bundleHasCover, coverReload, getBundleCover]);
+  }, [grantToken, shareHasCover, coverReload, getBundleCover]);
 
   const canTrackPresence = Boolean(playbackSession?.url && videoData?.video?._id);
   const { watchers } = useVideoPresence({
@@ -1101,6 +1106,18 @@ export default function SharePage() {
           >
             {downloadError ?? checkoutError}
           </div>
+        ) : null}
+
+        {/* Single-video shares get the same header treatment as bundles when
+            the sender set one. Read-only here: editing it needs the link id,
+            which the grant summary deliberately does not expose to viewers, so
+            the sender edits it from the share composer instead. */}
+        {!isBundle && (coverUrl || summary?.single?.headerTitle) ? (
+          <ShareStaticHeader
+            title={summary?.single?.headerTitle || video?.title || "Shared file"}
+            description={summary?.single?.headerDescription ?? null}
+            coverUrl={coverUrl}
+          />
         ) : null}
 
         {isBundle && summary?.bundle?._id ? (

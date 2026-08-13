@@ -31,6 +31,7 @@ import {
 } from "@/components/soft";
 import { seoHead } from "@/lib/seo";
 import { useIsDesktop } from "@/lib/useIsDesktop";
+import { BackupsPanel } from "@/components/desktop/BackupsPanel";
 
 export const Route = createFileRoute("/dashboard/settings")({
   head: () =>
@@ -57,13 +58,20 @@ const SETTINGS_TABS = [
   { value: "profile", label: "Profile" },
   { value: "notifications", label: "Notifications" },
   { value: "integrations", label: "Integrations" },
+  // Desktop only: auto-backup needs the native bridge, so the tab is hidden
+  // in a plain browser rather than shown as a dead end.
+  { value: "backups", label: "Backups", desktopOnly: true },
 ] as const;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number]["value"];
 
 function SettingsRoute() {
   const { user } = useUser();
+  const isDesktop = useIsDesktop();
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
+  const tabs = SETTINGS_TABS.filter(
+    (tab) => !("desktopOnly" in tab && tab.desktopOnly) || isDesktop,
+  );
 
   return (
     <div className="h-full flex flex-col">
@@ -77,7 +85,7 @@ function SettingsRoute() {
           {/* Soft pill tabs — matches the team settings page. */}
           <nav className="mt-5">
             <div className="flex flex-wrap gap-1.5">
-              {SETTINGS_TABS.map((tab) => {
+              {tabs.map((tab) => {
                 const isActive = activeTab === tab.value;
                 return (
                   <button
@@ -101,6 +109,8 @@ function SettingsRoute() {
               />
             ) : activeTab === "notifications" ? (
               <NotificationsTab />
+            ) : activeTab === "backups" ? (
+              <BackupsPanel />
             ) : (
               <IntegrationsTab />
             )}

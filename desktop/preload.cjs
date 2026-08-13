@@ -106,6 +106,25 @@ contextBridge.exposeInMainWorld("api", {
     snapshot: (args) => ipcRenderer.invoke("premiere:snapshot", args),
     restoreDownload: (args) => ipcRenderer.invoke("premiere:restore-download", args),
   },
+  backup: {
+    state: () => ipcRenderer.invoke("backup:state"),
+    volumes: () => ipcRenderer.invoke("backup:volumes"),
+    // Opens the native folder picker in the main process — the renderer never
+    // names a path, so remote web content can't point a backup at ~/.ssh.
+    addFolder: (args) => ipcRenderer.invoke("backup:add-folder", args),
+    addVolume: (args) => ipcRenderer.invoke("backup:add-volume", args),
+    updateSource: (args) => ipcRenderer.invoke("backup:update-source", args),
+    removeSource: (args) => ipcRenderer.invoke("backup:remove-source", args),
+    run: (args) => ipcRenderer.invoke("backup:run", args ?? {}),
+    cancel: (args) => ipcRenderer.invoke("backup:cancel", args ?? {}),
+    setOptions: (args) => ipcRenderer.invoke("backup:set-options", args),
+    dismissDrive: (args) => ipcRenderer.invoke("backup:dismiss-drive", args ?? {}),
+    onState: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("backup:state", listener);
+      return () => ipcRenderer.off("backup:state", listener);
+    },
+  },
   lanCache: {
     peers: () => ipcRenderer.invoke("lanCache:peers"),
     listFromPeer: (args) => ipcRenderer.invoke("lanCache:listFromPeer", args),

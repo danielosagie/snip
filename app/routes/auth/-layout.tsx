@@ -4,7 +4,10 @@ import { SnipMark } from "@/components/SnipMark";
 
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-[#FAFAFA] text-[#131315]">
+    // `surface-client surface-soft` pins the light variable scope the Clerk
+    // appearance reads from (see src/lib/clerk-appearance.ts). Without it the
+    // card follows the app theme and renders dark inside this light frame.
+    <div className="surface-client surface-soft relative flex min-h-screen items-center justify-center bg-[#FAFAFA] text-[#131315]">
       {/* Subtle grid pattern */}
       <div
         className="pointer-events-none absolute inset-0 opacity-40"

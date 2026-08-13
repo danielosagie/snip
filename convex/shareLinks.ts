@@ -477,6 +477,9 @@ export const create = mutation({
     videoId: v.optional(v.id("videos")),
     bundleId: v.optional(v.id("shareBundles")),
     coverVideoId: v.optional(v.id("videos")),
+    coverImageS3Key: v.optional(v.string()),
+    headerTitle: v.optional(v.string()),
+    headerDescription: v.optional(v.string()),
     expiresInDays: v.optional(v.number()),
     allowDownload: v.optional(v.boolean()),
     password: v.optional(v.string()),
@@ -564,6 +567,9 @@ export const create = mutation({
         videoId: args.videoId,
         bundleId: args.bundleId,
         coverVideoId: args.coverVideoId,
+        coverImageS3Key: args.coverImageS3Key,
+        headerTitle: args.headerTitle?.trim() || undefined,
+        headerDescription: args.headerDescription?.trim() || undefined,
         token,
         createdByClerkId: creatorSubject,
         createdByName: creatorName,
@@ -758,6 +764,14 @@ export const remove = mutation({
     for (const invite of invites) {
       await ctx.db.delete(invite._id);
     }
+    // The uploaded cover belongs to this link and nothing else points at it,
+    // so it goes with the link. Scheduled rather than awaited: a storage
+    // hiccup must not leave the link undeletable.
+    if (link.coverImageS3Key) {
+      await ctx.scheduler.runAfter(0, internal.videoActions.deleteStorageObject, {
+        key: link.coverImageS3Key,
+      });
+    }
     await ctx.db.delete(args.linkId);
   },
 });
@@ -789,6 +803,11 @@ export const update = mutation({
     allowDownload: v.optional(v.boolean()),
     password: v.optional(v.union(v.string(), v.null())),
     coverVideoId: v.optional(v.union(v.id("videos"), v.null())),
+    // Pass null to clear. The object itself is swept by retention alongside
+    // the link, so clearing here only detaches it.
+    coverImageS3Key: v.optional(v.union(v.string(), v.null())),
+    headerTitle: v.optional(v.union(v.string(), v.null())),
+    headerDescription: v.optional(v.union(v.string(), v.null())),
     paywall: v.optional(
       v.union(
         v.object({
@@ -847,6 +866,16 @@ export const update = mutation({
         );
       }
       updates.coverVideoId = args.coverVideoId ?? undefined;
+    }
+
+    if (args.coverImageS3Key !== undefined) {
+      updates.coverImageS3Key = args.coverImageS3Key ?? undefined;
+    }
+    if (args.headerTitle !== undefined) {
+      updates.headerTitle = args.headerTitle?.trim() || undefined;
+    }
+    if (args.headerDescription !== undefined) {
+      updates.headerDescription = args.headerDescription?.trim() || undefined;
     }
 
     if (args.password !== undefined) {
@@ -1089,8 +1118,9 @@ export const getUnfurlMedia = internalQuery({
       return {
         kind: "single" as const,
         shareLinkId: link._id,
-        title: video.title,
-        description: video.description ?? null,
+        title: link.headerTitle ?? video.title,
+        description: link.headerDescription ?? video.description ?? null,
+        uploadedCoverKey: link.coverImageS3Key ?? null,
         isPaywalled: Boolean(link.paywall),
         storedCoverVideoId: link.coverVideoId ?? null,
         resolvedCoverVideoId: resolvedCover?._id ?? null,
@@ -1108,8 +1138,13 @@ export const getUnfurlMedia = internalQuery({
       return {
         kind: "bundle" as const,
         shareLinkId: link._id,
-        title: bundle.headerTitle ?? bundle.name,
-        description: bundle.headerDescription ?? null,
+        // Link-level header beats the bundle's, so two links to the same
+        // bundle can be addressed to two different clients.
+        title: link.headerTitle ?? bundle.headerTitle ?? bundle.name,
+        description:
+          link.headerDescription ?? bundle.headerDescription ?? null,
+        uploadedCoverKey:
+          link.coverImageS3Key ?? bundle.coverImageS3Key ?? null,
         isPaywalled: Boolean(link.paywall),
         storedCoverVideoId: link.coverVideoId ?? null,
         resolvedCoverVideoId: resolvedCover?._id ?? null,

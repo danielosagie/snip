@@ -362,6 +362,11 @@ export const getExpiredTrashTargetAssets = internalQuery({
     const objectKeys = project.contract?.docxS3Key ? [project.contract.docxS3Key] : [];
     const bundles = await ctx.db.query("shareBundles").withIndex("by_project", (q) => q.eq("projectId", project._id)).collect();
     for (const bundle of bundles) if (bundle.coverImageS3Key) objectKeys.push(bundle.coverImageS3Key);
+    // Link-level covers (shareCovers/<projectId>/…) are deleted with their
+    // link in shareLinks.remove. They are deliberately NOT swept here: finding
+    // them would need a full shareLinks scan, and this runs in a cron that
+    // must not blow the read limit. An object orphaned by a crash is caught by
+    // the bucket lifecycle rule on the shareCovers/ prefix, not by this query.
     return { ...empty, eligible: true, objectKeys: [...new Set(objectKeys)] };
   },
 });

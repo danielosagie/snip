@@ -650,7 +650,76 @@ export const getBundleCoverUploadUrl = action({
 });
 
 /**
- * Grant-gated signed read URL for a bundle's cover image. Returns null when the
+ * Fire-and-forget removal of one bucket object. Internal only — the caller
+ * has already established that the key belongs to a row it is deleting.
+ * Swallows storage errors: a failed delete costs storage, a thrown one would
+ * roll back the caller's mutation and cost the user their action.
+ */
+export const deleteStorageObject = internalAction({
+  args: { key: v.string() },
+  returns: v.null(),
+  handler: async (_ctx, args) => {
+    try {
+      await getS3Client().send(
+        new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: args.key }),
+      );
+    } catch (error) {
+      console.error("deleteStorageObject failed", {
+        key: args.key,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return null;
+  },
+});
+
+/**
+ * Presigned PUT for a share cover the sender uploads themselves.
+ *
+ * Scoped to the PROJECT, not to a link: the share composer offers the cover
+ * before the link exists, so a link-scoped key would force a two-step create.
+ * The key is handed back and attached by `shareLinks.create` / `.update`; an
+ * uploaded-but-never-attached object is swept by retention with the project.
+ */
+export const getShareCoverUploadUrl = action({
+  args: {
+    projectId: v.id("projects"),
+    filename: v.string(),
+    contentType: v.string(),
+    fileSize: v.number(),
+  },
+  returns: v.object({ url: v.string(), key: v.string() }),
+  handler: async (ctx, args): Promise<{ url: string; key: string }> => {
+    // Throws for non-members.
+    await ctx.runQuery(api.projects.get, { projectId: args.projectId });
+
+    if (!args.contentType.startsWith("image/")) {
+      throw new Error("A share cover has to be an image.");
+    }
+    if (args.fileSize > 10 * 1024 * 1024) {
+      throw new Error(
+        `That image is ${Math.round(args.fileSize / 1024 / 1024)} MB. Share covers are capped at 10 MB.`,
+      );
+    }
+
+    const s3 = getS3Client();
+    const ext = getExtensionFromKey(args.filename, "jpg");
+    const key = `shareCovers/${args.projectId}/${crypto.randomUUID()}.${ext}`;
+    const url = await getSignedUrl(
+      s3,
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        ContentType: args.contentType,
+      }),
+      { expiresIn: 3600 },
+    );
+    return { url, key };
+  },
+});
+
+/**
+ * Grant-gated signed read URL for a share's cover image. Returns null when the
  * share has no cover. The S3 key is resolved server-side from the grant so a
  * viewer can never sign an arbitrary object.
  */
@@ -2859,6 +2928,8 @@ type ShareUnfurlMedia = {
   isPaywalled: boolean;
   storedCoverVideoId: Id<"videos"> | null;
   resolvedCoverVideoId: Id<"videos"> | null;
+  /** Owner-supplied cover object key. Beats every generated image. */
+  uploadedCoverKey: string | null;
   items: ShareUnfurlItem[];
 };
 
@@ -3089,6 +3160,10 @@ function shareUnfurlFingerprint(meta: ShareUnfurlMedia): string {
       isPaywalled: meta.isPaywalled,
       storedCoverVideoId: meta.storedCoverVideoId,
       resolvedCoverVideoId: meta.resolvedCoverVideoId,
+      // In the fingerprint so replacing the cover mints a new immutable URL.
+      // The unfurl route serves `cache-control: immutable`, so without this a
+      // changed cover would keep serving the old image to every crawler.
+      uploadedCoverKey: meta.uploadedCoverKey,
       items: meta.items.map((item) => [
         item._id,
         item.kind,
@@ -3252,6 +3327,21 @@ export const getShareUnfurl = action({
     })) as ShareUnfurlMedia | null;
     if (!media) return null;
 
+    // An uploaded cover is the card, whatever the share contains. Served
+    // through the same /share-unfurl route as the generated collage so the
+    // private object never needs a public URL, and not marked watermarked
+    // because the owner supplied the pixels.
+    if (media.uploadedCoverKey) {
+      return {
+        kind: media.kind === "bundle" ? ("bundle" as const) : ("image" as const),
+        title: media.title,
+        description: media.description,
+        image: shareUnfurlImageUrl(args.token, media),
+        watermarked: false,
+        video: null,
+      };
+    }
+
     if (media.kind === "bundle") {
       return {
         kind: "bundle" as const,
@@ -3400,6 +3490,30 @@ export const prepareShareUnfurlImage = internalAction({
     const fingerprint = shareUnfurlFingerprint(media);
     if (args.requestedFingerprint !== fingerprint) {
       return { status: "notFound" as const };
+    }
+
+    // An uploaded cover replaces the generated collage outright. The sender
+    // chose that image on purpose; composing it into a grid of frames would
+    // be second-guessing them. It is already an owner-supplied asset, so it
+    // carries no watermark and needs no per-item preview.
+    if (media.uploadedCoverKey) {
+      const coverUrl = await getSignedUrl(
+        getS3Client(),
+        new GetObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: media.uploadedCoverKey,
+        }),
+        { expiresIn: 3600 },
+      );
+      return {
+        status: "ok" as const,
+        fingerprint,
+        kind: media.kind,
+        title: media.title,
+        items: [
+          { title: media.title, kind: "image" as const, imageUrl: coverUrl },
+        ],
+      };
     }
 
     const items = media.items.slice(0, media.items.length > 4 ? 6 : 4);

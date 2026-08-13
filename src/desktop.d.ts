@@ -26,6 +26,57 @@ interface DesktopUpdateState {
   requiresManualInstall: boolean;
 }
 
+export interface DesktopBackupDestination {
+  teamSlug: string;
+  projectName: string;
+  folderPath: string[];
+}
+
+export interface DesktopBackupSource {
+  id: string;
+  kind: "folder" | "volume";
+  path: string;
+  label: string;
+  volumeName: string | null;
+  destination: DesktopBackupDestination;
+  autoOnConnect: boolean;
+  enabled: boolean;
+  includeHidden: boolean;
+  addedAt: number;
+}
+
+export interface DesktopBackupRun {
+  sourceId: string;
+  state: "idle" | "scanning" | "uploading" | "done" | "error" | "cancelled";
+  filesTotal: number;
+  filesDone: number;
+  filesFailed: number;
+  filesSkipped: number;
+  bytesTotal: number;
+  bytesDone: number;
+  currentFile: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  error: string | null;
+  reason: string | null;
+}
+
+export interface DesktopVolume {
+  path: string;
+  name: string;
+}
+
+export interface DesktopBackupState {
+  enabled: boolean;
+  promptOnNewDrive: boolean;
+  sweepMinutes: number;
+  sources: DesktopBackupSource[];
+  runs: DesktopBackupRun[];
+  volumes: DesktopVolume[];
+  pendingDrive: { path: string; name: string; at: number } | null;
+  log: string[];
+}
+
 interface DesktopApi {
   app: {
     version: () => Promise<string>;
@@ -56,6 +107,36 @@ interface DesktopApi {
   shell: {
     openFolder: (path: string) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
+  };
+  backup: {
+    state: () => Promise<DesktopBackupState>;
+    volumes: () => Promise<DesktopVolume[]>;
+    addFolder: (args: {
+      destination: DesktopBackupDestination;
+    }) => Promise<{ ok: boolean; cancelled?: boolean; state?: DesktopBackupState }>;
+    addVolume: (args: {
+      volumePath: string;
+      destination: DesktopBackupDestination;
+    }) => Promise<{ ok: boolean; state?: DesktopBackupState }>;
+    updateSource: (args: {
+      id: string;
+      patch: Partial<
+        Pick<
+          DesktopBackupSource,
+          "enabled" | "autoOnConnect" | "includeHidden" | "label"
+        >
+      > & { destination?: DesktopBackupDestination };
+    }) => Promise<{ ok: boolean; state: DesktopBackupState }>;
+    removeSource: (args: { id: string }) => Promise<{ ok: boolean; state: DesktopBackupState }>;
+    run: (args?: { id?: string }) => Promise<{ ok: boolean }>;
+    cancel: (args?: { id?: string }) => Promise<{ ok: boolean }>;
+    setOptions: (args: {
+      enabled?: boolean;
+      promptOnNewDrive?: boolean;
+      sweepMinutes?: number;
+    }) => Promise<{ ok: boolean; state: DesktopBackupState }>;
+    dismissDrive: (args?: { name?: string }) => Promise<{ ok: boolean; state: DesktopBackupState }>;
+    onState: (handler: (state: DesktopBackupState) => void) => () => void;
   };
 }
 

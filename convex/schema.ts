@@ -615,6 +615,14 @@ export default defineSchema({
     videoId: v.optional(v.id("videos")),
     bundleId: v.optional(v.id("shareBundles")),
     coverVideoId: v.optional(v.id("videos")),
+    // Per-link uploaded header. `coverVideoId` picks a frame from the shared
+    // items; these three let the sender supply their own image and wording
+    // instead. An uploaded cover beats a picked frame everywhere it is read:
+    // the delivery page header AND the unfurl card. Single-video shares have
+    // no bundle row, so this is the only place they can carry a header at all.
+    coverImageS3Key: v.optional(v.string()),
+    headerTitle: v.optional(v.string()),
+    headerDescription: v.optional(v.string()),
     token: v.string(),
     createdByClerkId: v.string(),
     createdByName: v.string(),

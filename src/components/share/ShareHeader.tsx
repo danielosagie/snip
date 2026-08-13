@@ -235,3 +235,55 @@ export function ShareHeader({
     </section>
   );
 }
+
+/**
+ * The same banner without the owner editor, for shares that have no editable
+ * row behind them (single-video links). Kept next to ShareHeader so the two
+ * cannot drift apart visually.
+ */
+export function ShareStaticHeader({
+  title,
+  description,
+  coverUrl,
+}: {
+  title: string;
+  description: string | null;
+  coverUrl: string | null;
+}) {
+  if (!coverUrl) {
+    return (
+      <section className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-5">
+        <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[#131315]">
+          {title}
+        </h1>
+        {description ? (
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-[#6E6E73]">
+            {description}
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
+      <div className="relative h-44 w-full overflow-hidden bg-[#0A0A0B] md:h-56">
+        <img
+          src={coverUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          draggable={false}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 p-5">
+          <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white md:text-4xl">
+            {title}
+          </h1>
+          {description ? (
+            <p className="mt-1 max-w-2xl text-sm text-white/85">{description}</p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}

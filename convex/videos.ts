@@ -2446,6 +2446,11 @@ export const getShareSummaryByGrant = query({
           workflowStatus: video.workflowStatus,
           versionNumber: video.versionNumber ?? null,
           versionLabel: video.versionLabel ?? null,
+          // The per-share header, which single-video shares never used to
+          // have. Same three fields the bundle carries, read off the link.
+          headerTitle: resolved.shareLink.headerTitle ?? null,
+          headerDescription: resolved.shareLink.headerDescription ?? null,
+          hasCover: Boolean(resolved.shareLink.coverImageS3Key),
         },
         bundle: null,
         paywall: resolved.shareLink.paywall ?? null,
@@ -2486,9 +2491,15 @@ export const getShareSummaryByGrant = query({
           kind: bundle.kind,
           // Notion-style per-share header. The cover URL is signed separately
           // via videoActions.getSharedBundleCover (private bucket object).
-          headerTitle: bundle.headerTitle ?? null,
-          headerDescription: bundle.headerDescription ?? null,
-          hasCover: Boolean(bundle.coverImageS3Key),
+          headerTitle:
+            resolved.shareLink.headerTitle ?? bundle.headerTitle ?? null,
+          headerDescription:
+            resolved.shareLink.headerDescription ??
+            bundle.headerDescription ??
+            null,
+          hasCover: Boolean(
+            resolved.shareLink.coverImageS3Key ?? bundle.coverImageS3Key,
+          ),
           // null = the share root. Folders below carry their own ids.
           rootFolderId,
           // The root folder itself is represented as null, so exclude it here.
@@ -2543,16 +2554,24 @@ export const getShareSummaryByGrant = query({
 });
 
 /**
- * Resolves a bundle's cover-image S3 key for a given share grant. Internal so
+ * Resolves a share's cover-image S3 key for a given share grant. Internal so
  * the key is never exposed to clients directly — videoActions.getSharedBundleCover
  * uses it to mint a short-TTL signed URL.
+ *
+ * A cover uploaded onto the LINK wins over the bundle's, so two links to the
+ * same bundle can carry different covers. Single-video shares have no bundle
+ * at all and reach a cover only through the link.
  */
 export const getBundleCoverKeyByGrant = internalQuery({
   args: { grantToken: v.string() },
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, args): Promise<string | null> => {
     const resolved = await resolveActiveShareGrant(ctx, args.grantToken);
-    if (!resolved || !resolved.shareLink.bundleId) return null;
+    if (!resolved) return null;
+    if (resolved.shareLink.coverImageS3Key) {
+      return resolved.shareLink.coverImageS3Key;
+    }
+    if (!resolved.shareLink.bundleId) return null;
     const bundle = await ctx.db.get(resolved.shareLink.bundleId);
     return bundle?.coverImageS3Key ?? null;
   },

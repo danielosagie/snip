@@ -27,6 +27,8 @@ const {
   createLocalVersionStore,
   sha256,
 } = require("./lib/version-store.cjs");
+const { createBackupEngine } = require("./lib/backup-engine.cjs");
+const { createVolumeWatcher, listVolumes } = require("./lib/volume-watcher.cjs");
 
 // The desktop is a thin native shell around the web app. It loads the remote
 // app on its real https origin so Clerk and Convex behave like the browser,
@@ -38,6 +40,7 @@ const WEB_APP_URL = (process.env.SNIP_WEB_URL || "https://www.snip.film").replac
 const SETTINGS_DIR = path.join(app.getPath("userData"));
 const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 const VERSION_STORE_DIR = path.join(SETTINGS_DIR, "project-versions");
+const BACKUP_MANIFEST_DIR = path.join(SETTINGS_DIR, "backup-manifests");
 const versionStore = createLocalVersionStore({ baseDirectory: VERSION_STORE_DIR });
 let settingsCache = null;
 
@@ -76,6 +79,24 @@ const DEFAULT_FEATURES = {
   // each logical media path to a mirrored proxy when one is ready. Flip it off
   // to resolve the original for conform/online. See plans/proxies-unified.md.
   proxy: { enabled: true },
+  // Auto-backup. Mirrors chosen folders and drives into a snip project, on a
+  // schedule, on file change, and the moment a matching drive is plugged in.
+  // Off until the user picks a source — it moves real bytes over their uplink.
+  backup: {
+    enabled: false,
+    // Offer to back up a drive we have never seen. Never uploads on its own:
+    // an unknown disk can hold hundreds of gigabytes the user never meant to
+    // send anywhere, so the prompt is the gate.
+    promptOnNewDrive: true,
+    // Re-sweep every enabled source on this cadence, independent of file
+    // events. Catches anything changed while the app was closed. 0 = never.
+    sweepMinutes: 60,
+    // Drive names the user said no to. Asking again on every replug is
+    // nagging, so a dismissal sticks until they add the drive themselves.
+    ignoredVolumes: [],
+    /** @type {Array<import("./lib/backup-engine.cjs").BackupSource>} */
+    sources: [],
+  },
 };
 
 const DEFAULT_SETTINGS = {
@@ -231,6 +252,9 @@ let liveConvexAuth = null; // { url: string, token: string } | null
 // Set by tryAutoMount when it wants to mount but no token has arrived yet;
 // the convex:setAuth handler fires the deferred mount once the renderer signs in.
 let pendingAutoMount = null; // { mountPath: string } | null
+// The once-per-launch backup sweep fires the first time a Convex session
+// arrives, not on app.whenReady — uploads are impossible before then.
+let launchBackupSweepDone = false;
 
 function resolveConvexCreds(settings) {
   return {
@@ -412,7 +436,16 @@ ipcMain.handle("settings:get", async () =>
 );
 ipcMain.handle("settings:set", async (_event, next) => {
   const current = await loadSettings();
-  await saveSettings(restoreRedactedSecrets(next, current));
+  const merged = restoreRedactedSecrets(next, current);
+  // Backup config is owned by the main process and edited through the
+  // backup:* handlers. The renderer's read-modify-write of settings (the
+  // credential refresh timer does one every few minutes) would otherwise
+  // silently drop a source added since its `settings:get`.
+  merged.features = {
+    ...(merged.features || {}),
+    backup: current.features?.backup ?? DEFAULT_FEATURES.backup,
+  };
+  await saveSettings(merged);
   // Re-evaluate background loops against the new flags.
   await reconcileFeatures().catch((err) => {
     console.error("reconcileFeatures failed after settings:set:", err);
@@ -441,6 +474,16 @@ ipcMain.handle("convex:setAuth", async (_event, payload) => {
     const args = pendingAutoMount;
     pendingAutoMount = null;
     startMount(args).catch((e) => console.error("deferred autoMount failed", e));
+  }
+  // Backups can't run before we have a Convex session — every upload resolves
+  // its destination through Convex. This is the first moment we do, so it's
+  // where the once-per-launch sweep belongs: it catches everything that
+  // changed while the app was closed.
+  if (!launchBackupSweepDone) {
+    launchBackupSweepDone = true;
+    void runAllBackupSources("launch").catch((e) =>
+      console.error("launch backup sweep failed", e),
+    );
   }
   return { ok: true };
 });
@@ -1442,6 +1485,481 @@ ipcMain.handle("lanCache:pullFromPeer", async (_event, { clientId, remotePath })
   return { ok: true, path: dest, bytes };
 });
 
+// ---- Auto-backup -------------------------------------------------------------
+//
+// Three triggers, one engine:
+//   * a drive is plugged in and matches a saved source  → back it up now
+//   * a watched folder changes                          → back it up shortly
+//   * the sweep timer fires (and on launch)             → back everything up
+//
+// All three funnel into backupEngine.runSource, which is incremental, so a
+// redundant trigger costs one directory scan and no upload.
+
+let backupEngine = null;
+let volumeWatcher = null;
+let backupSweepTimer = null;
+/** @type {Map<string, {watcher: import("node:fs").FSWatcher, timer: NodeJS.Timeout|null}>} */
+const backupFolderWatchers = new Map();
+/** Drive we have offered to back up, awaiting the user's answer. */
+let pendingDrivePrompt = null;
+/** Volumes seen attached as of the last poll, for the renderer's picker. */
+let attachedVolumes = [];
+
+/**
+ * Coalescing window after a file event before the source is backed up.
+ * Copying a folder of 500 files into a watched directory fires hundreds of
+ * events; without this each one would start a scan. 15s is comfortably longer
+ * than a normal save burst and short enough that a backup still feels prompt.
+ */
+const BACKUP_CHANGE_DEBOUNCE_MS = 15_000;
+
+/**
+ * Backup log ring. Failures here are the only thing that explains a partial
+ * backup, so they get their own buffer instead of being mixed into the mount
+ * log. 200 lines is roughly 24 KB and covers a whole run's failures.
+ */
+const BACKUP_LOG_LINES = 200;
+const backupLogBuffer = [];
+function backupLog(line) {
+  const stamped = `${new Date().toISOString().slice(11, 19)}  ${line}`;
+  console.log(stamped);
+  backupLogBuffer.push(stamped);
+  if (backupLogBuffer.length > BACKUP_LOG_LINES) {
+    backupLogBuffer.splice(0, backupLogBuffer.length - BACKUP_LOG_LINES);
+  }
+}
+
+function getBackupEngine() {
+  if (!backupEngine) {
+    backupEngine = createBackupEngine({
+      convexCall,
+      uploadObject: uploadStreamToStorage,
+      manifestDirectory: BACKUP_MANIFEST_DIR,
+      onEvent: () => emitBackupState(),
+      onLog: backupLog,
+    });
+  }
+  return backupEngine;
+}
+
+async function readBackupConfig() {
+  const settings = await loadSettings();
+  return { ...DEFAULT_FEATURES.backup, ...(settings.features?.backup || {}) };
+}
+
+async function writeBackupConfig(patch) {
+  const settings = await loadSettings();
+  const features = { ...(settings.features || {}) };
+  features.backup = { ...DEFAULT_FEATURES.backup, ...(features.backup || {}), ...patch };
+  await saveSettings({ ...settings, features });
+  return features.backup;
+}
+
+/** Everything the renderer needs to draw the Backups panel. */
+async function backupStateSnapshot() {
+  const config = await readBackupConfig();
+  return {
+    enabled: config.enabled === true,
+    promptOnNewDrive: config.promptOnNewDrive !== false,
+    sweepMinutes: Number(config.sweepMinutes) || 0,
+    sources: config.sources || [],
+    runs: backupEngine ? backupEngine.status() : [],
+    volumes: attachedVolumes,
+    pendingDrive: pendingDrivePrompt,
+    log: backupLogBuffer.slice(-40),
+  };
+}
+
+function emitBackupState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  void backupStateSnapshot()
+    .then((state) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("backup:state", state);
+      }
+    })
+    .catch(() => {});
+}
+
+/**
+ * The renderer loads REMOTE web content, so a destination arriving over IPC is
+ * untrusted input. Team and project are opaque names the server re-checks; the
+ * folder path is the part that could try to walk somewhere, so it is reduced
+ * to plain segments here.
+ */
+function sanitizeBackupDestination(raw) {
+  const teamSlug = String(raw?.teamSlug || "").trim();
+  const projectName = String(raw?.projectName || "").trim();
+  if (!teamSlug || !projectName) {
+    throw new Error("A backup needs a team and a project to copy into.");
+  }
+  const folderPath = Array.isArray(raw?.folderPath)
+    ? raw.folderPath
+        .map((segment) => String(segment || "").replace(/[\\/:*?"<>|]/g, "-").trim())
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+  return { teamSlug, projectName, folderPath };
+}
+
+/** Fail at add time, not at 3am mid-backup, when the project does not exist. */
+async function assertBackupDestinationExists(destination) {
+  const target = await convexCall(
+    "query",
+    "desktopBrowse:resolveUploadTargetForDesktop",
+    {
+      teamSlug: destination.teamSlug,
+      projectName: destination.projectName,
+      folderPath: [],
+    },
+  );
+  if (!target) {
+    throw new Error(
+      `No project "${destination.projectName}" in team "${destination.teamSlug}".`,
+    );
+  }
+  if (target.role === "viewer") {
+    throw new Error("Viewers can't upload, so this project can't receive a backup.");
+  }
+}
+
+async function addBackupSource({ kind, sourcePath, label, destination, autoOnConnect = true }) {
+  const clean = sanitizeBackupDestination(destination);
+  await assertBackupDestinationExists(clean);
+  const config = await readBackupConfig();
+  const existing = (config.sources || []).find(
+    (source) => path.resolve(source.path) === path.resolve(sourcePath),
+  );
+  if (existing) {
+    throw new Error(`${sourcePath} is already backed up to ${existing.destination.projectName}.`);
+  }
+  const sourceLabel = label || path.basename(sourcePath) || sourcePath;
+  // Default the destination folder to the source's own name. Dropping a
+  // drive's top-level files loose in the project root buries whatever was
+  // already there; "SANDISK SSD" landing in a folder called "SANDISK SSD" is
+  // what someone means by "back this up to that project".
+  if (clean.folderPath.length === 0) {
+    clean.folderPath = [sourceLabel.replace(/[\\/:*?"<>|]/g, "-").trim()].filter(Boolean);
+  }
+  const source = {
+    id: crypto.randomUUID(),
+    kind,
+    path: sourcePath,
+    label: sourceLabel,
+    volumeName: kind === "volume" ? path.basename(sourcePath) : null,
+    destination: clean,
+    autoOnConnect: autoOnConnect !== false,
+    enabled: true,
+    includeHidden: false,
+    addedAt: Date.now(),
+  };
+  const next = await writeBackupConfig({
+    enabled: true,
+    sources: [...(config.sources || []), source],
+  });
+  await reconcileBackup();
+  // Adding a source is the user asking for it to be backed up. Start now.
+  void runBackupSource(source.id, "added");
+  return next;
+}
+
+async function runBackupSource(sourceId, reason = "manual") {
+  const config = await readBackupConfig();
+  const source = (config.sources || []).find((entry) => entry.id === sourceId);
+  if (!source) throw new Error("That backup source no longer exists.");
+  if (source.enabled === false) return { skipped: true, why: "disabled" };
+  try {
+    return await getBackupEngine().runSource(source, { reason });
+  } catch (error) {
+    backupLog(`backup: ${source.label} failed: ${error.message}`);
+    emitBackupState();
+    return { failed: true, error: error.message };
+  }
+}
+
+async function runAllBackupSources(reason) {
+  const config = await readBackupConfig();
+  if (config.enabled !== true) return;
+  for (const source of config.sources || []) {
+    if (source.enabled === false) continue;
+    if (!fssync.existsSync(source.path)) continue;
+    await runBackupSource(source.id, reason);
+  }
+}
+
+/**
+ * A drive was plugged in. Back it up if we already know it; otherwise offer,
+ * once, and remember a "no".
+ */
+async function onVolumeAttached(volume) {
+  attachedVolumes = volumeWatcher ? volumeWatcher.list() : [volume];
+  const config = await readBackupConfig();
+  const match = (config.sources || []).find(
+    (source) =>
+      source.kind === "volume" &&
+      (path.resolve(source.path) === path.resolve(volume.path) ||
+        source.volumeName === volume.name),
+  );
+  if (match) {
+    if (config.enabled === true && match.enabled !== false && match.autoOnConnect !== false) {
+      // The mount path can shift (macOS appends " 1" on a name collision), so
+      // follow the volume we actually found rather than the remembered path.
+      if (path.resolve(match.path) !== path.resolve(volume.path)) {
+        await updateBackupSource(match.id, { path: volume.path });
+      }
+      backupLog(`backup: ${volume.name} connected, backing up`);
+      void runBackupSource(match.id, "drive-connected");
+    }
+    emitBackupState();
+    return;
+  }
+  if (config.promptOnNewDrive !== false && !(config.ignoredVolumes || []).includes(volume.name)) {
+    pendingDrivePrompt = { path: volume.path, name: volume.name, at: Date.now() };
+  }
+  emitBackupState();
+}
+
+function onVolumeDetached(volume) {
+  attachedVolumes = volumeWatcher ? volumeWatcher.list() : [];
+  if (pendingDrivePrompt && pendingDrivePrompt.path === volume.path) {
+    pendingDrivePrompt = null;
+  }
+  // A source whose disk just left mid-run would otherwise grind through
+  // hundreds of ENOENTs before giving up.
+  if (backupEngine) {
+    void readBackupConfig().then((config) => {
+      const gone = path.resolve(volume.path);
+      for (const source of config.sources || []) {
+        // Compare on a path boundary — "/Volumes/SSD" must not match a
+        // still-mounted "/Volumes/SSD 2".
+        const here = path.resolve(source.path);
+        if (here === gone || here.startsWith(`${gone}${path.sep}`)) {
+          backupEngine.cancel(source.id);
+        }
+      }
+      emitBackupState();
+    });
+  } else {
+    emitBackupState();
+  }
+}
+
+async function updateBackupSource(sourceId, patch) {
+  const config = await readBackupConfig();
+  const sources = (config.sources || []).map((source) => {
+    if (source.id !== sourceId) return source;
+    const next = { ...source };
+    if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
+    if (typeof patch.autoOnConnect === "boolean") next.autoOnConnect = patch.autoOnConnect;
+    if (typeof patch.includeHidden === "boolean") next.includeHidden = patch.includeHidden;
+    if (typeof patch.label === "string" && patch.label.trim()) next.label = patch.label.trim();
+    if (typeof patch.path === "string" && patch.path) next.path = patch.path;
+    if (patch.destination) next.destination = sanitizeBackupDestination(patch.destination);
+    return next;
+  });
+  await writeBackupConfig({ sources });
+  await reconcileBackup();
+  emitBackupState();
+  return sources;
+}
+
+async function removeBackupSource(sourceId) {
+  const config = await readBackupConfig();
+  const sources = (config.sources || []).filter((source) => source.id !== sourceId);
+  if (backupEngine) {
+    backupEngine.cancel(sourceId);
+    await backupEngine.forget(sourceId);
+  }
+  await writeBackupConfig({ sources });
+  await reconcileBackup();
+  emitBackupState();
+  return sources;
+}
+
+/**
+ * Watch a folder source for changes. Volumes are deliberately NOT watched: a
+ * recursive watch over a whole disk costs thousands of file descriptors for a
+ * signal the attach event and the sweep already provide.
+ */
+function watchBackupFolder(source) {
+  if (backupFolderWatchers.has(source.id)) return;
+  if (!fssync.existsSync(source.path)) return;
+  try {
+    const entry = { watcher: null, timer: null };
+    entry.watcher = fssync.watch(source.path, { recursive: true, persistent: false }, () => {
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => {
+        entry.timer = null;
+        void runBackupSource(source.id, "changed");
+      }, BACKUP_CHANGE_DEBOUNCE_MS);
+      entry.timer.unref?.();
+    });
+    backupFolderWatchers.set(source.id, entry);
+  } catch (error) {
+    // Linux has no recursive fs.watch. Say so plainly instead of silently
+    // degrading to "backups only happen when I press the button".
+    backupLog(
+      `backup: cannot watch ${source.path} for changes (${error.message}). It will still back up on the ${(DEFAULT_FEATURES.backup.sweepMinutes)}-minute sweep and when you run it.`,
+    );
+  }
+}
+
+function unwatchBackupFolder(sourceId) {
+  const entry = backupFolderWatchers.get(sourceId);
+  if (!entry) return;
+  if (entry.timer) clearTimeout(entry.timer);
+  try {
+    entry.watcher?.close();
+  } catch {
+    // Best effort during teardown.
+  }
+  backupFolderWatchers.delete(sourceId);
+}
+
+function stopBackup() {
+  for (const id of [...backupFolderWatchers.keys()]) unwatchBackupFolder(id);
+  if (backupSweepTimer) clearInterval(backupSweepTimer);
+  backupSweepTimer = null;
+  volumeWatcher?.stop();
+  volumeWatcher = null;
+  backupEngine?.cancelAll();
+}
+
+/** Start / stop watchers to match the saved sources. Safe to call repeatedly. */
+async function reconcileBackup() {
+  const config = await readBackupConfig();
+
+  if (config.enabled !== true) {
+    stopBackup();
+    return;
+  }
+
+  if (!volumeWatcher) {
+    volumeWatcher = createVolumeWatcher({
+      onAttached: (volume) => void onVolumeAttached(volume),
+      onDetached: (volume) => onVolumeDetached(volume),
+      onLog: backupLog,
+    });
+    await volumeWatcher.start();
+    attachedVolumes = volumeWatcher.list();
+  }
+
+  const wanted = new Set();
+  for (const source of config.sources || []) {
+    if (source.enabled === false || source.kind !== "folder") continue;
+    wanted.add(source.id);
+    watchBackupFolder(source);
+  }
+  for (const id of [...backupFolderWatchers.keys()]) {
+    if (!wanted.has(id)) unwatchBackupFolder(id);
+  }
+
+  const sweepMs = Math.max(0, Number(config.sweepMinutes) || 0) * 60_000;
+  if (backupSweepTimer) clearInterval(backupSweepTimer);
+  backupSweepTimer = null;
+  if (sweepMs > 0) {
+    backupSweepTimer = setInterval(() => void runAllBackupSources("sweep"), sweepMs);
+    backupSweepTimer.unref?.();
+  }
+}
+
+ipcMain.handle("backup:state", async () => backupStateSnapshot());
+
+ipcMain.handle("backup:volumes", async () => {
+  attachedVolumes = await listVolumes();
+  return attachedVolumes;
+});
+
+// The folder is chosen through the NATIVE dialog rather than accepted as a
+// path over IPC. The renderer runs remote web content; letting it name any
+// path would let a compromised deploy start uploading the user's home folder.
+ipcMain.handle("backup:add-folder", async (_event, { destination } = {}) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Choose a folder to back up",
+    properties: ["openDirectory"],
+    buttonLabel: "Back up this folder",
+  });
+  if (result.canceled || result.filePaths.length === 0) return { ok: false, cancelled: true };
+  await addBackupSource({
+    kind: "folder",
+    sourcePath: result.filePaths[0],
+    destination,
+  });
+  return { ok: true, state: await backupStateSnapshot() };
+});
+
+// A volume path IS accepted from the renderer, but only after it is matched
+// against the volumes we independently observed mounted.
+ipcMain.handle("backup:add-volume", async (_event, { volumePath, destination } = {}) => {
+  const volumes = volumeWatcher ? volumeWatcher.list() : await listVolumes();
+  const volume = volumes.find((entry) => entry.path === volumePath);
+  if (!volume) {
+    throw new Error("That drive isn't connected any more.");
+  }
+  await addBackupSource({
+    kind: "volume",
+    sourcePath: volume.path,
+    label: volume.name,
+    destination,
+  });
+  if (pendingDrivePrompt?.path === volume.path) pendingDrivePrompt = null;
+  return { ok: true, state: await backupStateSnapshot() };
+});
+
+ipcMain.handle("backup:update-source", async (_event, { id, patch } = {}) => {
+  await updateBackupSource(String(id || ""), patch || {});
+  return { ok: true, state: await backupStateSnapshot() };
+});
+
+ipcMain.handle("backup:remove-source", async (_event, { id } = {}) => {
+  await removeBackupSource(String(id || ""));
+  return { ok: true, state: await backupStateSnapshot() };
+});
+
+ipcMain.handle("backup:run", async (_event, { id } = {}) => {
+  if (id) {
+    void runBackupSource(String(id), "manual");
+  } else {
+    void runAllBackupSources("manual");
+  }
+  return { ok: true };
+});
+
+ipcMain.handle("backup:cancel", async (_event, { id } = {}) => {
+  if (!backupEngine) return { ok: true };
+  if (id) backupEngine.cancel(String(id));
+  else backupEngine.cancelAll();
+  emitBackupState();
+  return { ok: true };
+});
+
+ipcMain.handle("backup:set-options", async (_event, options = {}) => {
+  const patch = {};
+  if (typeof options.enabled === "boolean") patch.enabled = options.enabled;
+  if (typeof options.promptOnNewDrive === "boolean") {
+    patch.promptOnNewDrive = options.promptOnNewDrive;
+  }
+  if (Number.isFinite(options.sweepMinutes)) {
+    patch.sweepMinutes = Math.max(0, Math.floor(options.sweepMinutes));
+  }
+  await writeBackupConfig(patch);
+  await reconcileBackup();
+  emitBackupState();
+  return { ok: true, state: await backupStateSnapshot() };
+});
+
+ipcMain.handle("backup:dismiss-drive", async (_event, { name } = {}) => {
+  const volumeName = String(name || pendingDrivePrompt?.name || "");
+  if (volumeName) {
+    const config = await readBackupConfig();
+    const ignoredVolumes = [...new Set([...(config.ignoredVolumes || []), volumeName])];
+    await writeBackupConfig({ ignoredVolumes });
+  }
+  pendingDrivePrompt = null;
+  emitBackupState();
+  return { ok: true, state: await backupStateSnapshot() };
+});
+
 // ---- Feature loop reconciler -------------------------------------------------
 //
 // Single entry-point that looks at the current settings.features map and
@@ -1463,6 +1981,8 @@ async function reconcileFeatures() {
 
   if (flags.lanCache?.enabled) await startLanCacheServer();
   else stopLanCacheServer();
+
+  await reconcileBackup();
 
   // acls loop is data-layer-only and attaches in the next commit; the
   // toggle gates the renderer ACLs panel rather than a background loop
@@ -3105,6 +3625,7 @@ app.on("before-quit", async (event) => {
   stopProjectWatcher();
   stopPrefetchWatcher();
   stopLanCacheServer();
+  stopBackup();
   if (mountChild) {
     event.preventDefault();
     pushLog("App quit — unmounting first.");
