@@ -683,7 +683,13 @@ export const deleteStorageObject = internalAction({
  */
 export const getShareCoverUploadUrl = action({
   args: {
-    projectId: v.id("projects"),
+    // Same source shapes the cover picker takes, so every composer can call
+    // this with what it already holds. The project is resolved server-side.
+    linkId: v.optional(v.id("shareLinks")),
+    videoId: v.optional(v.id("videos")),
+    bundleId: v.optional(v.id("shareBundles")),
+    folderId: v.optional(v.id("folders")),
+    videoIds: v.optional(v.array(v.id("videos"))),
     filename: v.string(),
     contentType: v.string(),
     fileSize: v.number(),
@@ -691,7 +697,16 @@ export const getShareCoverUploadUrl = action({
   returns: v.object({ url: v.string(), key: v.string() }),
   handler: async (ctx, args): Promise<{ url: string; key: string }> => {
     // Throws for non-members.
-    await ctx.runQuery(api.projects.get, { projectId: args.projectId });
+    const projectId: Id<"projects"> = await ctx.runQuery(
+      internal.shareLinks.resolveShareSourceProject,
+      {
+        linkId: args.linkId,
+        videoId: args.videoId,
+        bundleId: args.bundleId,
+        folderId: args.folderId,
+        videoIds: args.videoIds,
+      },
+    );
 
     if (!args.contentType.startsWith("image/")) {
       throw new Error("A share cover has to be an image.");
@@ -704,7 +719,7 @@ export const getShareCoverUploadUrl = action({
 
     const s3 = getS3Client();
     const ext = getExtensionFromKey(args.filename, "jpg");
-    const key = `shareCovers/${args.projectId}/${crypto.randomUUID()}.${ext}`;
+    const key = `shareCovers/${projectId}/${crypto.randomUUID()}.${ext}`;
     const url = await getSignedUrl(
       s3,
       new PutObjectCommand({
@@ -3378,6 +3393,14 @@ export const getShareUnfurl = action({
             )
           : Promise.resolve(null),
       ]);
+      // A ready preview with no MP4 is an asset that predates renditions
+      // being requested. Ask for one now so the next crawl of this link
+      // gets a playable card instead of a still forever.
+      if (!video && cover.muxPreviewReady && cover.muxPreviewAssetId) {
+        await ctx.scheduler.runAfter(0, internal.muxActions.ensurePreviewMp4, {
+          assetId: cover.muxPreviewAssetId,
+        });
+      }
       return {
         kind: "video" as const,
         title: media.title,

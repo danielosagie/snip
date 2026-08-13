@@ -2453,6 +2453,9 @@ export const getShareSummaryByGrant = query({
           hasCover: Boolean(resolved.shareLink.coverImageS3Key),
         },
         bundle: null,
+        // Owner-only in practice: shareLinks.update re-checks membership, so a
+        // viewer holding this id can read it and do nothing with it.
+        shareLinkId: resolved.shareLink._id,
         paywall: resolved.shareLink.paywall ?? null,
         allowDownload: resolved.shareLink.allowDownload,
         grantExpiresAt: resolved.grant.expiresAt,

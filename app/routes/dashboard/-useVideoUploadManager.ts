@@ -4,6 +4,7 @@ import { api } from "@convex/_generated/api";
 import { Id } from "@convex/_generated/dataModel";
 import type { UploadStatus } from "@/components/upload/UploadProgress";
 import { stitchImageSequence } from "@/lib/stitchImageSequence";
+import { probeLocalMedia, type LocalMediaMeta } from "@/lib/localMediaMeta";
 
 const MULTIPART_THRESHOLD_BYTES = 32 * 1024 * 1024;
 const MAX_BATCH_CONCURRENCY = 3;
@@ -22,6 +23,12 @@ export interface ManagedUploadItem {
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
   resumable: boolean;
+  /**
+   * Duration, dimensions and a poster read off the local File. Undefined
+   * while the probe is in flight; a probe that fails leaves the fields null
+   * rather than blocking the upload, which never waits on this.
+   */
+  meta?: LocalMediaMeta;
 }
 
 interface MultipartState {
@@ -421,6 +428,19 @@ export function useVideoUploadManager() {
           resumable: runtime.file.size >= MULTIPART_THRESHOLD_BYTES,
         })),
       ]);
+
+      // Probe in the background and patch rows as results land. Deliberately
+      // not awaited: reading a poster frame off a 4 GB ProRes file must never
+      // delay the first byte going out.
+      for (const runtime of queued) {
+        void probeLocalMedia(runtime.file).then((meta) => {
+          setUploads((current) =>
+            current.map((item) =>
+              item.id === runtime.id ? { ...item, meta } : item,
+            ),
+          );
+        });
+      }
 
       let nextIndex = 0;
       const worker = async () => {

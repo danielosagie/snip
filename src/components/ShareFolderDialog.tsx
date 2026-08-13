@@ -37,6 +37,7 @@ import {
   type ShareCoverSource,
   type SharePaywallOptions,
   useShareCoverPicker,
+  useShareCoverUpload,
 } from "@/components/ShareDialog";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -94,6 +95,7 @@ export function ShareFolderDialog({
     [folderId, open],
   );
   const coverPicker = useShareCoverPicker(coverSource);
+  const coverUpload = useShareCoverUpload(coverSource);
   const unfurlHidden = generalAccess === "invite" || password.trim().length > 0;
 
   const copy = async (text: string, id: string) => {
@@ -131,6 +133,7 @@ export function ShareFolderDialog({
       const created = await createShareLink({
         bundleId,
         coverVideoId: selectedCoverVideoId ?? undefined,
+        coverImageS3Key: coverUpload.key ?? undefined,
         expiresInDays,
         allowDownload,
         password: password || undefined,
@@ -247,7 +250,12 @@ export function ShareFolderDialog({
                 isBundle
                 paywalled={paywallEnabled}
                 unfurlHidden={unfurlHidden}
+                uploadedCoverUrl={coverUpload.previewUrl}
+                uploadingCover={coverUpload.uploading}
+                onUploadCover={coverUpload.open}
+                onRemoveUploadedCover={coverUpload.clear}
               />
+              {coverUpload.fileInput}
 
               {createError ? (
                 <div

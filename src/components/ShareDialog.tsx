@@ -683,7 +683,7 @@ function PreviewMediaCell({
  * created; the caller attaches the returned key on create. Shared by all three
  * share composers so they behave identically.
  */
-export function useShareCoverUpload(projectId: Id<"projects"> | undefined) {
+export function useShareCoverUpload(source: ShareCoverSource | null) {
   const getUploadUrl = useAction(api.videoActions.getShareCoverUploadUrl);
   const [key, setKey] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -692,12 +692,12 @@ export function useShareCoverUpload(projectId: Id<"projects"> | undefined) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const upload = async (file: File) => {
-    if (!projectId) return;
+    if (!source) return;
     setUploading(true);
     setError(null);
     try {
       const { url, key: uploadedKey } = await getUploadUrl({
-        projectId,
+        ...source,
         filename: file.name,
         contentType: file.type,
         fileSize: file.size,
@@ -1110,7 +1110,6 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
   const [allowDownload, setAllowDownload] = useState(true);
   const [selectedCoverVideoId, setSelectedCoverVideoId] =
     useState<Id<"videos"> | null>(null);
-  const coverUpload = useShareCoverUpload(video?.projectId);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [newLinkOptions, setNewLinkOptions] = useState({
     expiresInDays: undefined as number | undefined,
@@ -1127,6 +1126,7 @@ export function ShareDialog({ videoId, open, onOpenChange }: ShareDialogProps) {
     return { videoId };
   }, [open, scope, video?.folderId, videoId]);
   const coverPicker = useShareCoverPicker(coverSource);
+  const coverUpload = useShareCoverUpload(coverSource);
   const paywallOptions: SharePaywallOptions = {
     mode: newLinkOptions.mode,
     priceDollars: newLinkOptions.priceDollars,

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { UploadStatus } from "./UploadProgress";
+import type { LocalMediaMeta } from "@/lib/localMediaMeta";
 import { UploadProgress, formatTransferTime } from "./UploadProgress";
 import { formatBytes } from "@/lib/utils";
 
@@ -16,6 +17,7 @@ interface QueueItem {
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
   resumable: boolean;
+  meta?: LocalMediaMeta;
 }
 
 interface Props {
@@ -107,6 +109,7 @@ export function UploadQueuePanel({
               key={upload.id}
               fileName={upload.file.name}
               fileSize={upload.file.size}
+              meta={upload.meta}
               bytesUploaded={upload.bytesUploaded}
               progress={upload.progress}
               status={upload.status}

@@ -13,6 +13,11 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { formatBytes } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import {
+  formatDuration,
+  formatResolution,
+  type LocalMediaMeta,
+} from "@/lib/localMediaMeta";
 
 export type UploadStatus =
   | "pending"
@@ -42,6 +47,8 @@ interface UploadProgressProps {
   bytesPerSecond?: number;
   estimatedSecondsRemaining?: number | null;
   resumable?: boolean;
+  /** Local probe result. Undefined until the probe resolves. */
+  meta?: LocalMediaMeta;
   onCancel?: () => void;
   onPause?: () => void;
   onResume?: () => void;
@@ -69,6 +76,7 @@ export const UploadProgress = memo(function UploadProgress({
   bytesPerSecond = 0,
   estimatedSecondsRemaining = null,
   resumable = false,
+  meta,
   onCancel,
   onPause,
   onResume,
@@ -90,11 +98,26 @@ export const UploadProgress = memo(function UploadProgress({
               ? formatBytes(fileSize)
               : STATUS_LABEL[status];
 
+  // Size always; duration and resolution only once the probe found them, so
+  // the line never shows a placeholder for something we could not read.
+  const mediaLine = [
+    formatBytes(fileSize),
+    formatDuration(meta?.durationSec),
+    formatResolution(meta?.width, meta?.height),
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
+
   return (
     <li className="group px-3 py-2.5 bg-[var(--surface)]" aria-label={`${fileName}: ${STATUS_LABEL[status]}`}>
       <div className="flex min-w-0 items-center gap-3">
-        <div className="relative grid h-8 w-8 shrink-0 place-items-center bg-[var(--surface-alt)] text-[var(--foreground-muted)]">
-          {status === "complete" ? (
+        <div className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden bg-[var(--surface-alt)] text-[var(--foreground-muted)]">
+          {/* The poster is the fastest way to confirm you grabbed the right
+              take, so it outranks the status glyph once we have one. State
+              still reads from the percentage and the label to its right. */}
+          {meta?.posterUrl ? (
+            <img src={meta.posterUrl} alt="" className="h-full w-full object-cover" />
+          ) : status === "complete" ? (
             <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
           ) : status === "error" ? (
             <AlertCircle className="h-4 w-4 text-[var(--destructive)]" />
@@ -112,6 +135,11 @@ export const UploadProgress = memo(function UploadProgress({
               {status === "uploading" ? `${progress}%` : STATUS_LABEL[status]}
             </span>
           </div>
+          {mediaLine ? (
+            <p className="mt-0.5 truncate font-mono text-[10px] tabular-nums text-[var(--foreground-subtle)]">
+              {mediaLine}
+            </p>
+          ) : null}
           <div className="mt-0.5 flex min-w-0 items-center justify-between gap-3 font-mono text-[10px] tabular-nums text-[var(--foreground-muted)]">
             <span className={cn("truncate", status === "error" && "text-[var(--destructive)]")}>{detail}</span>
             {status === "uploading" ? (

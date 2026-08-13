@@ -22,7 +22,7 @@ import {
   useAntiPiracyDefenses,
 } from "@/components/share/ShareWatermarkOverlay";
 import { ShareFolderBrowser } from "@/components/share/ShareFolderBrowser";
-import { ShareHeader, ShareStaticHeader } from "@/components/share/ShareHeader";
+import { ShareHeader } from "@/components/share/ShareHeader";
 import { ShareDownloadSheet } from "@/components/share/ShareDownloadSheet";
 import {
   ShareItemMetadata,
@@ -1112,18 +1112,22 @@ export default function SharePage() {
             the sender set one. Read-only here: editing it needs the link id,
             which the grant summary deliberately does not expose to viewers, so
             the sender edits it from the share composer instead. */}
-        {!isBundle && (coverUrl || summary?.single?.headerTitle) ? (
-          <ShareStaticHeader
-            title={summary?.single?.headerTitle || video?.title || "Shared file"}
-            description={summary?.single?.headerDescription ?? null}
+        {!isBundle && summary?.shareLinkId && (isOwner || coverUrl || summary?.single?.headerTitle) ? (
+          <ShareHeader
+            target={{ kind: "link", linkId: summary.shareLinkId }}
+            bundleName={video?.title ?? "Shared file"}
+            headerTitle={summary.single?.headerTitle ?? null}
+            headerDescription={summary.single?.headerDescription ?? null}
             coverUrl={coverUrl}
+            isOwner={isOwner}
+            onCoverChanged={() => setCoverReload((n) => n + 1)}
           />
         ) : null}
 
         {isBundle && summary?.bundle?._id ? (
           <div className="space-y-3">
             <ShareHeader
-              bundleId={summary.bundle._id}
+              target={{ kind: "bundle", bundleId: summary.bundle._id }}
               bundleName={summary.bundle.name ?? "Shared files"}
               headerTitle={summary.bundle.headerTitle ?? null}
               headerDescription={summary.bundle.headerDescription ?? null}

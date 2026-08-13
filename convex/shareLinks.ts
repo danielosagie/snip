@@ -1097,6 +1097,62 @@ export const getCoverPickerMedia = internalQuery({
 });
 
 /**
+ * The project a share composer is working in, from whichever source shape it
+ * has. The cover upload needs a project to key the object under, and no
+ * composer holds one: the video dialog has a videoId, the folder dialog a
+ * folderId, the selection dialog a list. Resolving here keeps all three
+ * callers identical and keeps the member check on the server.
+ */
+export const resolveShareSourceProject = internalQuery({
+  args: {
+    linkId: v.optional(v.id("shareLinks")),
+    videoId: v.optional(v.id("videos")),
+    bundleId: v.optional(v.id("shareBundles")),
+    folderId: v.optional(v.id("folders")),
+    videoIds: v.optional(v.array(v.id("videos"))),
+  },
+  returns: v.id("projects"),
+  handler: async (ctx, args): Promise<Id<"projects">> => {
+    if (args.linkId) {
+      // Editing the header on an existing share, from the delivery page.
+      const link = await ctx.db.get(args.linkId);
+      if (!link) throw new Error("Share link not found");
+      if (link.videoId) {
+        const { video } = await requireVideoAccess(ctx, link.videoId, "member");
+        return video.projectId;
+      }
+      if (link.bundleId) {
+        const bundle = await ctx.db.get(link.bundleId);
+        if (!bundle) throw new Error("Bundle not found");
+        await requireProjectAccess(ctx, bundle.projectId, "member");
+        return bundle.projectId;
+      }
+      throw new Error("Share link has no target");
+    }
+    if (args.videoId) {
+      const { video } = await requireVideoAccess(ctx, args.videoId, "member");
+      return video.projectId;
+    }
+    if (args.bundleId) {
+      const bundle = await ctx.db.get(args.bundleId);
+      if (!bundle) throw new Error("Bundle not found");
+      await requireProjectAccess(ctx, bundle.projectId, "member");
+      return bundle.projectId;
+    }
+    if (args.folderId) {
+      const folder = await ctx.db.get(args.folderId);
+      if (!folder) throw new Error("Folder not found");
+      await requireProjectAccess(ctx, folder.projectId, "member");
+      return folder.projectId;
+    }
+    const first = args.videoIds?.[0];
+    if (!first) throw new Error("A share cover needs a share source.");
+    const { video } = await requireVideoAccess(ctx, first, "member");
+    return video.projectId;
+  },
+});
+
+/**
  * Privacy-gated media source for all share unfurls and the collage HTTP action.
  * Password and invite links return before title or media resolution. The
  * internal item fields are used only to mint safe signed URLs or inline image

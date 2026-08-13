@@ -17,8 +17,18 @@ import { Textarea } from "@/components/ui/textarea";
  * served via a signed URL fetched by the parent.
  */
 
+/**
+ * The header hangs off a bundle for folder/selection shares and off the link
+ * for single-video shares, which have no bundle row. Both write the same three
+ * fields, so the component takes whichever target it was given and picks the
+ * matching mutation.
+ */
+export type ShareHeaderTarget =
+  | { kind: "bundle"; bundleId: Id<"shareBundles"> }
+  | { kind: "link"; linkId: Id<"shareLinks"> };
+
 interface Props {
-  bundleId: Id<"shareBundles">;
+  target: ShareHeaderTarget;
   bundleName: string;
   headerTitle: string | null;
   headerDescription: string | null;
@@ -29,7 +39,7 @@ interface Props {
 }
 
 export function ShareHeader({
-  bundleId,
+  target,
   bundleName,
   headerTitle,
   headerDescription,
@@ -37,8 +47,28 @@ export function ShareHeader({
   isOwner,
   onCoverChanged,
 }: Props) {
-  const getUploadUrl = useAction(api.videoActions.getBundleCoverUploadUrl);
-  const setHeader = useMutation(api.shareBundles.setHeader);
+  const getBundleUploadUrl = useAction(api.videoActions.getBundleCoverUploadUrl);
+  const getShareUploadUrl = useAction(api.videoActions.getShareCoverUploadUrl);
+  const setBundleHeader = useMutation(api.shareBundles.setHeader);
+  const updateLink = useMutation(api.shareLinks.update);
+
+  /** One call site for "write these header fields", whichever target we hold. */
+  const writeHeader = async (patch: {
+    headerTitle?: string | null;
+    headerDescription?: string | null;
+    coverImageS3Key?: string | null;
+  }) => {
+    if (target.kind === "bundle") {
+      await setBundleHeader({
+        bundleId: target.bundleId,
+        headerTitle: patch.headerTitle ?? undefined,
+        headerDescription: patch.headerDescription ?? undefined,
+        coverImageS3Key: patch.coverImageS3Key,
+      });
+      return;
+    }
+    await updateLink({ linkId: target.linkId, ...patch });
+  };
 
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(headerTitle ?? "");
@@ -53,7 +83,7 @@ export function ShareHeader({
     setBusy(true);
     setError(null);
     try {
-      await setHeader({ bundleId, headerTitle: title, headerDescription: description });
+      await writeHeader({ headerTitle: title, headerDescription: description });
       setEditing(false);
     } catch {
       setError("Couldn't save the header.");
@@ -66,19 +96,27 @@ export function ShareHeader({
     setBusy(true);
     setError(null);
     try {
-      const { url, key } = await getUploadUrl({
-        bundleId,
-        filename: file.name,
-        contentType: file.type,
-        fileSize: file.size,
-      });
+      const { url, key } =
+        target.kind === "bundle"
+          ? await getBundleUploadUrl({
+              bundleId: target.bundleId,
+              filename: file.name,
+              contentType: file.type,
+              fileSize: file.size,
+            })
+          : await getShareUploadUrl({
+              linkId: target.linkId,
+              filename: file.name,
+              contentType: file.type,
+              fileSize: file.size,
+            });
       const res = await fetch(url, {
         method: "PUT",
         body: file,
         headers: { "Content-Type": file.type },
       });
       if (!res.ok) throw new Error("upload failed");
-      await setHeader({ bundleId, coverImageS3Key: key });
+      await writeHeader({ coverImageS3Key: key });
       onCoverChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't upload the cover.");
@@ -91,7 +129,7 @@ export function ShareHeader({
     setBusy(true);
     setError(null);
     try {
-      await setHeader({ bundleId, coverImageS3Key: null });
+      await writeHeader({ coverImageS3Key: null });
       onCoverChanged?.();
     } catch {
       setError("Couldn't remove the cover.");
@@ -232,58 +270,6 @@ export function ShareHeader({
           {error ? <p className="text-xs text-[#8A2B34]">{error}</p> : null}
         </div>
       ) : null}
-    </section>
-  );
-}
-
-/**
- * The same banner without the owner editor, for shares that have no editable
- * row behind them (single-video links). Kept next to ShareHeader so the two
- * cannot drift apart visually.
- */
-export function ShareStaticHeader({
-  title,
-  description,
-  coverUrl,
-}: {
-  title: string;
-  description: string | null;
-  coverUrl: string | null;
-}) {
-  if (!coverUrl) {
-    return (
-      <section className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white px-6 py-5">
-        <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[#131315]">
-          {title}
-        </h1>
-        {description ? (
-          <p className="mt-1 max-w-2xl text-sm leading-5 text-[#6E6E73]">
-            {description}
-          </p>
-        ) : null}
-      </section>
-    );
-  }
-
-  return (
-    <section className="overflow-hidden rounded-[14px] border border-[#E8E8EC] bg-white">
-      <div className="relative h-44 w-full overflow-hidden bg-[#0A0A0B] md:h-56">
-        <img
-          src={coverUrl}
-          alt=""
-          className="h-full w-full object-cover"
-          draggable={false}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-        <div className="absolute bottom-0 left-0 right-0 p-5">
-          <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white md:text-4xl">
-            {title}
-          </h1>
-          {description ? (
-            <p className="mt-1 max-w-2xl text-sm text-white/85">{description}</p>
-          ) : null}
-        </div>
-      </div>
     </section>
   );
 }

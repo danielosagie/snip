@@ -25,6 +25,7 @@ import {
   type ShareCoverSource,
   type SharePaywallOptions,
   useShareCoverPicker,
+  useShareCoverUpload,
 } from "@/components/ShareDialog";
 
 interface ShareSelectionDialogProps {
@@ -71,6 +72,7 @@ export function ShareSelectionDialog({
     [open, videoIds],
   );
   const coverPicker = useShareCoverPicker(coverSource);
+  const coverUpload = useShareCoverUpload(coverSource);
   const unfurlHidden = generalAccess === "invite" || password.trim().length > 0;
 
   const copy = async (url: string) => {
@@ -108,6 +110,7 @@ export function ShareSelectionDialog({
       const created = await createShareLink({
         bundleId,
         coverVideoId: selectedCoverVideoId ?? undefined,
+        coverImageS3Key: coverUpload.key ?? undefined,
         expiresInDays,
         allowDownload,
         password: password || undefined,

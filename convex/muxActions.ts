@@ -7,8 +7,31 @@ import { Id } from "./_generated/dataModel";
 import {
   buildMuxThumbnailUrl,
   getMuxAsset,
+  requestStaticRenditions,
   verifyMuxWebhookSignature,
 } from "./mux";
+
+/**
+ * Backfill for previews that went ready before MP4 renditions were requested.
+ * Fired from the unfurl path when a share needs an og:video and finds none, so
+ * the re-encode is only spent on assets somebody actually shared, and the next
+ * crawl of that link gets a playable card.
+ */
+export const ensurePreviewMp4 = internalAction({
+  args: { assetId: v.string() },
+  returns: v.null(),
+  handler: async (_ctx, args) => {
+    try {
+      await requestStaticRenditions(args.assetId, ["360p"]);
+    } catch (error) {
+      console.error("ensurePreviewMp4 failed", {
+        assetId: args.assetId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return null;
+  },
+});
 
 type MuxData = {
   id?: string;
@@ -273,6 +296,22 @@ export const processWebhook = internalAction({
               muxPreviewPlaybackId: signedPlaybackId,
               expectedAssetId: assetId,
             });
+            // Ask for one small MP4 off the preview. Every asset here is
+            // created with mp4_support: "none", so getMuxMp4 had nothing to
+            // return and no share link has ever emitted an og:video tag —
+            // which is why unfurls never played. The preview is the right
+            // asset to spend the re-encode on: it is already watermarked and
+            // signed, so an MP4 of it leaks nothing the share page doesn't.
+            // Failure is logged and dropped; the card falls back to a still.
+            try {
+              await requestStaticRenditions(assetId, ["360p"]);
+            } catch (error) {
+              console.error("Preview MP4 rendition request failed", {
+                videoId: resolved.videoId,
+                assetId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
             console.log("Preview asset ready", {
               videoId: resolved.videoId,
               assetId,
